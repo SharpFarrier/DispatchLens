@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0a0b;
+  --surface: #111113;
+  --surface2: #1a1a1e;
+  --border: #2a2a30;
+  --border2: #3a3a42;
+  --text: #e8e8ec;
+  --text2: #9090a0;
+  --text3: #5a5a6a;
+  --accent: #f0a020;
+  --critical: #ef4444;
+  --today: #f97316;
+  --plan: #eab308;
+  --hold: #3b82f6;
+  --dispatched: #22c55e;
+  --cancelled: #6b7280;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.mono { font-family: 'IBM Plex Mono', monospace; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+.urgency-CRITICAL { color: var(--critical); }
+.urgency-TODAY { color: var(--today); }
+.urgency-PLAN { color: var(--plan); }
+.urgency-HOLD { color: var(--hold); }
+
+.badge-CRITICAL { background: rgba(239,68,68,0.15); color: var(--critical); border: 1px solid rgba(239,68,68,0.3); }
+.badge-TODAY { background: rgba(249,115,22,0.15); color: var(--today); border: 1px solid rgba(249,115,22,0.3); }
+.badge-PLAN { background: rgba(234,179,8,0.15); color: var(--plan); border: 1px solid rgba(234,179,8,0.3); }
+.badge-HOLD { background: rgba(59,130,246,0.15); color: var(--hold); border: 1px solid rgba(59,130,246,0.3); }
