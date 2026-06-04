@@ -1,18 +1,25 @@
 export type Courier = 'Bluedart' | 'Delhivery'
-
-export type OrderStatus =
-  | 'Pending'
-  | 'Dispatched'
-  | 'Cancelled'
-  | 'Unfulfillable'
-
-export type PlanDecision =
-  | 'dispatch_today'
-  | 'hold'
-  | 'unfulfillable'
-  | 'undecided'
-
+export type PlanDecision = 'dispatch_today' | 'hold' | 'unfulfillable' | 'undecided'
 export type UrgencyTier = 'CRITICAL' | 'TODAY' | 'PLAN' | 'HOLD'
+export type UnfulfillableReason = 'Not ready' | 'No stock available' | 'Other'
+export type AccessStatus = 'pending' | 'approved' | 'rejected'
+
+export interface UserAccess {
+  id: string
+  email: string
+  user_id: string | null
+  status: AccessStatus
+  can_import: boolean
+  can_plan: boolean
+  can_review: boolean
+  can_picklist: boolean
+  can_eod: boolean
+  can_users: boolean
+  requested_at: string
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+}
 
 export interface ParsedOrder {
   order_id: string
@@ -30,7 +37,6 @@ export interface ParsedOrder {
   state: string | null
   oda: string | null
   transit_days: number
-  // computed
   days_left: number | null
   urgency: UrgencyTier | null
   is_cancelled: boolean
@@ -63,6 +69,11 @@ export interface DBOrder {
   is_priority: boolean
   plan_decision: PlanDecision
   dispatched_at: string | null
+  unfulfillable_reason: UnfulfillableReason | null
+  unfulfillable_note: string | null
+  target_dispatch_date: string | null
+  manual_cancelled: boolean
+  manual_cancelled_at: string | null
   created_at: string
   updated_at: string
 }
@@ -79,11 +90,4 @@ export interface DispatchSession {
   unfulfillable_count: number
   created_at: string
   updated_at: string
-}
-
-export interface PicklistItem {
-  sku: string
-  courier: Courier
-  qty: number
-  order_count: number
 }
