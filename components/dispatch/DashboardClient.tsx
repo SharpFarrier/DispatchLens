@@ -4,7 +4,11 @@ import { createClient } from '@/lib/supabase/client'
 import { parseOrders } from '@/lib/parser'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier } from '@/types'
 import { User } from '@supabase/supabase-js'
-import { Star, Printer, CheckCircle, ChevronDown, ChevronUp, Upload, LogOut, Package, Truck, AlertTriangle, Clock, Calendar, RefreshCw } from 'lucide-react'
+import {
+  Star, Printer, CheckCircle, ChevronDown, ChevronUp,
+  Upload, LogOut, Package, Truck, AlertTriangle, Clock,
+  RefreshCw, Plus, ArrowRight
+} from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'picklist' | 'eod'
 type FilterTier = 'ALL' | UrgencyTier
@@ -15,12 +19,6 @@ interface Props {
 }
 
 const URGENCY_ORDER: UrgencyTier[] = ['CRITICAL', 'TODAY', 'PLAN', 'HOLD']
-const URGENCY_LABELS: Record<UrgencyTier, string> = {
-  CRITICAL: 'CRITICAL',
-  TODAY: 'TODAY',
-  PLAN: 'PLAN',
-  HOLD: 'HOLD',
-}
 
 export default function DashboardClient({ user, initialSessions }: Props) {
   const supabase = createClient()
@@ -39,14 +37,12 @@ export default function DashboardClient({ user, initialSessions }: Props) {
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [eodDone, setEodDone] = useState(false)
 
-  // Load orders for a session
   const loadOrders = useCallback(async (sessionId: string) => {
     setLoadingOrders(true)
     const { data } = await supabase
       .from('dispatch_orders')
       .select('*')
       .eq('session_id', sessionId)
-      .order('urgency', { ascending: true })
     setOrders((data as DBOrder[]) || [])
     setLoadingOrders(false)
   }, [supabase])
@@ -57,15 +53,13 @@ export default function DashboardClient({ user, initialSessions }: Props) {
     setTab('plan')
   }, [loadOrders])
 
-  // Create new session
   const createSession = async () => {
     const today = new Date().toISOString().split('T')[0]
     const label = `Dispatch ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
     const { data, error } = await supabase
       .from('dispatch_sessions')
       .insert({ created_by: user.id, session_date: today, label })
-      .select()
-      .single()
+      .select().single()
     if (!error && data) {
       setSessions(prev => [data, ...prev])
       setActiveSession(data)
@@ -75,7 +69,6 @@ export default function DashboardClient({ user, initialSessions }: Props) {
     }
   }
 
-  // Import orders from pasted text
   const handleImport = async () => {
     if (!activeSession) return
     if (!delhiveryText.trim() && !bluedartText.trim()) return
@@ -87,30 +80,21 @@ export default function DashboardClient({ user, initialSessions }: Props) {
       ...parseOrders(bluedartText, 'Bluedart'),
     ]
 
-    if (allParsed.length === 0) {
-      setImporting(false)
-      return
-    }
+    if (allParsed.length === 0) { setImporting(false); return }
 
-    // Check for existing order IDs in this session
     const { data: existing } = await supabase
-      .from('dispatch_orders')
-      .select('order_id')
-      .eq('session_id', activeSession.id)
+      .from('dispatch_orders').select('order_id').eq('session_id', activeSession.id)
 
     const existingIds = new Set((existing || []).map((o: { order_id: string }) => o.order_id))
     const newOrders = allParsed.filter(o => !existingIds.has(o.order_id))
 
     if (newOrders.length > 0) {
       const rows = newOrders.map(o => ({
-        session_id: activeSession.id,
-        ...o,
-        plan_decision: o.is_dispatched ? 'dispatch_today' : o.is_cancelled ? 'undecided' : 'undecided',
+        session_id: activeSession.id, ...o,
+        plan_decision: o.is_dispatched ? 'dispatch_today' : 'undecided',
       }))
       await supabase.from('dispatch_orders').insert(rows)
       await loadOrders(activeSession.id)
-
-      // Update session totals
       const total = (existing?.length || 0) + newOrders.length
       await supabase.from('dispatch_sessions').update({ total_orders: total }).eq('id', activeSession.id)
     }
@@ -122,47 +106,33 @@ export default function DashboardClient({ user, initialSessions }: Props) {
     if (newOrders.length > 0) setTab('plan')
   }
 
-  // Update a single order's plan decision
   const updateDecision = async (orderId: string, decision: PlanDecision) => {
     setUpdatingId(orderId)
-    await supabase
-      .from('dispatch_orders')
+    await supabase.from('dispatch_orders')
       .update({ plan_decision: decision, updated_at: new Date().toISOString() })
       .eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, plan_decision: decision } : o))
     setUpdatingId(null)
   }
 
-  // Toggle priority
   const togglePriority = async (orderId: string, current: boolean) => {
-    await supabase
-      .from('dispatch_orders')
-      .update({ is_priority: !current })
-      .eq('id', orderId)
+    await supabase.from('dispatch_orders').update({ is_priority: !current }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, is_priority: !current } : o))
   }
 
-  // EOD confirmation
   const handleEOD = async () => {
     if (!activeSession) return
     const dispatchedOrders = orders.filter(o => o.plan_decision === 'dispatch_today' && !o.is_cancelled)
     const now = new Date().toISOString()
-    await supabase
-      .from('dispatch_orders')
+    await supabase.from('dispatch_orders')
       .update({ dispatched_at: now, is_dispatched: true })
       .in('id', dispatchedOrders.map(o => o.id))
-
-    const dispatched = dispatchedOrders.length
-    const held = orders.filter(o => o.plan_decision === 'hold').length
-    const unfulfillable = orders.filter(o => o.plan_decision === 'unfulfillable').length
-
     await supabase.from('dispatch_sessions').update({
       is_eod_done: true,
-      dispatched_count: dispatched,
-      held_count: held,
-      unfulfillable_count: unfulfillable,
+      dispatched_count: dispatchedOrders.length,
+      held_count: orders.filter(o => o.plan_decision === 'hold').length,
+      unfulfillable_count: orders.filter(o => o.plan_decision === 'unfulfillable').length,
     }).eq('id', activeSession.id)
-
     setEodDone(true)
     await loadOrders(activeSession.id)
   }
@@ -172,26 +142,14 @@ export default function DashboardClient({ user, initialSessions }: Props) {
     window.location.href = '/login'
   }
 
-  // Computed lists
-  const activeOrders = useMemo(() =>
-    orders.filter(o => !o.is_cancelled && !o.is_dispatched),
-    [orders]
-  )
-
-  const cancelledOrders = useMemo(() =>
-    orders.filter(o => o.is_cancelled),
-    [orders]
-  )
-
-  const dispatchedOrders = useMemo(() =>
-    orders.filter(o => o.is_dispatched && !o.is_cancelled),
-    [orders]
-  )
+  // Computed
+  const activeOrders = useMemo(() => orders.filter(o => !o.is_cancelled && !o.is_dispatched), [orders])
+  const cancelledOrders = useMemo(() => orders.filter(o => o.is_cancelled), [orders])
+  const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
 
   const filteredActive = useMemo(() => {
     let list = [...activeOrders]
     if (filterTier !== 'ALL') list = list.filter(o => o.urgency === filterTier)
-    // Sort: priority first, then urgency tier, then days_left
     const tierOrder: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
     list.sort((a, b) => {
       if (a.is_priority !== b.is_priority) return a.is_priority ? -1 : 1
@@ -203,7 +161,6 @@ export default function DashboardClient({ user, initialSessions }: Props) {
     return list
   }, [activeOrders, filterTier])
 
-  // Picklist
   const picklist = useMemo(() => {
     const dispatchToday = orders.filter(o => o.plan_decision === 'dispatch_today' && !o.is_cancelled)
     const skuMap: Record<string, { sku: string; courier: Courier; qty: number; count: number }> = {}
@@ -223,296 +180,404 @@ export default function DashboardClient({ user, initialSessions }: Props) {
 
   const tierCounts = useMemo(() => {
     const counts: Record<string, number> = {}
-    activeOrders.forEach(o => {
-      if (o.urgency) counts[o.urgency] = (counts[o.urgency] || 0) + 1
-    })
+    activeOrders.forEach(o => { if (o.urgency) counts[o.urgency] = (counts[o.urgency] || 0) + 1 })
     return counts
   }, [activeOrders])
 
+  // Styles
+  const card = {
+    background: 'var(--surface)',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    boxShadow: 'var(--shadow)',
+  }
+
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }}>
+      {/* ── Header ── */}
       <header style={{
-        borderBottom: '1px solid var(--border)',
         background: 'var(--surface)',
-        padding: '0 24px',
+        borderBottom: '1px solid var(--border)',
+        padding: '0 32px',
+        height: 56,
         display: 'flex',
         alignItems: 'center',
-        height: 52,
-        gap: 16,
-        position: 'sticky', top: 0, zIndex: 100,
+        gap: 0,
+        position: 'sticky' as const, top: 0, zIndex: 100,
+        boxShadow: 'var(--shadow)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 8 }}>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32 }}>
           <div style={{
-            width: 26, height: 26, background: 'var(--accent)', borderRadius: 5,
+            width: 30, height: 30, background: 'var(--accent)', borderRadius: 7,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: 'IBM Plex Mono', fontWeight: 700, fontSize: 13, color: '#000'
+            fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14, color: '#fff',
           }}>D</div>
-          <span style={{ fontFamily: 'IBM Plex Mono', fontWeight: 600, fontSize: 14 }}>DispatchLens</span>
+          <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>
+            DispatchLens
+          </span>
         </div>
 
-        {/* Tabs */}
-        {(['import', 'plan', 'picklist', 'eod'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '4px 12px',
-            borderRadius: 4,
-            border: 'none',
-            background: tab === t ? 'var(--surface2)' : 'transparent',
-            color: tab === t ? 'var(--text)' : 'var(--text2)',
-            cursor: 'pointer',
-            fontSize: 13,
-            fontFamily: 'IBM Plex Sans',
-            borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-            textTransform: 'capitalize',
-          }}>
-            {t === 'eod' ? 'EOD' : t === 'plan' ? `Plan${activeOrders.length ? ` (${activeOrders.length})` : ''}` : t.charAt(0).toUpperCase() + t.slice(1)}
+        {/* Nav tabs */}
+        <nav style={{ display: 'flex', gap: 2, flex: 1 }}>
+          {(['import', 'plan', 'picklist', 'eod'] as Tab[]).map(t => {
+            const labels: Record<Tab, string> = {
+              import: 'Import',
+              plan: activeOrders.length ? `Plan (${activeOrders.length})` : 'Plan',
+              picklist: `Picklist${dispatchTodayCount ? ` (${dispatchTodayCount})` : ''}`,
+              eod: 'End of Day',
+            }
+            return (
+              <button key={t} onClick={() => setTab(t)} style={{
+                padding: '6px 16px',
+                border: 'none', borderRadius: 6,
+                background: tab === t ? 'var(--accent-bg)' : 'transparent',
+                color: tab === t ? 'var(--accent)' : 'var(--text2)',
+                fontFamily: 'DM Sans', fontWeight: tab === t ? 600 : 400, fontSize: 14,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}>
+                {labels[t]}
+              </button>
+            )
+          })}
+        </nav>
+
+        {/* Right side */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {activeSession && (
+            <span style={{
+              fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)',
+              background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20,
+              border: '1px solid var(--border)',
+            }}>
+              {activeSession.label}
+            </span>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {user.user_metadata?.avatar_url && (
+              <img src={user.user_metadata.avatar_url} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />
+            )}
+            <span style={{ fontSize: 13, color: 'var(--text2)' }}>
+              {user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0]}
+            </span>
+          </div>
+          <button onClick={handleSignOut} style={{
+            background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+            color: 'var(--text3)', cursor: 'pointer', padding: '5px 8px',
+            display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
+            transition: 'border-color 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--border2)'}
+          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+          >
+            <LogOut size={13} />
           </button>
-        ))}
-
-        <div style={{ flex: 1 }} />
-
-        {/* Session selector */}
-        {activeSession && (
-          <span style={{ color: 'var(--text2)', fontSize: 12, fontFamily: 'IBM Plex Mono' }}>
-            {activeSession.label}
-          </span>
-        )}
-
-        <button onClick={handleSignOut} style={{
-          background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
-        }}>
-          <LogOut size={14} />
-        </button>
+        </div>
       </header>
 
-      <main style={{ flex: 1, padding: 24, maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+      {/* ── Main content ── */}
+      <main style={{ flex: 1, padding: '28px 32px', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
 
-        {/* ── IMPORT TAB ── */}
+        {/* ════════════════ IMPORT TAB ════════════════ */}
         {tab === 'import' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            {/* Session management */}
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24 }}>
+            {/* Session bar */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <h2 style={{ fontFamily: 'IBM Plex Mono', fontSize: 16, fontWeight: 600 }}>
-                {activeSession ? `Session: ${activeSession.label}` : 'No active session'}
-              </h2>
+              <h1 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>
+                {activeSession ? activeSession.label : 'No active session'}
+              </h1>
               <button onClick={createSession} style={{
-                padding: '6px 14px', borderRadius: 5,
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 14px', borderRadius: 7,
                 background: 'var(--accent)', border: 'none',
-                color: '#000', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-              }}>+ New Session</button>
+                color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer',
+                boxShadow: '0 1px 3px rgba(217,119,6,0.3)',
+                transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
+              >
+                <Plus size={14} /> New Session
+              </button>
               {sessions.length > 1 && (
                 <select onChange={e => {
                   const s = sessions.find(x => x.id === e.target.value)
                   if (s) selectSession(s)
                 }} value={activeSession?.id || ''} style={{
-                  background: 'var(--surface2)', border: '1px solid var(--border)',
-                  color: 'var(--text)', padding: '6px 10px', borderRadius: 5, fontSize: 13,
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  color: 'var(--text)', padding: '7px 12px', borderRadius: 7,
+                  fontSize: 13, cursor: 'pointer',
                 }}>
                   {sessions.map(s => (
-                    <option key={s.id} value={s.id}>{s.label} ({s.total_orders} orders)</option>
+                    <option key={s.id} value={s.id}>{s.label} · {s.total_orders} orders</option>
                   ))}
                 </select>
               )}
             </div>
 
-            {!activeSession && (
-              <div style={{ color: 'var(--text2)', padding: 24, textAlign: 'center' }}>
-                Create a new session to start planning today's dispatches.
+            {!activeSession ? (
+              <div style={{
+                ...card, padding: 48, textAlign: 'center' as const,
+                color: 'var(--text2)',
+              }}>
+                <Package size={32} style={{ margin: '0 auto 12px', color: 'var(--text3)' }} />
+                <p style={{ fontSize: 15 }}>Create a new session to start planning today's dispatches.</p>
               </div>
-            )}
+            ) : (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                  {/* Delhivery */}
+                  <div style={{ ...card, padding: 20, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: '#7c3aed',
+                      }} />
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color: 'var(--text2)', letterSpacing: '0.05em' }}>
+                        DELHIVERY
+                      </span>
+                      {delhiveryText.trim() && (
+                        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)' }}>
+                          ~{delhiveryText.trim().split('\n').length - 1} rows
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      value={delhiveryText}
+                      onChange={e => setDelhiveryText(e.target.value)}
+                      placeholder="Copy from Delhivery planning sheet (include header row) and paste here"
+                      style={{
+                        height: 260, width: '100%', padding: '12px 14px',
+                        background: 'var(--bg)', border: '1px solid var(--border)',
+                        borderRadius: 7, color: 'var(--text)', fontFamily: 'DM Mono',
+                        fontSize: 12, resize: 'vertical' as const, outline: 'none',
+                        lineHeight: 1.5, transition: 'border-color 0.15s',
+                      }}
+                      onFocus={e => e.target.style.borderColor = '#7c3aed'}
+                      onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                    />
+                  </div>
 
-            {activeSession && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-                {/* Delhivery paste */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <label style={{ fontSize: 12, fontFamily: 'IBM Plex Mono', color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Truck size={13} /> DELHIVERY — paste from planning sheet
-                  </label>
-                  <textarea
-                    value={delhiveryText}
-                    onChange={e => setDelhiveryText(e.target.value)}
-                    placeholder="Copy rows from Delhivery planning sheet and paste here (include header row)"
-                    style={{
-                      height: 240, width: '100%', padding: 12,
-                      background: 'var(--surface)', border: '1px solid var(--border)',
-                      borderRadius: 6, color: 'var(--text)', fontFamily: 'IBM Plex Mono',
-                      fontSize: 12, resize: 'vertical', outline: 'none',
-                    }}
-                    onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                    onBlur={e => e.target.style.borderColor = 'var(--border)'}
-                  />
-                  <span style={{ color: 'var(--text3)', fontSize: 11 }}>
-                    {delhiveryText.trim() ? `~${delhiveryText.trim().split('\n').length - 1} rows` : 'No data pasted'}
-                  </span>
+                  {/* Bluedart */}
+                  <div style={{ ...card, padding: 20, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: '#2563eb',
+                      }} />
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color: 'var(--text2)', letterSpacing: '0.05em' }}>
+                        BLUEDART
+                      </span>
+                      {bluedartText.trim() && (
+                        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)' }}>
+                          ~{bluedartText.trim().split('\n').length - 1} rows
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      value={bluedartText}
+                      onChange={e => setBluedartText(e.target.value)}
+                      placeholder="Copy from Bluedart planning sheet (include header row) and paste here"
+                      style={{
+                        height: 260, width: '100%', padding: '12px 14px',
+                        background: 'var(--bg)', border: '1px solid var(--border)',
+                        borderRadius: 7, color: 'var(--text)', fontFamily: 'DM Mono',
+                        fontSize: 12, resize: 'vertical' as const, outline: 'none',
+                        lineHeight: 1.5, transition: 'border-color 0.15s',
+                      }}
+                      onFocus={e => e.target.style.borderColor = '#2563eb'}
+                      onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                    />
+                  </div>
                 </div>
 
-                {/* Bluedart paste */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <label style={{ fontSize: 12, fontFamily: 'IBM Plex Mono', color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Package size={13} /> BLUEDART — paste from planning sheet
-                  </label>
-                  <textarea
-                    value={bluedartText}
-                    onChange={e => setBluedartText(e.target.value)}
-                    placeholder="Copy rows from Bluedart planning sheet and paste here (include header row)"
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <button
+                    onClick={handleImport}
+                    disabled={importing || (!delhiveryText.trim() && !bluedartText.trim())}
                     style={{
-                      height: 240, width: '100%', padding: 12,
-                      background: 'var(--surface)', border: '1px solid var(--border)',
-                      borderRadius: 6, color: 'var(--text)', fontFamily: 'IBM Plex Mono',
-                      fontSize: 12, resize: 'vertical', outline: 'none',
+                      padding: '9px 22px', borderRadius: 7,
+                      background: importing || (!delhiveryText.trim() && !bluedartText.trim()) ? 'var(--bg2)' : 'var(--accent)',
+                      border: '1px solid transparent',
+                      color: importing || (!delhiveryText.trim() && !bluedartText.trim()) ? 'var(--text3)' : '#fff',
+                      fontWeight: 600, fontSize: 14, cursor: importing ? 'wait' : 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      transition: 'all 0.15s',
                     }}
-                    onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-                    onBlur={e => e.target.style.borderColor = 'var(--border)'}
-                  />
-                  <span style={{ color: 'var(--text3)', fontSize: 11 }}>
-                    {bluedartText.trim() ? `~${bluedartText.trim().split('\n').length - 1} rows` : 'No data pasted'}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {activeSession && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <button
-                  onClick={handleImport}
-                  disabled={importing || (!delhiveryText.trim() && !bluedartText.trim())}
-                  style={{
-                    padding: '10px 24px', borderRadius: 6,
-                    background: importing ? 'var(--surface2)' : 'var(--accent)',
-                    border: 'none', color: importing ? 'var(--text2)' : '#000',
-                    fontWeight: 600, fontSize: 14, cursor: importing ? 'not-allowed' : 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 8,
-                  }}
-                >
-                  <Upload size={15} />
-                  {importing ? 'Importing…' : 'Import Orders'}
-                </button>
-
-                {importResult && (
-                  <span style={{ color: 'var(--dispatched)', fontSize: 13 }}>
-                    ✓ {importResult.added} orders imported
-                    {importResult.skipped > 0 && `, ${importResult.skipped} skipped (duplicates)`}
-                  </span>
-                )}
-
-                {orders.length > 0 && (
-                  <button onClick={() => setTab('plan')} style={{
-                    padding: '10px 20px', borderRadius: 6,
-                    background: 'var(--surface2)', border: '1px solid var(--border2)',
-                    color: 'var(--text)', fontSize: 13, cursor: 'pointer',
-                  }}>
-                    View Plan →
+                  >
+                    <Upload size={15} />
+                    {importing ? 'Importing…' : 'Import Orders'}
                   </button>
-                )}
-              </div>
+
+                  {importResult && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      color: 'var(--dispatched)', fontSize: 13, fontWeight: 500,
+                    }}>
+                      <CheckCircle size={15} />
+                      {importResult.added} orders imported
+                      {importResult.skipped > 0 && (
+                        <span style={{ color: 'var(--text3)' }}>
+                          · {importResult.skipped} skipped (duplicates)
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {orders.length > 0 && (
+                    <button onClick={() => setTab('plan')} style={{
+                      marginLeft: 'auto',
+                      padding: '9px 18px', borderRadius: 7,
+                      background: 'var(--surface)', border: '1px solid var(--border)',
+                      color: 'var(--text)', fontSize: 13, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      fontWeight: 500,
+                    }}>
+                      View Plan <ArrowRight size={14} />
+                    </button>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
 
-        {/* ── PLAN TAB ── */}
+        {/* ════════════════ PLAN TAB ════════════════ */}
         {tab === 'plan' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Stats bar */}
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
+            {/* Stats row */}
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               {[
                 { label: 'Total Active', value: activeOrders.length, color: 'var(--text)' },
-                { label: 'Undecided', value: undecidedCount, color: undecidedCount > 0 ? 'var(--today)' : 'var(--text2)' },
-                { label: 'Dispatch Today', value: dispatchTodayCount, color: 'var(--dispatched)' },
-                { label: 'Hold', value: holdCount, color: 'var(--hold)' },
-                { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)' },
+                { label: 'Undecided', value: undecidedCount, color: undecidedCount > 0 ? 'var(--today)' : 'var(--text2)', bg: undecidedCount > 0 ? 'var(--today-bg)' : 'var(--surface)' },
+                { label: 'Dispatch Today', value: dispatchTodayCount, color: 'var(--dispatched)', bg: 'var(--dispatched-bg)' },
+                { label: 'On Hold', value: holdCount, color: 'var(--hold)', bg: 'var(--hold-bg)' },
+                { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)' },
               ].map(s => (
                 <div key={s.label} style={{
-                  padding: '8px 16px', background: 'var(--surface)',
-                  border: '1px solid var(--border)', borderRadius: 6,
-                  display: 'flex', flexDirection: 'column', gap: 2,
+                  padding: '10px 18px',
+                  background: (s as any).bg || 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  display: 'flex', flexDirection: 'column' as const, gap: 2,
+                  minWidth: 110,
                 }}>
-                  <span style={{ color: s.color, fontFamily: 'IBM Plex Mono', fontSize: 20, fontWeight: 600 }}>{s.value}</span>
-                  <span style={{ color: 'var(--text3)', fontSize: 11 }}>{s.label}</span>
+                  <span style={{ color: s.color, fontFamily: 'DM Mono', fontSize: 22, fontWeight: 500, lineHeight: 1 }}>{s.value}</span>
+                  <span style={{ color: 'var(--text3)', fontSize: 11, marginTop: 2 }}>{s.label}</span>
                 </div>
               ))}
-
               <div style={{ flex: 1 }} />
-
-              {/* Reload */}
               {activeSession && (
                 <button onClick={() => loadOrders(activeSession.id)} style={{
-                  background: 'none', border: '1px solid var(--border)', borderRadius: 6,
-                  color: 'var(--text2)', cursor: 'pointer', padding: '8px 12px',
-                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 7, color: 'var(--text2)', cursor: 'pointer',
+                  padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
                 }}>
                   <RefreshCw size={13} /> Refresh
                 </button>
               )}
             </div>
 
-            {/* Urgency filter */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {(['ALL', ...URGENCY_ORDER] as FilterTier[]).map(tier => (
-                <button key={tier} onClick={() => setFilterTier(tier)} style={{
-                  padding: '4px 12px', borderRadius: 4,
-                  border: filterTier === tier ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: filterTier === tier ? 'rgba(240,160,32,0.1)' : 'transparent',
-                  color: tier === 'ALL' ? 'var(--text)' : `var(--${tier === 'CRITICAL' ? 'critical' : tier === 'TODAY' ? 'today' : tier === 'PLAN' ? 'plan' : 'hold'})`,
-                  fontSize: 12, fontFamily: 'IBM Plex Mono', cursor: 'pointer',
-                }}>
-                  {tier}{tier !== 'ALL' && tierCounts[tier] ? ` (${tierCounts[tier]})` : ''}
-                </button>
-              ))}
+            {/* Urgency filters */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => setFilterTier('ALL')} style={{
+                padding: '5px 14px', borderRadius: 6,
+                border: '1px solid ' + (filterTier === 'ALL' ? 'var(--accent)' : 'var(--border)'),
+                background: filterTier === 'ALL' ? 'var(--accent-bg)' : 'var(--surface)',
+                color: filterTier === 'ALL' ? 'var(--accent)' : 'var(--text2)',
+                fontSize: 12, fontFamily: 'DM Mono', cursor: 'pointer', fontWeight: 500,
+              }}>
+                ALL {activeOrders.length > 0 && `(${activeOrders.length})`}
+              </button>
+              {URGENCY_ORDER.map(tier => {
+                const colors: Record<UrgencyTier, { color: string; bg: string; border: string }> = {
+                  CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
+                  TODAY:    { color: 'var(--today)',    bg: 'var(--today-bg)',    border: '#fed7aa' },
+                  PLAN:     { color: 'var(--plan)',     bg: 'var(--plan-bg)',     border: '#fde68a' },
+                  HOLD:     { color: 'var(--hold)',     bg: 'var(--hold-bg)',     border: '#bfdbfe' },
+                }
+                const c = colors[tier]
+                const active = filterTier === tier
+                return (
+                  <button key={tier} onClick={() => setFilterTier(tier)} style={{
+                    padding: '5px 14px', borderRadius: 6,
+                    border: `1px solid ${active ? c.border : 'var(--border)'}`,
+                    background: active ? c.bg : 'var(--surface)',
+                    color: active ? c.color : 'var(--text2)',
+                    fontSize: 12, fontFamily: 'DM Mono', cursor: 'pointer', fontWeight: 500,
+                  }}>
+                    {tier}{tierCounts[tier] ? ` (${tierCounts[tier]})` : ''}
+                  </button>
+                )
+              })}
             </div>
 
             {/* Orders table */}
             {loadingOrders ? (
-              <div style={{ color: 'var(--text2)', padding: 40, textAlign: 'center' }}>Loading orders…</div>
+              <div style={{ ...card, padding: 60, textAlign: 'center' as const, color: 'var(--text3)' }}>
+                Loading orders…
+              </div>
             ) : filteredActive.length === 0 ? (
-              <div style={{ color: 'var(--text2)', padding: 40, textAlign: 'center' }}>
-                {activeOrders.length === 0 ? 'No orders imported yet. Go to Import tab.' : 'No orders match filter.'}
+              <div style={{ ...card, padding: 60, textAlign: 'center' as const, color: 'var(--text2)' }}>
+                {activeOrders.length === 0
+                  ? 'No orders imported yet. Go to Import tab to paste your planning data.'
+                  : 'No orders match this filter.'}
               </div>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border2)' }}>
-                      {['★', 'Urgency', 'Order ID', 'Customer', 'SKU', 'Courier', 'Pincode / City', 'Transit', 'Promise', 'Days Left', 'Decision'].map(h => (
-                        <th key={h} style={{
-                          padding: '8px 10px', textAlign: 'left',
-                          color: 'var(--text3)', fontSize: 11, fontFamily: 'IBM Plex Mono',
-                          fontWeight: 500, whiteSpace: 'nowrap',
-                        }}>{h}</th>
+              <div style={{ ...card, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
+                        {['', 'Urgency', 'Order ID', 'Customer', 'SKU', 'Cour.', 'Pincode · City', 'ODA', 'Transit', 'Promise', 'Days Left', 'Decision'].map(h => (
+                          <th key={h} style={{
+                            padding: '9px 12px', textAlign: 'left' as const,
+                            color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono',
+                            fontWeight: 500, whiteSpace: 'nowrap' as const, letterSpacing: '0.03em',
+                          }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredActive.map((order) => (
+                        <OrderRow
+                          key={order.id}
+                          order={order}
+                          updating={updatingId === order.id}
+                          onDecision={updateDecision}
+                          onPriority={togglePriority}
+                        />
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredActive.map((order, idx) => (
-                      <OrderRow
-                        key={order.id}
-                        order={order}
-                        idx={idx}
-                        updating={updatingId === order.id}
-                        onDecision={updateDecision}
-                        onPriority={togglePriority}
-                      />
-                    ))}
-                  </tbody>
-                </table>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
-            {/* Cancelled section */}
+            {/* Collapsed sections */}
             {cancelledOrders.length > 0 && (
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <div style={{ ...card, overflow: 'hidden' }}>
                 <button onClick={() => setShowCancelled(v => !v)} style={{
-                  background: 'none', border: 'none', color: 'var(--text3)',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                  width: '100%', padding: '10px 16px',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  color: 'var(--text3)', fontSize: 13, fontWeight: 500,
                 }}>
-                  {showCancelled ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                  Cancelled ({cancelledOrders.length})
+                  {showCancelled ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  Cancelled orders ({cancelledOrders.length})
                 </button>
                 {showCancelled && (
-                  <div style={{ marginTop: 8, color: 'var(--text3)', fontSize: 12, fontFamily: 'IBM Plex Mono' }}>
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px' }}>
                     {cancelledOrders.map(o => (
-                      <div key={o.id} style={{ padding: '4px 0' }}>
-                        {o.order_id} — {o.sku} — {o.customer_name}
+                      <div key={o.id} style={{
+                        padding: '5px 0', fontFamily: 'DM Mono', fontSize: 12,
+                        color: 'var(--text3)', borderBottom: '1px solid var(--border)',
+                        display: 'flex', gap: 16,
+                      }}>
+                        <span>{o.order_id}</span>
+                        <span>{o.sku}</span>
+                        <span>{o.customer_name}</span>
                       </div>
                     ))}
                   </div>
@@ -520,21 +585,28 @@ export default function DashboardClient({ user, initialSessions }: Props) {
               </div>
             )}
 
-            {/* Already dispatched section */}
             {dispatchedOrders.length > 0 && (
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <div style={{ ...card, overflow: 'hidden' }}>
                 <button onClick={() => setShowDispatched(v => !v)} style={{
-                  background: 'none', border: 'none', color: 'var(--text3)',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                  width: '100%', padding: '10px 16px',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  color: 'var(--dispatched)', fontSize: 13, fontWeight: 500,
                 }}>
-                  {showDispatched ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                  Already Dispatched ({dispatchedOrders.length})
+                  {showDispatched ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  Already dispatched ({dispatchedOrders.length})
                 </button>
                 {showDispatched && (
-                  <div style={{ marginTop: 8, color: 'var(--dispatched)', fontSize: 12, fontFamily: 'IBM Plex Mono' }}>
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px' }}>
                     {dispatchedOrders.map(o => (
-                      <div key={o.id} style={{ padding: '4px 0' }}>
-                        {o.order_id} — {o.sku} — {o.customer_name}
+                      <div key={o.id} style={{
+                        padding: '5px 0', fontFamily: 'DM Mono', fontSize: 12,
+                        color: 'var(--dispatched)', borderBottom: '1px solid var(--border)',
+                        display: 'flex', gap: 16,
+                      }}>
+                        <span>{o.order_id}</span>
+                        <span>{o.sku}</span>
+                        <span>{o.customer_name}</span>
                       </div>
                     ))}
                   </div>
@@ -544,121 +616,134 @@ export default function DashboardClient({ user, initialSessions }: Props) {
           </div>
         )}
 
-        {/* ── PICKLIST TAB ── */}
+        {/* ════════════════ PICKLIST TAB ════════════════ */}
         {tab === 'picklist' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <h2 style={{ fontFamily: 'IBM Plex Mono', fontSize: 16, fontWeight: 600 }}>
-                Picklist — {dispatchTodayCount} orders to dispatch
-              </h2>
+              <h1 style={{ fontSize: 18, fontWeight: 600 }}>
+                Picklist
+              </h1>
+              <span style={{ color: 'var(--text3)', fontSize: 14 }}>
+                {dispatchTodayCount} orders · {picklist.reduce((s, i) => s + i.qty, 0)} pieces
+              </span>
               <button onClick={() => window.print()} style={{
-                padding: '6px 14px', borderRadius: 5,
-                background: 'var(--surface2)', border: '1px solid var(--border2)',
+                marginLeft: 'auto',
+                padding: '8px 16px', borderRadius: 7,
+                background: 'var(--surface)', border: '1px solid var(--border)',
                 color: 'var(--text)', fontSize: 13, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
+                display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500,
               }}>
-                <Printer size={13} /> Print
+                <Printer size={14} /> Print Picklist
               </button>
             </div>
 
             {picklist.length === 0 ? (
-              <p style={{ color: 'var(--text2)' }}>No orders marked "Dispatch Today" yet. Go to Plan tab.</p>
+              <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text2)' }}>
+                No orders marked "Dispatch Today" yet. Go to Plan tab and assign decisions first.
+              </div>
             ) : (
-              <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                 {(['Bluedart', 'Delhivery'] as Courier[]).map(courier => {
                   const items = picklist.filter(p => p.courier === courier)
                   if (!items.length) return null
                   const totalQty = items.reduce((s, i) => s + i.qty, 0)
+                  const courierColor = courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
                   return (
-                    <div key={courier} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                    <div key={courier} style={{ ...card, overflow: 'hidden' }}>
                       <div style={{
-                        padding: '10px 16px', borderBottom: '1px solid var(--border)',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        background: 'var(--surface2)',
+                        padding: '12px 20px',
+                        borderBottom: '1px solid var(--border)',
+                        background: 'var(--bg2)',
+                        display: 'flex', alignItems: 'center', gap: 10,
                       }}>
-                        <span style={{ fontFamily: 'IBM Plex Mono', fontWeight: 600, fontSize: 14 }}>{courier}</span>
-                        <span style={{ color: 'var(--text2)', fontSize: 12 }}>{items.length} SKUs · {totalQty} pieces</span>
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: courierColor }} />
+                        <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14 }}>{courier}</span>
+                        <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 12 }}>
+                          {items.length} SKUs · {totalQty} pcs
+                        </span>
                       </div>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                            <th style={{ padding: '8px 16px', textAlign: 'left', color: 'var(--text3)', fontSize: 11, fontFamily: 'IBM Plex Mono', fontWeight: 500 }}>SKU</th>
-                            <th style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--text3)', fontSize: 11, fontFamily: 'IBM Plex Mono', fontWeight: 500 }}>ORDERS</th>
-                            <th style={{ padding: '8px 16px', textAlign: 'right', color: 'var(--text3)', fontSize: 11, fontFamily: 'IBM Plex Mono', fontWeight: 500 }}>QTY</th>
+                            <th style={{ padding: '8px 20px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>SKU</th>
+                            <th style={{ padding: '8px 20px', textAlign: 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>ORDERS</th>
+                            <th style={{ padding: '8px 20px', textAlign: 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>QTY</th>
                           </tr>
                         </thead>
                         <tbody>
                           {items.map((item, i) => (
-                            <tr key={item.sku} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                              <td style={{ padding: '10px 16px', fontFamily: 'IBM Plex Mono', color: 'var(--text)' }}>{item.sku}</td>
-                              <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--text2)' }}>{item.count}</td>
-                              <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'IBM Plex Mono', fontWeight: 600, color: 'var(--accent)' }}>{item.qty}</td>
+                            <tr key={item.sku} style={{
+                              borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none',
+                            }}>
+                              <td style={{ padding: '10px 20px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{item.sku}</td>
+                              <td style={{ padding: '10px 20px', textAlign: 'right' as const, color: 'var(--text2)', fontSize: 13 }}>{item.count}</td>
+                              <td style={{ padding: '10px 20px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, color: courierColor, fontSize: 15 }}>{item.qty}</td>
                             </tr>
                           ))}
                         </tbody>
                         <tfoot>
-                          <tr style={{ borderTop: '1px solid var(--border2)' }}>
-                            <td style={{ padding: '10px 16px', color: 'var(--text2)', fontSize: 12 }}>TOTAL</td>
-                            <td style={{ padding: '10px 16px', textAlign: 'right', color: 'var(--text2)', fontFamily: 'IBM Plex Mono' }}>{items.reduce((s, i) => s + i.count, 0)}</td>
-                            <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'IBM Plex Mono', fontWeight: 700, color: 'var(--accent)', fontSize: 16 }}>{totalQty}</td>
+                          <tr style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)' }}>
+                            <td style={{ padding: '10px 20px', fontWeight: 600, fontSize: 13 }}>Total</td>
+                            <td style={{ padding: '10px 20px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{items.reduce((s, i) => s + i.count, 0)}</td>
+                            <td style={{ padding: '10px 20px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: courierColor, fontSize: 18 }}>{totalQty}</td>
                           </tr>
                         </tfoot>
                       </table>
                     </div>
                   )
                 })}
-              </>
+              </div>
             )}
           </div>
         )}
 
-        {/* ── EOD TAB ── */}
+        {/* ════════════════ EOD TAB ════════════════ */}
         {tab === 'eod' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 600 }}>
-            <h2 style={{ fontFamily: 'IBM Plex Mono', fontSize: 16, fontWeight: 600 }}>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24, maxWidth: 640 }}>
+            <h1 style={{ fontSize: 18, fontWeight: 600 }}>
               End of Day — {activeSession?.label || 'No session'}
-            </h2>
+            </h1>
 
             {eodDone || activeSession?.is_eod_done ? (
               <div style={{
-                padding: 24, background: 'rgba(34,197,94,0.08)',
-                border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8,
-                display: 'flex', flexDirection: 'column', gap: 12,
+                ...card, padding: 32,
+                border: '1px solid #bbf7d0',
+                background: 'var(--dispatched-bg)',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--dispatched)' }}>
-                  <CheckCircle size={20} />
-                  <span style={{ fontFamily: 'IBM Plex Mono', fontWeight: 600 }}>EOD Complete</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--dispatched)', marginBottom: 20 }}>
+                  <CheckCircle size={22} />
+                  <span style={{ fontWeight: 700, fontSize: 16 }}>EOD Confirmed</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
                   {[
                     { label: 'Dispatched', value: dispatchTodayCount, color: 'var(--dispatched)' },
                     { label: 'Held', value: holdCount, color: 'var(--hold)' },
                     { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)' },
                   ].map(s => (
-                    <div key={s.label} style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 28, fontFamily: 'IBM Plex Mono', fontWeight: 700, color: s.color }}>{s.value}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text3)' }}>{s.label}</div>
+                    <div key={s.label} style={{ textAlign: 'center' as const }}>
+                      <div style={{ fontSize: 32, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>{s.label}</div>
                     </div>
                   ))}
                 </div>
-                <p style={{ color: 'var(--text2)', fontSize: 13 }}>
+                <p style={{ color: 'var(--text2)', fontSize: 13, marginTop: 20 }}>
                   Held and unfulfillable orders will carry forward to tomorrow's session.
                 </p>
               </div>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
                   {[
-                    { label: 'Will Dispatch', value: dispatchTodayCount, color: 'var(--dispatched)', icon: <CheckCircle size={16} /> },
-                    { label: 'On Hold', value: holdCount, color: 'var(--hold)', icon: <Clock size={16} /> },
-                    { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', icon: <AlertTriangle size={16} /> },
+                    { label: 'Will Dispatch', value: dispatchTodayCount, color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', icon: <CheckCircle size={18} /> },
+                    { label: 'On Hold', value: holdCount, color: 'var(--hold)', bg: 'var(--hold-bg)', icon: <Clock size={18} /> },
+                    { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)', icon: <AlertTriangle size={18} /> },
                   ].map(s => (
                     <div key={s.label} style={{
-                      padding: 16, background: 'var(--surface)',
-                      border: '1px solid var(--border)', borderRadius: 8, textAlign: 'center',
+                      padding: 20, background: s.bg,
+                      border: '1px solid var(--border)', borderRadius: 8, textAlign: 'center' as const,
                     }}>
-                      <div style={{ color: s.color, marginBottom: 6, display: 'flex', justifyContent: 'center' }}>{s.icon}</div>
-                      <div style={{ fontSize: 28, fontFamily: 'IBM Plex Mono', fontWeight: 700, color: s.color }}>{s.value}</div>
+                      <div style={{ color: s.color, display: 'flex', justifyContent: 'center', marginBottom: 8 }}>{s.icon}</div>
+                      <div style={{ fontSize: 30, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
                       <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>{s.label}</div>
                     </div>
                   ))}
@@ -666,13 +751,14 @@ export default function DashboardClient({ user, initialSessions }: Props) {
 
                 {undecidedCount > 0 && (
                   <div style={{
-                    padding: 12, background: 'rgba(249,115,22,0.08)',
-                    border: '1px solid rgba(249,115,22,0.3)', borderRadius: 6,
-                    color: 'var(--today)', fontSize: 13,
+                    padding: '12px 16px',
+                    background: 'var(--today-bg)',
+                    border: '1px solid #fed7aa',
+                    borderRadius: 8, color: 'var(--today)', fontSize: 13,
                     display: 'flex', alignItems: 'center', gap: 8,
                   }}>
-                    <AlertTriangle size={14} />
-                    {undecidedCount} orders still undecided. Go to Plan tab before confirming EOD.
+                    <AlertTriangle size={15} />
+                    {undecidedCount} orders still undecided — go to Plan tab before confirming EOD.
                   </div>
                 )}
 
@@ -680,12 +766,14 @@ export default function DashboardClient({ user, initialSessions }: Props) {
                   onClick={handleEOD}
                   disabled={dispatchTodayCount === 0}
                   style={{
-                    padding: '12px 24px', borderRadius: 6,
-                    background: dispatchTodayCount > 0 ? 'var(--dispatched)' : 'var(--surface2)',
+                    padding: '11px 24px', borderRadius: 8,
+                    background: dispatchTodayCount > 0 ? 'var(--dispatched)' : 'var(--bg2)',
                     border: 'none',
-                    color: dispatchTodayCount > 0 ? '#000' : 'var(--text3)',
-                    fontWeight: 700, fontSize: 14, cursor: dispatchTodayCount > 0 ? 'pointer' : 'not-allowed',
+                    color: dispatchTodayCount > 0 ? '#fff' : 'var(--text3)',
+                    fontWeight: 700, fontSize: 14,
+                    cursor: dispatchTodayCount > 0 ? 'pointer' : 'not-allowed',
                     display: 'flex', alignItems: 'center', gap: 8, width: 'fit-content',
+                    boxShadow: dispatchTodayCount > 0 ? '0 1px 3px rgba(22,163,74,0.3)' : 'none',
                   }}
                 >
                   <CheckCircle size={16} />
@@ -700,143 +788,152 @@ export default function DashboardClient({ user, initialSessions }: Props) {
   )
 }
 
-// ── Order Row Component ──
-function OrderRow({ order, idx, updating, onDecision, onPriority }: {
+// ── Order Row ──
+function OrderRow({ order, updating, onDecision, onPriority }: {
   order: DBOrder
-  idx: number
   updating: boolean
   onDecision: (id: string, d: PlanDecision) => void
   onPriority: (id: string, current: boolean) => void
 }) {
-  const tierColor = {
-    CRITICAL: 'var(--critical)',
-    TODAY: 'var(--today)',
-    PLAN: 'var(--plan)',
-    HOLD: 'var(--hold)',
-  }[order.urgency || 'HOLD'] || 'var(--text3)'
+  const urgencyColors: Record<string, { color: string; bg: string; border: string }> = {
+    CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
+    TODAY:    { color: 'var(--today)',    bg: 'var(--today-bg)',    border: '#fed7aa' },
+    PLAN:     { color: 'var(--plan)',     bg: 'var(--plan-bg)',     border: '#fde68a' },
+    HOLD:     { color: 'var(--hold)',     bg: 'var(--hold-bg)',     border: '#bfdbfe' },
+  }
+  const uc = urgencyColors[order.urgency || 'HOLD']
 
-  const decisionBg: Record<PlanDecision, string> = {
-    dispatch_today: 'rgba(34,197,94,0.08)',
-    hold: 'rgba(59,130,246,0.06)',
-    unfulfillable: 'rgba(239,68,68,0.06)',
+  const rowBg: Record<PlanDecision, string> = {
+    dispatch_today: '#f0fdf4',
+    hold: '#eff6ff',
+    unfulfillable: '#fef2f2',
     undecided: 'transparent',
   }
 
   return (
     <tr style={{
       borderBottom: '1px solid var(--border)',
-      background: updating ? 'rgba(240,160,32,0.05)' : decisionBg[order.plan_decision],
-      opacity: updating ? 0.6 : 1,
+      background: updating ? 'var(--accent-bg)' : rowBg[order.plan_decision],
+      opacity: updating ? 0.7 : 1,
+      transition: 'background 0.15s',
     }}>
-      {/* Priority star */}
-      <td style={{ padding: '8px 10px', width: 32 }}>
+      {/* Priority */}
+      <td style={{ padding: '8px 12px', width: 36 }}>
         <button onClick={() => onPriority(order.id, order.is_priority)} style={{
-          background: 'none', border: 'none', cursor: 'pointer',
+          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
           color: order.is_priority ? 'var(--accent)' : 'var(--border2)',
-          padding: 0,
+          transition: 'color 0.15s',
         }}>
           <Star size={14} fill={order.is_priority ? 'var(--accent)' : 'none'} />
         </button>
       </td>
 
-      {/* Urgency */}
-      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
+      {/* Urgency badge */}
+      <td style={{ padding: '8px 12px' }}>
         <span style={{
-          fontSize: 10, fontFamily: 'IBM Plex Mono', fontWeight: 600,
-          color: tierColor, letterSpacing: '0.05em',
+          display: 'inline-block',
+          padding: '2px 8px', borderRadius: 4,
+          fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, letterSpacing: '0.05em',
+          color: uc.color, background: uc.bg, border: `1px solid ${uc.border}`,
         }}>
           {order.urgency || '—'}
         </span>
       </td>
 
       {/* Order ID */}
-      <td style={{ padding: '8px 10px' }}>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, color: 'var(--text2)' }}>
-          {order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}
+      <td style={{ padding: '8px 12px' }}>
+        <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>
+          {order.order_id.length > 20 ? order.order_id.slice(0, 20) + '…' : order.order_id}
         </span>
       </td>
 
       {/* Customer */}
-      <td style={{ padding: '8px 10px', maxWidth: 160 }}>
-        <span style={{ fontSize: 12, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+      <td style={{ padding: '8px 12px', maxWidth: 160 }}>
+        <span style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: 150 }}>
           {order.customer_name}
         </span>
       </td>
 
       {/* SKU */}
-      <td style={{ padding: '8px 10px' }}>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, color: 'var(--text)' }}>
+      <td style={{ padding: '8px 12px' }}>
+        <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>
           {order.sku}
         </span>
       </td>
 
       {/* Courier */}
-      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
+      <td style={{ padding: '8px 12px' }}>
         <span style={{
-          fontSize: 10, fontFamily: 'IBM Plex Mono',
-          color: order.courier === 'Bluedart' ? '#60a5fa' : '#a78bfa',
-          background: order.courier === 'Bluedart' ? 'rgba(96,165,250,0.1)' : 'rgba(167,139,250,0.1)',
-          padding: '2px 6px', borderRadius: 3,
+          fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500,
+          color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed',
+          background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff',
+          padding: '2px 7px', borderRadius: 4,
+          border: `1px solid ${order.courier === 'Bluedart' ? '#bfdbfe' : '#e9d5ff'}`,
         }}>
           {order.courier === 'Bluedart' ? 'BD' : 'DL'}
         </span>
       </td>
 
-      {/* Pincode / City */}
-      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, color: 'var(--text2)' }}>
-          {order.pincode}
-        </span>
-        {order.city && (
-          <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>
-            {order.city}
-          </span>
-        )}
+      {/* Pincode · City */}
+      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
+        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{order.pincode}</span>
+        {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
+      </td>
+
+      {/* ODA */}
+      <td style={{ padding: '8px 12px' }}>
         {order.oda === 'ODA' && (
-          <span style={{ fontSize: 10, color: 'var(--today)', marginLeft: 4 }}>ODA</span>
+          <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--today)', background: 'var(--today-bg)', padding: '1px 5px', borderRadius: 3, border: '1px solid #fed7aa' }}>ODA</span>
         )}
       </td>
 
       {/* Transit */}
-      <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 12, color: 'var(--text3)' }}>
-          {order.transit_days}d
-        </span>
+      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}>
+        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span>
       </td>
 
       {/* Promise date */}
-      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, color: 'var(--text2)' }}>
-          {order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
+      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
+        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>
+          {order.promise_date
+            ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+            : '—'}
         </span>
       </td>
 
       {/* Days left */}
-      <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 13, fontWeight: 600, color: tierColor }}>
+      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}>
+        <span style={{
+          fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600,
+          color: uc.color,
+        }}>
           {order.days_left !== null ? order.days_left : '—'}
         </span>
       </td>
 
       {/* Decision buttons */}
-      <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
+      <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', gap: 4 }}>
           {([
-            { d: 'dispatch_today' as PlanDecision, label: 'Dispatch', activeColor: 'var(--dispatched)' },
-            { d: 'hold' as PlanDecision, label: 'Hold', activeColor: 'var(--hold)' },
-            { d: 'unfulfillable' as PlanDecision, label: 'Unful.', activeColor: 'var(--critical)' },
-          ]).map(({ d, label, activeColor }) => (
-            <button key={d} onClick={() => onDecision(order.id, d)} style={{
-              padding: '3px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer',
-              fontFamily: 'IBM Plex Sans', fontWeight: 500,
-              background: order.plan_decision === d ? activeColor : 'var(--surface2)',
-              border: `1px solid ${order.plan_decision === d ? activeColor : 'var(--border)'}`,
-              color: order.plan_decision === d ? '#000' : 'var(--text3)',
-              transition: 'all 0.1s',
-            }}>
-              {label}
-            </button>
-          ))}
+            { d: 'dispatch_today' as PlanDecision, label: 'Dispatch', ac: 'var(--dispatched)', ab: 'var(--dispatched-bg)', aborder: '#bbf7d0' },
+            { d: 'hold' as PlanDecision, label: 'Hold', ac: 'var(--hold)', ab: 'var(--hold-bg)', aborder: '#bfdbfe' },
+            { d: 'unfulfillable' as PlanDecision, label: 'Unfulfil.', ac: 'var(--critical)', ab: 'var(--critical-bg)', aborder: '#fecaca' },
+          ]).map(({ d, label, ac, ab, aborder }) => {
+            const isActive = order.plan_decision === d
+            return (
+              <button key={d} onClick={() => onDecision(order.id, d)} style={{
+                padding: '4px 10px', borderRadius: 5, fontSize: 11,
+                cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500,
+                background: isActive ? ab : 'var(--surface)',
+                border: `1px solid ${isActive ? aborder : 'var(--border)'}`,
+                color: isActive ? ac : 'var(--text3)',
+                transition: 'all 0.1s',
+                whiteSpace: 'nowrap' as const,
+              }}>
+                {label}
+              </button>
+            )
+          })}
         </div>
       </td>
     </tr>
