@@ -81,6 +81,11 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const [unfulfillableSku, setUnfulfillableSku] = useState<string | null>(null)
   const [unfulfillableReason, setUnfulfillableReason] = useState<UnfulfillableReason>('Not ready')
   const [unfulfillableNote, setUnfulfillableNote] = useState('')
+  const [availableQty, setAvailableQty] = useState<number | ''>('')
+  const [allocationPreview, setAllocationPreview] = useState<{
+    dispatch: DBOrder[]
+    unfulfillable: DBOrder[]
+  } | null>(null)
 
   // Review tab
   const [targetDates, setTargetDates] = useState<Record<string, string>>({})
@@ -210,26 +215,49 @@ export default function DashboardClient({ user, access, initialSessions }: Props
     setCancelOrderId(null)
   }
 
-  // ── Unfulfillable by SKU ──
+  // ── Compute allocation preview ──
+  const computeAllocation = (sku: string, available: number) => {
+    const tierOrder: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
+    const skuOrders = orders
+      .filter(o => o.sku === sku && o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched)
+      .sort((a, b) => {
+        const ta = tierOrder[a.urgency || 'HOLD'] ?? 3
+        const tb = tierOrder[b.urgency || 'HOLD'] ?? 3
+        if (ta !== tb) return ta - tb
+        return (a.days_left ?? 99) - (b.days_left ?? 99)
+      })
+    return {
+      dispatch: skuOrders.slice(0, available),
+      unfulfillable: skuOrders.slice(available),
+    }
+  }
+
+  // ── Unfulfillable by SKU (partial or full) ──
   const handleUnfulfillableSku = async () => {
-    if (!unfulfillableSku) return
-    const affectedIds = orders.filter(o => o.sku === unfulfillableSku && !o.is_cancelled && !o.is_dispatched).map(o => o.id)
-    if (affectedIds.length > 0) {
+    if (!unfulfillableSku || !allocationPreview) return
+    const now = new Date().toISOString()
+
+    // Mark unfulfillable orders
+    if (allocationPreview.unfulfillable.length > 0) {
+      const unfulfillableIds = allocationPreview.unfulfillable.map(o => o.id)
       await supabase.from('dispatch_orders').update({
         plan_decision: 'unfulfillable',
         unfulfillable_reason: unfulfillableReason,
         unfulfillable_note: unfulfillableNote.trim() || null,
-        updated_at: new Date().toISOString(),
-      }).in('id', affectedIds)
-      setOrders(prev => prev.map(o => affectedIds.includes(o.id) ? {
+        updated_at: now,
+      }).in('id', unfulfillableIds)
+      setOrders(prev => prev.map(o => unfulfillableIds.includes(o.id) ? {
         ...o, plan_decision: 'unfulfillable',
         unfulfillable_reason: unfulfillableReason,
         unfulfillable_note: unfulfillableNote.trim() || null,
       } : o))
     }
+
     setUnfulfillableSku(null)
     setUnfulfillableReason('Not ready')
     setUnfulfillableNote('')
+    setAvailableQty('')
+    setAllocationPreview(null)
   }
 
   // ── Review: save target date ──
@@ -409,60 +437,161 @@ export default function DashboardClient({ user, access, initialSessions }: Props
         </Modal>
       )}
 
-      {/* Unfulfillable SKU */}
-      {unfulfillableSku && (
-        <Modal title="Mark SKU Unfulfillable" onClose={() => { setUnfulfillableSku(null); setUnfulfillableReason('Not ready'); setUnfulfillableNote('') }}>
-          <div style={{ marginBottom: 4 }}>
-            <div style={{ fontFamily: 'DM Mono', fontSize: 13, background: 'var(--bg2)', padding: '8px 12px', borderRadius: 6, marginBottom: 16, color: 'var(--text)' }}>{unfulfillableSku}</div>
+      {/* Unfulfillable SKU — partial allocation */}
+      {unfulfillableSku && (() => {
+        const skuOrders = orders.filter(o => o.sku === unfulfillableSku && o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched)
+        const totalQty = skuOrders.reduce((s, o) => s + o.qty, 0)
+        const closeModal = () => { setUnfulfillableSku(null); setUnfulfillableReason('Not ready'); setUnfulfillableNote(''); setAvailableQty(''); setAllocationPreview(null) }
+        const showPreview = allocationPreview !== null
+        const canConfirm = showPreview && allocationPreview.unfulfillable.length > 0 && !(unfulfillableReason === 'Other' && !unfulfillableNote.trim())
 
-            {/* Reason dropdown */}
-            <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>Reason</label>
-            <select value={unfulfillableReason} onChange={e => setUnfulfillableReason(e.target.value as UnfulfillableReason)} style={{ width: '100%', padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, marginBottom: 14, cursor: 'pointer' }}>
-              {UNFULFILLABLE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+        return (
+          <Modal title="Mark SKU Unfulfillable" onClose={closeModal} width={520}>
+            {/* SKU pill */}
+            <div style={{ fontFamily: 'DM Mono', fontSize: 13, background: 'var(--bg2)', padding: '8px 12px', borderRadius: 6, marginBottom: 20, color: 'var(--text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{unfulfillableSku}</span>
+              <span style={{ color: 'var(--text3)', fontSize: 12 }}>{skuOrders.length} orders · {totalQty} pcs total</span>
+            </div>
 
-            {/* Note (shown always, required if Other) */}
-            {unfulfillableReason === 'Other' && (
-              <>
-                <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>Note <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(required)</span></label>
+            {/* Step 1: Available qty */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 8, fontWeight: 600 }}>
+                How many pieces are available to dispatch?
+              </label>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <input
+                  type="number" min={0} max={totalQty}
+                  value={availableQty}
+                  onChange={e => {
+                    const val = e.target.value === '' ? '' : Math.min(Math.max(0, parseInt(e.target.value)), totalQty)
+                    setAvailableQty(val as number | '')
+                    setAllocationPreview(null)
+                  }}
+                  placeholder={`0 – ${totalQty}`}
+                  style={{ width: 100, padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 14, fontFamily: 'DM Mono', outline: 'none', textAlign: 'center' as const }}
+                  onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+                  onBlur={e => e.target.style.borderColor = 'var(--border)'}
+                />
+                <span style={{ fontSize: 13, color: 'var(--text3)' }}>out of {totalQty}</span>
+                <button
+                  onClick={() => {
+                    if (availableQty === '' || (availableQty as number) >= totalQty) return
+                    setAllocationPreview(computeAllocation(unfulfillableSku, availableQty as number))
+                  }}
+                  disabled={availableQty === '' || (availableQty as number) >= totalQty}
+                  style={{
+                    padding: '8px 16px', borderRadius: 7, border: 'none',
+                    background: availableQty === '' || (availableQty as number) >= totalQty ? 'var(--bg2)' : 'var(--accent)',
+                    color: availableQty === '' || (availableQty as number) >= totalQty ? 'var(--text3)' : '#fff',
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  Preview Allocation
+                </button>
+              </div>
+              {availableQty !== '' && (availableQty as number) >= totalQty && (
+                <p style={{ fontSize: 12, color: 'var(--today)', marginTop: 6 }}>
+                  If all pieces are available, no orders need to be marked unfulfillable.
+                </p>
+              )}
+              {availableQty !== '' && availableQty === 0 && (
+                <p style={{ fontSize: 12, color: 'var(--critical)', marginTop: 6 }}>
+                  0 available — all {skuOrders.length} orders will be marked unfulfillable.
+                </p>
+              )}
+            </div>
+
+            {/* Allocation preview */}
+            {showPreview && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  <div style={{ background: 'var(--dispatched-bg)', border: '1px solid #bbf7d0', borderRadius: 7, padding: '10px 14px', textAlign: 'center' as const }}>
+                    <div style={{ fontSize: 20, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)' }}>{allocationPreview.dispatch.length}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>Will dispatch</div>
+                  </div>
+                  <div style={{ background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 7, padding: '10px 14px', textAlign: 'center' as const }}>
+                    <div style={{ fontSize: 20, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)' }}>{allocationPreview.unfulfillable.length}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>Unfulfillable</div>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>Allocated by urgency — CRITICAL first, then TODAY, PLAN, HOLD:</p>
+
+                <div style={{ border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden', maxHeight: 220, overflowY: 'auto' }}>
+                  {/* Dispatch rows */}
+                  {allocationPreview.dispatch.map((o, i) => {
+                    const uc = {
+                      CRITICAL: 'var(--critical)', TODAY: 'var(--today)',
+                      PLAN: 'var(--plan)', HOLD: 'var(--hold)',
+                    }[o.urgency as string] || 'var(--text3)'
+                    return (
+                      <div key={o.id} style={{
+                        padding: '8px 12px',
+                        borderBottom: '1px solid var(--border)',
+                        background: '#f0fdf4',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                      }}>
+                        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0', whiteSpace: 'nowrap' as const }}>DISPATCH</span>
+                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{o.urgency}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{o.customer_name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{o.days_left ?? '?'}</span>
+                      </div>
+                    )
+                  })}
+                  {/* Unfulfillable rows */}
+                  {allocationPreview.unfulfillable.map((o, i) => {
+                    const uc = {
+                      CRITICAL: 'var(--critical)', TODAY: 'var(--today)',
+                      PLAN: 'var(--plan)', HOLD: 'var(--hold)',
+                    }[o.urgency as string] || 'var(--text3)'
+                    return (
+                      <div key={o.id} style={{
+                        padding: '8px 12px',
+                        borderBottom: i < allocationPreview.unfulfillable.length - 1 ? '1px solid var(--border)' : 'none',
+                        background: '#fef2f2',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                      }}>
+                        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #fecaca', whiteSpace: 'nowrap' as const }}>UNFULFIL.</span>
+                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{o.urgency}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{o.customer_name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{o.days_left ?? '?'}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Reason + note — only show after preview */}
+            {showPreview && allocationPreview.unfulfillable.length > 0 && (
+              <div style={{ marginBottom: 4 }}>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 600 }}>Reason for unfulfillable orders</label>
+                <select value={unfulfillableReason} onChange={e => setUnfulfillableReason(e.target.value as UnfulfillableReason)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, marginBottom: 12, cursor: 'pointer' }}>
+                  {UNFULFILLABLE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>
+                  {unfulfillableReason === 'Other' ? <>Note <span style={{ color: 'var(--critical)' }}>(required)</span></> : <>Note <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(optional)</span></>}
+                </label>
                 <textarea value={unfulfillableNote} onChange={e => setUnfulfillableNote(e.target.value)}
-                  placeholder="Describe the issue..."
-                  style={{ width: '100%', height: 80, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Sans', resize: 'vertical' as const, outline: 'none', marginBottom: 14 }}
+                  placeholder={unfulfillableReason === 'Other' ? 'Describe the issue...' : 'Any additional context...'}
+                  style={{ width: '100%', height: 68, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Sans', resize: 'vertical' as const, outline: 'none' }}
                   onFocus={e => e.target.style.borderColor = 'var(--critical)'}
                   onBlur={e => e.target.style.borderColor = 'var(--border)'}
                 />
-              </>
-            )}
-            {unfulfillableReason !== 'Other' && (
-              <>
-                <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>Additional note <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(optional)</span></label>
-                <textarea value={unfulfillableNote} onChange={e => setUnfulfillableNote(e.target.value)}
-                  placeholder="Any additional context..."
-                  style={{ width: '100%', height: 64, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Sans', resize: 'vertical' as const, outline: 'none', marginBottom: 14 }}
-                />
-              </>
+              </div>
             )}
 
-            {/* Affected orders */}
-            <p style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8 }}>Affected orders:</p>
-            <div style={{ border: '1px solid var(--border)', borderRadius: 6, maxHeight: 160, overflowY: 'auto' }}>
-              {orders.filter(o => o.sku === unfulfillableSku && !o.is_cancelled && !o.is_dispatched).map(o => (
-                <div key={o.id} style={{ padding: '7px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, fontFamily: 'DM Mono', display: 'flex', gap: 12, color: 'var(--text2)' }}>
-                  <span style={{ color: 'var(--text)' }}>{o.customer_name}</span>
-                  <span style={{ color: 'var(--text3)' }}>{o.order_id.slice(0, 18)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <ModalActions
-            onCancel={() => { setUnfulfillableSku(null); setUnfulfillableReason('Not ready'); setUnfulfillableNote('') }}
-            onConfirm={handleUnfulfillableSku}
-            confirmLabel="Mark Unfulfillable"
-            confirmColor="var(--critical)"
-            disabled={unfulfillableReason === 'Other' && !unfulfillableNote.trim()}
-          />
-        </Modal>
-      )}
+            <ModalActions
+              onCancel={closeModal}
+              onConfirm={handleUnfulfillableSku}
+              confirmLabel={`Mark ${allocationPreview?.unfulfillable.length ?? 0} Orders Unfulfillable`}
+              confirmColor="var(--critical)"
+              disabled={!canConfirm}
+            />
+          </Modal>
+        )
+      })()}
 
       {/* EOD confirm */}
       {showEodConfirm && eodMatchResult && (
