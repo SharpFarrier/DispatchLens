@@ -67,6 +67,10 @@ export default function DashboardClient({ user, access, initialSessions }: Props
 
   // Plan
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
+  const [sortCol, setSortCol] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
+  const [showDaysPopover, setShowDaysPopover] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDecision, setBulkDecision] = useState<PlanDecision | ''>('')
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
@@ -341,20 +345,62 @@ export default function DashboardClient({ user, access, initialSessions }: Props
     return c
   }, [activeOrders])
 
+  // Display days left = raw - 1 (buffer)
+  const displayDaysLeft = (raw: number | null) => raw === null ? null : raw - 1
+
   const filteredActive = useMemo(() => {
     let list = [...activeOrders]
+    // Decision/urgency filter
     if (activeFilter === 'dispatch_today') list = list.filter(o => o.plan_decision === 'dispatch_today')
     else if (activeFilter === 'hold') list = list.filter(o => o.plan_decision === 'hold')
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter !== 'ALL') list = list.filter(o => o.urgency === activeFilter)
+    // Days left filter (applied to display value = raw - 1)
+    if (daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
+    // Sort
     const to: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
-    list.sort((a, b) => {
-      if (a.is_priority !== b.is_priority) return a.is_priority ? -1 : 1
-      return (to[a.urgency || 'HOLD'] ?? 3) - (to[b.urgency || 'HOLD'] ?? 3) || (a.days_left ?? 99) - (b.days_left ?? 99)
-    })
+    if (sortCol) {
+      list.sort((a, b) => {
+        let av: any, bv: any
+        if (sortCol === 'urgency') { av = to[a.urgency || 'HOLD'] ?? 3; bv = to[b.urgency || 'HOLD'] ?? 3 }
+        else if (sortCol === 'days_left') { av = a.days_left ?? 999; bv = b.days_left ?? 999 }
+        else if (sortCol === 'customer') { av = a.customer_name.toLowerCase(); bv = b.customer_name.toLowerCase() }
+        else if (sortCol === 'sku') { av = a.sku.toLowerCase(); bv = b.sku.toLowerCase() }
+        else if (sortCol === 'courier') { av = a.courier; bv = b.courier }
+        else if (sortCol === 'promise') { av = a.promise_date || ''; bv = b.promise_date || '' }
+        else if (sortCol === 'transit') { av = a.transit_days; bv = b.transit_days }
+        else if (sortCol === 'pincode') { av = a.pincode; bv = b.pincode }
+        else { av = 0; bv = 0 }
+        if (av < bv) return sortDir === 'asc' ? -1 : 1
+        if (av > bv) return sortDir === 'asc' ? 1 : -1
+        return 0
+      })
+    } else {
+      list.sort((a, b) => {
+        if (a.is_priority !== b.is_priority) return a.is_priority ? -1 : 1
+        return (to[a.urgency || 'HOLD'] ?? 3) - (to[b.urgency || 'HOLD'] ?? 3) || (a.days_left ?? 99) - (b.days_left ?? 99)
+      })
+    }
     return list
-  }, [activeOrders, activeFilter])
+  }, [activeOrders, activeFilter, daysFilter, sortCol, sortDir])
+
+  // Unique display days left values for filter popover
+  const uniqueDaysLeft = useMemo(() => {
+    const vals = new Set<number>()
+    activeOrders.forEach(o => { const d = displayDaysLeft(o.days_left); if (d !== null) vals.add(d) })
+    return Array.from(vals).sort((a, b) => a - b)
+  }, [activeOrders])
+
+  const handleColSort = (col: string) => {
+    if (sortCol === col) {
+      if (sortDir === 'asc') setSortDir('desc')
+      else { setSortCol(null); setSortDir('asc') }
+    } else {
+      setSortCol(col)
+      setSortDir('asc')
+    }
+  }
 
   const picklist = useMemo(() => {
     const dt = orders.filter(o => o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched)
@@ -388,7 +434,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => setShowDaysPopover(false)}>
 
       {/* ── Modals ── */}
 
@@ -803,12 +849,118 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                   <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-                        <th style={{ padding: '9px 12px' }}>
+                        <th style={{ padding: '9px 12px', width: 36 }}>
                           <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: 14, height: 14, accentColor: 'var(--accent)' }} />
                         </th>
-                        {['', 'Urgency', 'Order ID', 'Customer', 'SKU', 'Cour.', 'Pincode · City', 'ODA', 'Transit', 'Promise', 'Days Left', 'Decision', ''].map((h, i) => (
-                          <th key={i} style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
+                        {/* Priority */}
+                        <th style={{ padding: '9px 12px', width: 32 }} />
+                        {/* Sortable headers */}
+                        {([
+                          { label: 'Urgency', col: 'urgency' },
+                          { label: 'Order ID', col: null },
+                          { label: 'Customer', col: 'customer' },
+                          { label: 'SKU', col: 'sku' },
+                          { label: 'Cour.', col: 'courier' },
+                          { label: 'Pincode · City', col: 'pincode' },
+                          { label: 'ODA', col: null },
+                          { label: 'Transit', col: 'transit' },
+                          { label: 'Promise', col: 'promise' },
+                        ] as { label: string; col: string | null }[]).map(({ label, col }) => (
+                          <th key={label}
+                            onClick={() => col && handleColSort(col)}
+                            style={{
+                              padding: '9px 12px', textAlign: 'left' as const,
+                              color: sortCol === col ? 'var(--accent)' : 'var(--text3)',
+                              fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500,
+                              whiteSpace: 'nowrap' as const,
+                              cursor: col ? 'pointer' : 'default',
+                              userSelect: 'none' as const,
+                            }}>
+                            {label}
+                            {col && sortCol === col && (
+                              <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
+                            )}
+                            {col && sortCol !== col && (
+                              <span style={{ marginLeft: 4, opacity: 0.3 }}>↕</span>
+                            )}
+                          </th>
                         ))}
+                        {/* Days Left — with filter popover */}
+                        <th style={{ padding: '9px 12px', textAlign: 'left' as const, whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span
+                              onClick={() => handleColSort('days_left')}
+                              style={{ color: sortCol === 'days_left' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
+                            >
+                              Days Left
+                              {sortCol === 'days_left' ? <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 4, opacity: 0.3 }}>↕</span>}
+                            </span>
+                            {/* Filter button */}
+                            <button
+                              onClick={e => { e.stopPropagation(); setShowDaysPopover(v => !v) }}
+                              style={{
+                                background: daysFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                border: daysFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                color: daysFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                              }}
+                            >
+                              {daysFilter.size > 0 ? `${daysFilter.size} ▾` : '▾'}
+                            </button>
+                            {daysFilter.size > 0 && (
+                              <button onClick={() => setDaysFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>
+                            )}
+                          </div>
+                          {/* Popover */}
+                          {showDaysPopover && (
+                            <div
+                              style={{
+                                position: 'absolute' as const, top: '100%', left: 0, zIndex: 200,
+                                background: 'var(--surface)', border: '1px solid var(--border)',
+                                borderRadius: 8, padding: 12, minWidth: 160,
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                              }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DAYS LEFT</span>
+                                <button onClick={() => { setDaysFilter(new Set()); setShowDaysPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 220, overflowY: 'auto' }}>
+                                {uniqueDaysLeft.map(d => {
+                                  const isSelected = daysFilter.has(d)
+                                  const color = d <= 0 ? 'var(--critical)' : d <= 2 ? 'var(--today)' : d === 3 ? 'var(--plan)' : 'var(--hold)'
+                                  return (
+                                    <button key={d} onClick={() => {
+                                      setDaysFilter(prev => {
+                                        const n = new Set(prev)
+                                        n.has(d) ? n.delete(d) : n.add(d)
+                                        return n
+                                      })
+                                    }} style={{
+                                      display: 'flex', alignItems: 'center', gap: 8,
+                                      padding: '5px 8px', borderRadius: 5, border: 'none',
+                                      background: isSelected ? 'var(--accent-bg)' : 'transparent',
+                                      cursor: 'pointer', textAlign: 'left' as const, width: '100%',
+                                    }}>
+                                      <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                        {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+                                      </span>
+                                      <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color }}>{d}</span>
+                                      <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 'auto' }}>
+                                        {activeOrders.filter(o => displayDaysLeft(o.days_left) === d).length}
+                                      </span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              <button onClick={() => setShowDaysPopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                            </div>
+                          )}
+                        </th>
+                        <th style={{ padding: '9px 12px', color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Decision</th>
+                        <th style={{ padding: '9px 12px', width: 32 }} />
                       </tr>
                     </thead>
                     <tbody>
@@ -816,6 +968,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                         <OrderRow key={order.id} order={order}
                           selected={selectedIds.has(order.id)}
                           updating={updatingIds.has(order.id)}
+                          daysLeftDisplay={displayDaysLeft(order.days_left)}
                           onSelect={toggleSelect}
                           onDecision={updateDecision}
                           onPriority={togglePriority}
@@ -1177,8 +1330,9 @@ export default function DashboardClient({ user, access, initialSessions }: Props
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onPriority, onCancel }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onPriority, onCancel, daysLeftDisplay }: {
   order: DBOrder; selected: boolean; updating: boolean
+  daysLeftDisplay: number | null
   onSelect: (id: string) => void
   onDecision: (id: string, d: PlanDecision) => void
   onPriority: (id: string, current: boolean) => void
@@ -1217,7 +1371,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onPriority,
       <td style={{ padding: '8px 12px' }}>{order.oda === 'ODA' && <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--today)', background: 'var(--today-bg)', padding: '1px 5px', borderRadius: 3, border: '1px solid #fed7aa' }}>ODA</span>}</td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
-      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{order.days_left !== null ? order.days_left : '—'}</span></td>
+      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{daysLeftDisplay !== null ? daysLeftDisplay : '—'}</span></td>
       <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', gap: 4 }}>
           {([
