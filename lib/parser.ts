@@ -136,7 +136,7 @@ export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
       customer_name: get('name'),
       qty: parseInt(get('qty')) || 1,
       courier,
-      tracking_number: get('tracking') || null,
+      tracking_number: (courier === 'Delhivery' ? get('master') : get('tracking')) || null,
       sku: skuRaw,
       raw_status: rawStatus,
       promise_date: promiseDateStr,
