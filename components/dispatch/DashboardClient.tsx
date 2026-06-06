@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { parseOrders } from '@/lib/parser'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason } from '@/types'
@@ -73,6 +73,9 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
   const [showDaysPopover, setShowDaysPopover] = useState(false)
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 })
+  const [courierFilter, setCourierFilter] = useState<Set<string>>(new Set())
+  const [showCourierPopover, setShowCourierPopover] = useState(false)
+  const [courierPopoverPos, setCourierPopoverPos] = useState({ top: 0, left: 0 })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDecision, setBulkDecision] = useState<PlanDecision | ''>('')
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
@@ -117,19 +120,40 @@ export default function DashboardClient({ user, access, initialSessions }: Props
     setSelectedIds(new Set())
   }, [supabase])
 
+  // Auto-load today's session on mount if not already loaded
+
+  // Auto-ensure today's session exists on mount
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0]
+    if (!activeSession || activeSession.session_date !== today) {
+      ensureTodaySession()
+    } else {
+      loadOrders(activeSession.id)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const selectSession = useCallback((s: DispatchSession) => {
     setActiveSession(s)
     loadOrders(s.id)
     setTab('plan')
   }, [loadOrders])
 
-  const createSession = async () => {
+  const ensureTodaySession = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0]
+    // Check if today's session already exists in state
+    const existing = sessions.find(s => s.session_date === today)
+    if (existing) {
+      setActiveSession(existing)
+      await loadOrders(existing.id)
+      return
+    }
+    // Create today's session automatically
     const label = `Dispatch ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
     const { data, error } = await supabase.from('dispatch_sessions')
       .insert({ created_by: user.id, session_date: today, label }).select().single()
     if (!error && data) {
-      // Pull unfulfillable orders from previous sessions that have a target date of today or earlier
+      // Pull unfulfillable orders from previous sessions due today or earlier
       const { data: carryOver } = await supabase.from('dispatch_orders')
         .select('*')
         .eq('plan_decision', 'unfulfillable')
@@ -154,10 +178,9 @@ export default function DashboardClient({ user, access, initialSessions }: Props
       setSessions(prev => [data, ...prev])
       setActiveSession(data)
       setOrders([])
-      setTab('import')
       setImportResult(null)
     }
-  }
+  }, [sessions, supabase, user.id, loadOrders])
 
   // ── Import ──
   const handleImport = async () => {
@@ -393,6 +416,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
     else if (activeFilter !== 'ALL') list = list.filter(o => o.urgency === activeFilter)
     // Days left filter (applied to display value = raw - 1)
     if (daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
+    if (courierFilter.size > 0) list = list.filter(o => courierFilter.has(o.courier))
     // Sort
     const to: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
     if (sortCol) {
@@ -418,7 +442,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
       })
     }
     return list
-  }, [activeOrders, activeFilter, daysFilter, sortCol, sortDir])
+  }, [activeOrders, activeFilter, daysFilter, courierFilter, sortCol, sortDir])
 
   // Unique display days left values for filter popover
   const uniqueDaysLeft = useMemo(() => {
@@ -485,7 +509,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => setShowDaysPopover(false)}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -775,20 +799,24 @@ export default function DashboardClient({ user, access, initialSessions }: Props
         {tab === 'import' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <h1 style={{ fontSize: 18, fontWeight: 600 }}>{activeSession ? activeSession.label : 'No active session'}</h1>
-              <button onClick={createSession} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 7, background: 'var(--accent)', border: 'none', color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                <Plus size={14} /> New Session
-              </button>
+              <h1 style={{ fontSize: 18, fontWeight: 600 }}>
+                {activeSession ? activeSession.label : 'Loading…'}
+              </h1>
+              {activeSession && orders.length > 0 && (
+                <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                  {orders.filter(o => !o.is_cancelled && !o.is_dispatched).length} active orders
+                </span>
+              )}
               {sessions.length > 1 && (
-                <select onChange={e => { const s = sessions.find(x => x.id === e.target.value); if (s) selectSession(s) }} value={activeSession?.id || ''} style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 7, fontSize: 13 }}>
+                <select onChange={e => { const s = sessions.find(x => x.id === e.target.value); if (s) selectSession(s) }} value={activeSession?.id || ''} style={{ marginLeft: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 7, fontSize: 13 }}>
                   {sessions.map(s => <option key={s.id} value={s.id}>{s.label} · {s.total_orders} orders</option>)}
                 </select>
               )}
             </div>
             {!activeSession ? (
               <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text2)' }}>
-                <Package size={32} style={{ margin: '0 auto 12px', color: 'var(--text3)' }} />
-                <p>Create a new session to start planning today's dispatches.</p>
+                <RefreshCw size={24} style={{ margin: '0 auto 12px', color: 'var(--text3)' }} />
+                <p>Setting up today's session…</p>
               </div>
             ) : (
               <>
@@ -824,7 +852,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                   )}
                   {orders.length > 0 && (
                     <button onClick={() => setTab('plan')} style={{ marginLeft: 'auto', padding: '9px 18px', borderRadius: 7, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
-                      View Plan <ArrowRight size={14} />
+                      Go to Plan <ArrowRight size={14} />
                     </button>
                   )}
                 </div>
@@ -923,12 +951,96 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                           { label: 'Order ID', col: null },
                           { label: 'Customer', col: 'customer' },
                           { label: 'SKU', col: 'sku' },
-                          { label: 'Cour.', col: 'courier' },
+                          { label: 'COURIER_SPECIAL', col: 'courier' },
                           { label: 'Pincode · City', col: 'pincode' },
                           { label: 'ODA', col: null },
                           { label: 'Transit', col: 'transit' },
                           { label: 'Promise', col: 'promise' },
-                        ] as { label: string; col: string | null }[]).map(({ label, col }) => (
+                        ] as { label: string; col: string | null }[]).map(({ label, col }) => {
+                          // Special courier header with filter
+                          if (label === 'COURIER_SPECIAL') return (
+                            <th key="courier" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span
+                                  onClick={() => handleColSort('courier')}
+                                  style={{ color: sortCol === 'courier' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
+                                >
+                                  Cour.{sortCol === 'courier' ? <span style={{ marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
+                                </span>
+                                <button
+                                  onClick={e => {
+                                    e.stopPropagation()
+                                    const rect = e.currentTarget.getBoundingClientRect()
+                                    setCourierPopoverPos({ top: rect.bottom + 6, left: rect.left })
+                                    setShowCourierPopover(v => !v)
+                                    setShowDaysPopover(false)
+                                  }}
+                                  style={{
+                                    background: courierFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                    border: courierFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                    borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                    color: courierFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                    fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                  }}
+                                >
+                                  {courierFilter.size > 0 ? `${courierFilter.size} ▾` : '▾'}
+                                </button>
+                                {courierFilter.size > 0 && (
+                                  <button onClick={() => setCourierFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>
+                                )}
+                              </div>
+                              {/* Courier popover */}
+                              {showCourierPopover && (
+                                <div
+                                  style={{
+                                    position: 'fixed' as const,
+                                    top: courierPopoverPos.top,
+                                    left: courierPopoverPos.left,
+                                    zIndex: 500,
+                                    background: 'var(--surface)', border: '1px solid var(--border)',
+                                    borderRadius: 8, padding: 12, minWidth: 160,
+                                    boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                  }}
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>COURIER</span>
+                                    <button onClick={() => { setCourierFilter(new Set()); setShowCourierPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                                    {(['Bluedart', 'Delhivery'] as const).map(courier => {
+                                      const isSelected = courierFilter.has(courier)
+                                      const count = activeOrders.filter(o => o.courier === courier).length
+                                      const color = courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
+                                      return (
+                                        <button key={courier} onClick={() => {
+                                          setCourierFilter(prev => {
+                                            const n = new Set(prev)
+                                            n.has(courier) ? n.delete(courier) : n.add(courier)
+                                            return n
+                                          })
+                                        }} style={{
+                                          display: 'flex', alignItems: 'center', gap: 8,
+                                          padding: '6px 8px', borderRadius: 5, border: 'none',
+                                          background: isSelected ? 'var(--accent-bg)' : 'transparent',
+                                          cursor: 'pointer', textAlign: 'left' as const, width: '100%',
+                                        }}>
+                                          <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                            {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+                                          </span>
+                                          <span style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 600, color }}>{courier === 'Bluedart' ? 'BD' : 'DL'}</span>
+                                          <span style={{ fontSize: 11, color: 'var(--text)', flex: 1 }}>{courier}</span>
+                                          <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                  <button onClick={() => setShowCourierPopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                                </div>
+                              )}
+                            </th>
+                          )
+                          return (
                           <th key={label}
                             onClick={() => col && handleColSort(col)}
                             style={{
@@ -947,7 +1059,8 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                               <span style={{ marginLeft: 4, opacity: 0.3 }}>↕</span>
                             )}
                           </th>
-                        ))}
+                          )
+                        })}
                         {/* Days Left — with filter popover */}
                         <th style={{ padding: '9px 12px', textAlign: 'left' as const, whiteSpace: 'nowrap' as const }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
