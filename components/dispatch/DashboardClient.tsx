@@ -4,12 +4,13 @@ import { createClient } from '@/lib/supabase/client'
 import { parseOrders } from '@/lib/parser'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason } from '@/types'
 import UsersTab from './UsersTab'
+import OrderHistoryPanel from './OrderHistoryPanel'
 import { User } from '@supabase/supabase-js'
 import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban
+  Ban, History
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'users'
@@ -82,6 +83,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // Manual cancel modal
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
+  // History panel
+  const [historyOrder, setHistoryOrder] = useState<DBOrder | null>(null)
 
   // Unfulfillable from picklist
   const [unfulfillableSku, setUnfulfillableSku] = useState<string | null>(null)
@@ -150,6 +153,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }))
         await supabase.from('dispatch_orders').insert(rows)
         await loadOrders()
+        // Log import events
+        for (const o of newOrders) {
+          logEvent(o.order_id, 'import', `Imported · ${o.courier} · ${o.sku}`)
+        }
       }
     }
     setImportResult({ added: newOrders.length, skipped: allParsed.length - newOrders.length })
@@ -169,6 +176,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (decision === 'scheduled') update.scheduled_date = scheduledDate || null
     if (decision === 'hold' || decision === 'undecided' || decision === 'unfulfillable') update.scheduled_date = null
     await supabase.from('dispatch_orders').update(update).eq('id', orderId)
+    const order = orders.find(o => o.id === orderId)
+    if (order) {
+      if (decision === 'hold') logEvent(order.order_id, 'hold', 'Marked On Hold')
+      if (decision === 'unfulfillable') logEvent(order.order_id, 'unfulfillable', 'Marked Unfulfillable')
+      if (decision === 'undecided') logEvent(order.order_id, 'hold', 'Decision cleared')
+    }
     setOrders(prev => prev.map(o => o.id === orderId ? {
       ...o, plan_decision: decision,
       scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
@@ -178,11 +191,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // ── Schedule with date (called from row date picker) ──
   const scheduleOrder = async (orderId: string, date: string) => {
+    const order = orders.find(o => o.id === orderId)
     if (!date) {
       await updateDecision(orderId, 'undecided')
       return
     }
+    const wasScheduled = order?.plan_decision === 'scheduled' && order?.scheduled_date
+    const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
     await updateDecision(orderId, 'scheduled', date)
+    if (order) {
+      const eventType = wasScheduled ? 'rescheduled' : 'scheduled'
+      const title = wasScheduled ? `Rescheduled to ${dateLabel}` : `Scheduled for ${dateLabel}`
+      logEvent(order.order_id, eventType, title)
+    }
   }
 
   // ── Bulk decision ──
@@ -220,10 +241,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const handleManualCancel = async () => {
     if (!cancelOrderId) return
     const now = new Date().toISOString()
+    const order = orders.find(o => o.id === cancelOrderId)
     await supabase.from('dispatch_orders').update({
       is_cancelled: true, manual_cancelled: true, manual_cancelled_at: now,
       plan_decision: 'undecided', updated_at: now,
     }).eq('id', cancelOrderId)
+    if (order) logEvent(order.order_id, 'cancelled', 'Order cancelled manually')
     setOrders(prev => prev.map(o => o.id === cancelOrderId ? { ...o, is_cancelled: true, manual_cancelled: true } : o))
     setCancelOrderId(null)
   }
@@ -342,8 +365,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         is_dispatched: true,
         dispatched_at: now,
         tracking_number: m.awb,
-        sku: m.sku, // store Shypassist SKU
+        sku: m.sku,
       }).eq('id', m.orderId)
+      logEvent(m.orderId, 'dispatched', `Dispatched · AWB ${m.awb}`)
     }
     await loadOrders()
     setShowEodConfirm(false)
@@ -351,6 +375,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   const handleSignOut = async () => { await supabase.auth.signOut(); window.location.href = '/login' }
+
+  // ── Log event ──
+  const logEvent = async (orderId: string, eventType: string, title: string, note?: string) => {
+    await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId, event_type: eventType, title, note }),
+    })
+  }
 
   // ── Computed ──
   const activeOrders = useMemo(() => orders.filter(o => !o.is_cancelled && !o.is_dispatched), [orders])
@@ -1114,6 +1147,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           onSchedule={scheduleOrder}
                           onPriority={togglePriority}
                           onCancel={id => setCancelOrderId(id)}
+                          onHistory={order => setHistoryOrder(order)}
                         />
                       ))}
                     </tbody>
@@ -1530,12 +1564,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           <UsersTab ownerEmail={user.email!} />
         )}
       </main>
+
+      {/* History panel */}
+      {historyOrder && (
+        <OrderHistoryPanel
+          order={historyOrder}
+          currentUserEmail={user.email || ''}
+          onClose={() => setHistoryOrder(null)}
+        />
+      )}
     </div>
   )
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, daysLeftDisplay }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, daysLeftDisplay }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   onSelect: (id: string) => void
@@ -1543,6 +1586,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onSchedule: (id: string, date: string) => void
   onPriority: (id: string, current: boolean) => void
   onCancel: (id: string) => void
+  onHistory: (order: DBOrder) => void
 }) {
   const uc = {
     CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
@@ -1631,12 +1675,20 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         </div>
       </td>
       <td style={{ padding: '8px 12px' }}>
-        <button onClick={() => onCancel(order.id)} title="Cancel order" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', borderRadius: 4, transition: 'color 0.15s' }}
-          onMouseEnter={e => e.currentTarget.style.color = 'var(--critical)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
-        >
-          <Ban size={13} />
-        </button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => onCancel(order.id)} title="Cancel order" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', borderRadius: 4, transition: 'color 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--critical)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
+          >
+            <Ban size={13} />
+          </button>
+          <button onClick={() => onHistory(order)} title="View history" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', borderRadius: 4, transition: 'color 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
+          >
+            <History size={13} />
+          </button>
+        </div>
       </td>
     </tr>
   )
