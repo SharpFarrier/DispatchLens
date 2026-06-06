@@ -108,7 +108,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // EOD
   const [shypassistText, setShypassistText] = useState('')
   const [eodMatchResult, setEodMatchResult] = useState<{
-    matched: Array<{ orderId: string; sku: string; awb: string; customerName: string }>
+    matched: Array<{ orderId: string; platformOrderId: string; sku: string; awb: string; customerName: string }>
     unmatched: Array<{ orderId: string; sku: string; customerName: string; storedAwb?: string | null }>
   } | null>(null)
   const [showEodConfirm, setShowEodConfirm] = useState(false)
@@ -396,7 +396,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       !o.is_dispatched
     )
 
-    const matched: Array<{ orderId: string; sku: string; awb: string; customerName: string }> = []
+    const matched: Array<{ orderId: string; platformOrderId: string; sku: string; awb: string; customerName: string }> = []
     const unmatched: Array<{ orderId: string; sku: string; customerName: string; storedAwb: string | null }> = []
 
     toDispatch.forEach(order => {
@@ -404,7 +404,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const storedAwb = order.tracking_number?.trim().replace(/\.0+$/, '') || null
       if (storedAwb && shypassistAwbs.has(storedAwb)) {
         const shypassistSku = shypassistAwbs.get(storedAwb) || order.sku
-        matched.push({ orderId: order.id, sku: shypassistSku, awb: storedAwb, customerName: order.customer_name })
+        matched.push({ orderId: order.id, platformOrderId: order.order_id, sku: shypassistSku, awb: storedAwb, customerName: order.customer_name })
       } else {
         unmatched.push({ orderId: order.id, sku: order.sku, customerName: order.customer_name, storedAwb })
       }
@@ -424,7 +424,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         tracking_number: m.awb,
         sku: m.sku,
       }).eq('id', m.orderId)
-      logEvent(m.orderId, 'dispatched', `Dispatched · AWB ${m.awb}`)
+      logEvent(m.platformOrderId, 'dispatched', `Dispatched · AWB ${m.awb}`)
     }
     await loadOrders()
     setShowEodConfirm(false)
