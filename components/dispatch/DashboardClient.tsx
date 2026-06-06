@@ -120,7 +120,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Auto-load on mount if initialOrders is empty
 
   useEffect(() => {
-    if (initialOrders.length === 0) loadOrders()
+    // Always load fresh from DB to ensure all columns (incl. scheduled_date) are present
+    loadOrders()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -889,6 +890,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           { label: 'COURIER_SPECIAL', col: 'courier' },
                           { label: 'Pincode · City', col: 'pincode' },
                           { label: 'ODA', col: null },
+                          { label: 'AWB', col: null },
                           { label: 'Transit', col: 'transit' },
                           { label: 'Promise', col: 'promise' },
                         ] as { label: string; col: string | null }[]).map(({ label, col }) => {
@@ -1554,6 +1556,12 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
       </td>
       <td style={{ padding: '8px 12px' }}>{order.oda === 'ODA' && <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--today)', background: 'var(--today-bg)', padding: '1px 5px', borderRadius: 3, border: '1px solid #fed7aa' }}>ODA</span>}</td>
+      <td style={{ padding: '8px 12px' }}>
+        {order.tracking_number
+          ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0' }}>{order.tracking_number}</span>
+          : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
+        }
+      </td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{daysLeftDisplay !== null ? daysLeftDisplay : '—'}</span></td>
