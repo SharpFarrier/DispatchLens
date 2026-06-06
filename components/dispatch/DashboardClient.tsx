@@ -10,7 +10,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History
+  Ban, History, Search
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'users'
@@ -85,6 +85,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
   // History panel
   const [historyOrder, setHistoryOrder] = useState<DBOrder | null>(null)
+  // Global search
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
 
   // Unfulfillable from picklist
   const [unfulfillableSku, setUnfulfillableSku] = useState<string | null>(null)
@@ -112,6 +115,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
   // ── Data ──
+  // ── Log event ──
+  const logEvent = async (orderId: string, eventType: string, title: string, note?: string) => {
+    await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId, event_type: eventType, title, note }),
+    })
+  }
+
   const loadOrders = useCallback(async () => {
     setLoadingOrders(true)
     const { data } = await supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false })
@@ -224,6 +236,18 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       ...o, plan_decision: bulkDecision as PlanDecision,
       scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
     } : o))
+    // Log bulk events
+    const bulkOrders = orders.filter(o => selectedIds.has(o.id))
+    for (const o of bulkOrders) {
+      if (bulkDecision === 'scheduled') {
+        const dateLabel = bulkScheduleDate ? new Date(bulkScheduleDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''
+        logEvent(o.order_id, 'scheduled', `Scheduled for ${dateLabel} (bulk)`)
+      } else if (bulkDecision === 'hold') {
+        logEvent(o.order_id, 'hold', 'Marked On Hold (bulk)')
+      } else if (bulkDecision === 'unfulfillable') {
+        logEvent(o.order_id, 'unfulfillable', 'Marked Unfulfillable (bulk)')
+      }
+    }
     setUpdatingIds(new Set())
     setSelectedIds(new Set())
     setBulkDecision('')
@@ -289,6 +313,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       } : o))
     }
 
+    // Log events for unfulfillable orders
+    if (allocationPreview && allocationPreview.unfulfillable.length > 0) {
+      for (const o of allocationPreview.unfulfillable) {
+        logEvent(o.order_id, 'unfulfillable', `Marked Unfulfillable · ${unfulfillableReason}`, unfulfillableNote.trim() || undefined)
+      }
+    }
     setUnfulfillableSku(null)
     setUnfulfillableReason('Not ready')
     setUnfulfillableNote('')
@@ -302,16 +332,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (!date) return
     setSavingReview(orderId)
     await supabase.from('dispatch_orders').update({ target_dispatch_date: date, updated_at: new Date().toISOString() }).eq('id', orderId)
+    const order = orders.find(o => o.id === orderId)
+    if (order) {
+      const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      logEvent(order.order_id, 'target_set', `Target dispatch date set to ${dateLabel}`)
+    }
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, target_dispatch_date: date } : o))
     setSavingReview(null)
-    // Reload to pick up any auto-carried orders
     await loadOrders()
   }
 
   // ── Review: cancel from review ──
   const cancelFromReview = async (orderId: string) => {
     const now = new Date().toISOString()
+    const order = orders.find(o => o.id === orderId)
     await supabase.from('dispatch_orders').update({ is_cancelled: true, manual_cancelled: true, manual_cancelled_at: now, updated_at: now }).eq('id', orderId)
+    if (order) logEvent(order.order_id, 'cancelled', 'Order cancelled from Review tab')
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, is_cancelled: true, manual_cancelled: true } : o))
   }
 
@@ -376,14 +412,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const handleSignOut = async () => { await supabase.auth.signOut(); window.location.href = '/login' }
 
-  // ── Log event ──
-  const logEvent = async (orderId: string, eventType: string, title: string, note?: string) => {
-    await fetch('/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: orderId, event_type: eventType, title, note }),
-    })
-  }
+
+
+  // ── Search results ──
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim() || searchQuery.length < 3) return []
+    const q = searchQuery.toLowerCase().trim()
+    return orders.filter(o =>
+      o.order_id.toLowerCase().includes(q) ||
+      o.customer_name.toLowerCase().includes(q) ||
+      o.sku.toLowerCase().includes(q) ||
+      (o.tracking_number && o.tracking_number.toLowerCase().includes(q))
+    ).slice(0, 8)
+  }, [orders, searchQuery])
 
   // ── Computed ──
   const activeOrders = useMemo(() => orders.filter(o => !o.is_cancelled && !o.is_dispatched), [orders])
@@ -785,7 +826,96 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             </button>
           ))}
         </nav>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Global search */}
+          <div style={{ position: 'relative' as const }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'var(--bg2)', border: '1px solid var(--border)',
+              borderRadius: 7, padding: '5px 12px',
+              transition: 'width 0.2s, border-color 0.15s',
+              width: showSearch ? 240 : 160,
+            }}>
+              <Search size={13} style={{ color: 'var(--text3)', flexShrink: 0 }} />
+              <input
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setShowSearch(true) }}
+                onFocus={() => setShowSearch(true)}
+                onBlur={() => setTimeout(() => setShowSearch(false), 200)}
+                placeholder="Search orders…"
+                style={{
+                  border: 'none', background: 'transparent',
+                  color: 'var(--text)', fontSize: 13, outline: 'none',
+                  width: '100%', fontFamily: 'DM Sans',
+                }}
+              />
+              {searchQuery && (
+                <button onClick={() => { setSearchQuery(''); setShowSearch(false) }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0, lineHeight: 1 }}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            {/* Search results dropdown */}
+            {showSearch && searchResults.length > 0 && (
+              <div style={{
+                position: 'fixed' as const,
+                top: 56, right: 156,
+                width: 360, zIndex: 300,
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                overflow: 'hidden',
+              }}>
+                <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                  {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
+                </div>
+                {searchResults.map(order => {
+                  const uc = { CRITICAL: 'var(--critical)', TODAY: 'var(--today)', PLAN: 'var(--plan)', HOLD: 'var(--hold)' }[order.urgency as string] || 'var(--text3)'
+                  return (
+                    <button key={order.id}
+                      onMouseDown={() => { setHistoryOrder(order); setSearchQuery(''); setShowSearch(false) }}
+                      style={{
+                        width: '100%', padding: '10px 14px',
+                        background: 'none', border: 'none', borderBottom: '1px solid var(--border)',
+                        cursor: 'pointer', textAlign: 'left' as const,
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.order_id}</span>
+                          {order.urgency && <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600, color: uc, flexShrink: 0 }}>{order.urgency}</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>{order.customer_name}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{order.sku}</span>
+                        </div>
+                      </div>
+                      <div style={{ flexShrink: 0, fontSize: 10, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                        {order.is_dispatched ? '✓ dispatched' : order.is_cancelled ? 'cancelled' : order.plan_decision === 'scheduled' ? `📅 ${order.scheduled_date ? new Date(order.scheduled_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}` : order.plan_decision}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            {showSearch && searchQuery.length >= 3 && searchResults.length === 0 && (
+              <div style={{
+                position: 'fixed' as const, top: 56, right: 156,
+                width: 280, zIndex: 300,
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                padding: '16px', textAlign: 'center' as const,
+                color: 'var(--text3)', fontSize: 13,
+              }}>
+                No orders found
+              </div>
+            )}
+          </div>
+
           <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)' }}>
             {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
           </span>
