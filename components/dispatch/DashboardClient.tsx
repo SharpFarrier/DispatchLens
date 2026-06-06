@@ -297,13 +297,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const lines = shypassistText.trim().split('\n').filter(l => l.trim())
     if (lines.length < 2) return
 
-    // Build AWB set from Shypassist — normalise: strip .0 decimals, trim whitespace
-    const shypassistAwbs = new Set<string>()
+    // Build AWB -> SKU map from Shypassist — normalise: strip .0 decimals, trim whitespace
+    const shypassistAwbs = new Map<string, string>() // awb -> sku
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split('\t')
       if (cols.length < 3) continue
+      const sku = cols[0].trim()
       const awb = cols[2].trim().replace(/\.0+$/, '')
-      if (awb) shypassistAwbs.add(awb)
+      if (awb) shypassistAwbs.set(awb, sku)
     }
 
     // Today's scheduled orders
@@ -322,7 +323,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       // Normalise stored tracking number the same way
       const storedAwb = order.tracking_number?.trim().replace(/\.0+$/, '') || null
       if (storedAwb && shypassistAwbs.has(storedAwb)) {
-        matched.push({ orderId: order.id, sku: order.sku, awb: storedAwb, customerName: order.customer_name })
+        const shypassistSku = shypassistAwbs.get(storedAwb) || order.sku
+        matched.push({ orderId: order.id, sku: shypassistSku, awb: storedAwb, customerName: order.customer_name })
       } else {
         unmatched.push({ orderId: order.id, sku: order.sku, customerName: order.customer_name, storedAwb })
       }
