@@ -296,26 +296,38 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const parseShypassist = () => {
     const lines = shypassistText.trim().split('\n').filter(l => l.trim())
     if (lines.length < 2) return
-    const skuAwbs: Record<string, string[]> = {}
+
+    // Build AWB set from Shypassist — normalise: strip .0 decimals, trim whitespace
+    const shypassistAwbs = new Set<string>()
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split('\t')
       if (cols.length < 3) continue
-      const sku = cols[0].trim(); const awb = cols[2].trim()
-      if (!sku || !awb) continue
-      if (!skuAwbs[sku]) skuAwbs[sku] = []
-      skuAwbs[sku].push(awb)
+      const awb = cols[2].trim().replace(/\.0+$/, '')
+      if (awb) shypassistAwbs.add(awb)
     }
-    const toDispatch = orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched)
-    const ordersBySku: Record<string, DBOrder[]> = {}
-    toDispatch.forEach(o => { if (!ordersBySku[o.sku]) ordersBySku[o.sku] = []; ordersBySku[o.sku].push(o) })
+
+    // Today's scheduled orders
+    const eodToday = new Date().toISOString().split('T')[0]
+    const toDispatch = orders.filter(o =>
+      o.plan_decision === 'scheduled' &&
+      o.scheduled_date === eodToday &&
+      !o.is_cancelled &&
+      !o.is_dispatched
+    )
+
     const matched: Array<{ orderId: string; sku: string; awb: string; customerName: string }> = []
-    const unmatched: Array<{ orderId: string; sku: string; customerName: string }> = []
+    const unmatched: Array<{ orderId: string; sku: string; customerName: string; storedAwb: string | null }> = []
+
     toDispatch.forEach(order => {
-      const awbList = skuAwbs[order.sku]
-      const idx = ordersBySku[order.sku].indexOf(order)
-      if (awbList && awbList[idx]) matched.push({ orderId: order.id, sku: order.sku, awb: awbList[idx], customerName: order.customer_name })
-      else unmatched.push({ orderId: order.id, sku: order.sku, customerName: order.customer_name })
+      // Normalise stored tracking number the same way
+      const storedAwb = order.tracking_number?.trim().replace(/\.0+$/, '') || null
+      if (storedAwb && shypassistAwbs.has(storedAwb)) {
+        matched.push({ orderId: order.id, sku: order.sku, awb: storedAwb, customerName: order.customer_name })
+      } else {
+        unmatched.push({ orderId: order.id, sku: order.sku, customerName: order.customer_name, storedAwb })
+      }
     })
+
     setEodMatchResult({ matched, unmatched })
     setShowEodConfirm(true)
   }
