@@ -88,6 +88,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Global search
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
+  // Picklist print selection
+  const [selectedPrintDates, setSelectedPrintDates] = useState<Set<string>>(new Set())
 
   // Unfulfillable from picklist
   const [unfulfillableSku, setUnfulfillableSku] = useState<string | null>(null)
@@ -1544,14 +1546,38 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ PICKLIST ════ */}
         {tab === 'picklist' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' as const }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Picklist</h1>
               <span style={{ color: 'var(--text3)', fontSize: 14 }}>
                 {scheduledCount} orders scheduled · {picklist.reduce((s, g) => s + g.couriers.reduce((cs, c) => cs + c.items.reduce((is, i) => is + i.qty, 0), 0), 0)} pieces
               </span>
-              <button onClick={() => window.print()} style={{ marginLeft: 'auto', padding: '8px 16px', borderRadius: 7, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
-                <Printer size={14} /> Print
-              </button>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                {selectedPrintDates.size > 0 && (
+                  <button onClick={() => {
+                    // Store selected dates and trigger print
+                    window.dispatchEvent(new CustomEvent('printSelectedDates', { detail: Array.from(selectedPrintDates) }))
+                    window.print()
+                  }} style={{
+                    padding: '8px 16px', borderRadius: 7,
+                    background: 'var(--accent)', border: 'none',
+                    color: '#fff', fontSize: 13, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600,
+                  }}>
+                    <Printer size={14} /> Print Selected ({selectedPrintDates.size})
+                  </button>
+                )}
+                <button onClick={() => {
+                  setSelectedPrintDates(new Set())
+                  window.print()
+                }} style={{
+                  padding: '8px 16px', borderRadius: 7,
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  color: 'var(--text)', fontSize: 13, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500,
+                }}>
+                  <Printer size={14} /> Print All
+                </button>
+              </div>
             </div>
 
             {picklist.length === 0 ? (
@@ -1570,9 +1596,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 const totalPcs = courierGroups.reduce((s, c) => s + c.items.reduce((si, i) => si + i.qty, 0), 0)
 
                 return (
-                  <div key={date}>
+                  <div key={date} style={{ display: selectedPrintDates.size > 0 && !selectedPrintDates.has(date) ? 'none' : 'block' }}
+                    className={selectedPrintDates.size > 0 && !selectedPrintDates.has(date) ? 'print-hide' : ''}>
                     {/* Date header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }} className={`print-date-${date}`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPrintDates.has(date)}
+                        onChange={() => setSelectedPrintDates(prev => {
+                          const n = new Set(prev)
+                          n.has(date) ? n.delete(date) : n.add(date)
+                          return n
+                        })}
+                        style={{ width: 15, height: 15, cursor: 'pointer', accentColor: 'var(--accent)', flexShrink: 0 }}
+                        className="no-print"
+                      />
                       <div style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '6px 14px', borderRadius: 20,
@@ -1585,6 +1623,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </span>
                       </div>
                       <span style={{ color: 'var(--text3)', fontSize: 13 }}>{totalOrders} orders · {totalPcs} pcs</span>
+                      <button
+                        onClick={() => {
+                          setSelectedPrintDates(new Set([date]))
+                          setTimeout(() => window.print(), 100)
+                        }}
+                        className="no-print"
+                        style={{
+                          marginLeft: 'auto',
+                          padding: '5px 12px', borderRadius: 6,
+                          background: 'var(--surface)', border: '1px solid var(--border)',
+                          color: 'var(--text2)', fontSize: 12, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                        }}
+                      >
+                        <Printer size={12} /> Print this date
+                      </button>
                     </div>
 
                     {/* Courier tables side by side */}

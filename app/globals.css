@@ -72,4 +72,6 @@ tbody tr:hover { background: var(--surface2); }
   header, .no-print { display: none !important; }
   body { background: white; }
   .print-area { padding: 0; }
+  /* Hide date groups that are not selected for printing */
+  .print-hide { display: none !important; }
 }
