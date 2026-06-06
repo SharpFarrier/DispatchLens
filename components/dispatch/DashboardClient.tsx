@@ -18,7 +18,7 @@ type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'hol
 interface Props {
   user: User
   access: import('@/types').UserAccess
-  initialSessions: DispatchSession[]
+  initialOrders: DBOrder[]
 }
 
 const URGENCY_ORDER: UrgencyTier[] = ['CRITICAL', 'TODAY', 'PLAN', 'HOLD']
@@ -51,12 +51,10 @@ function ModalActions({ onCancel, onConfirm, confirmLabel, confirmColor = 'var(-
   )
 }
 
-export default function DashboardClient({ user, access, initialSessions }: Props) {
+export default function DashboardClient({ user, access, initialOrders }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<Tab>('import')
-  const [sessions, setSessions] = useState<DispatchSession[]>(initialSessions)
-  const [activeSession, setActiveSession] = useState<DispatchSession | null>(initialSessions[0] || null)
-  const [orders, setOrders] = useState<DBOrder[]>([])
+  const [orders, setOrders] = useState<DBOrder[]>(initialOrders)
   const [loadingOrders, setLoadingOrders] = useState(false)
 
   // Import
@@ -67,7 +65,6 @@ export default function DashboardClient({ user, access, initialSessions }: Props
 
   // Plan
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
-  const [schedulingId, setSchedulingId] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
@@ -112,91 +109,47 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
   // ── Data ──
-  const loadOrders = useCallback(async (sessionId: string) => {
+  const loadOrders = useCallback(async () => {
     setLoadingOrders(true)
-    const { data } = await supabase.from('dispatch_orders').select('*').eq('session_id', sessionId)
+    const { data } = await supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false })
     setOrders((data as DBOrder[]) || [])
     setLoadingOrders(false)
     setSelectedIds(new Set())
   }, [supabase])
 
-  // Auto-load today's session on mount if not already loaded
+  // Auto-load on mount if initialOrders is empty
 
-  // Auto-ensure today's session exists on mount
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0]
-    if (!activeSession || activeSession.session_date !== today) {
-      ensureTodaySession()
-    } else {
-      loadOrders(activeSession.id)
-    }
+    if (initialOrders.length === 0) loadOrders()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const selectSession = useCallback((s: DispatchSession) => {
-    setActiveSession(s)
-    loadOrders(s.id)
-    setTab('plan')
-  }, [loadOrders])
 
-  const ensureTodaySession = useCallback(async () => {
-    const today = new Date().toISOString().split('T')[0]
-    // Check if today's session already exists in state
-    const existing = sessions.find(s => s.session_date === today)
-    if (existing) {
-      setActiveSession(existing)
-      await loadOrders(existing.id)
-      return
-    }
-    // Create today's session automatically
-    const label = `Dispatch ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
-    const { data, error } = await supabase.from('dispatch_sessions')
-      .insert({ created_by: user.id, session_date: today, label }).select().single()
-    if (!error && data) {
-      // Pull unfulfillable orders from previous sessions due today or earlier
-      const { data: carryOver } = await supabase.from('dispatch_orders')
-        .select('*')
-        .eq('plan_decision', 'unfulfillable')
-        .eq('manual_cancelled', false)
-        .lte('target_dispatch_date', today)
-        .not('target_dispatch_date', 'is', null)
-      if (carryOver && carryOver.length > 0) {
-        const carried = carryOver.map((o: DBOrder) => ({
-          session_id: data.id,
-          order_id: o.order_id, order_date: o.order_date, dispatch_by_date: o.dispatch_by_date,
-          customer_name: o.customer_name, qty: o.qty, courier: o.courier,
-          tracking_number: o.tracking_number, sku: o.sku, raw_status: o.raw_status,
-          promise_date: o.promise_date, pincode: o.pincode, city: o.city, state: o.state,
-          oda: o.oda, transit_days: o.transit_days, days_left: o.days_left, urgency: o.urgency,
-          is_cancelled: false, is_dispatched: false, is_priority: false,
-          plan_decision: 'undecided' as PlanDecision,
-          unfulfillable_reason: o.unfulfillable_reason,
-          unfulfillable_note: o.unfulfillable_note,
-        }))
-        await supabase.from('dispatch_orders').insert(carried)
-      }
-      setSessions(prev => [data, ...prev])
-      setActiveSession(data)
-      setOrders([])
-      setImportResult(null)
-    }
-  }, [sessions, supabase, user.id, loadOrders])
 
   // ── Import ──
   const handleImport = async () => {
-    if (!activeSession || (!delhiveryText.trim() && !bluedartText.trim())) return
+    if (!delhiveryText.trim() && !bluedartText.trim()) return
     setImporting(true)
     setImportResult(null)
     const allParsed = [...parseOrders(delhiveryText, 'Delhivery'), ...parseOrders(bluedartText, 'Bluedart')]
     if (allParsed.length === 0) { setImporting(false); return }
-    const { data: existing } = await supabase.from('dispatch_orders').select('order_id').eq('session_id', activeSession.id)
-    const existingIds = new Set((existing || []).map((o: { order_id: string }) => o.order_id))
+    // Check for duplicates across all orders in the pool
+    const existingIds = new Set(orders.map(o => o.order_id))
     const newOrders = allParsed.filter(o => !existingIds.has(o.order_id))
     if (newOrders.length > 0) {
-      const rows = newOrders.map(o => ({ session_id: activeSession.id, ...o, plan_decision: o.is_dispatched ? 'scheduled' : 'undecided' }))
-      await supabase.from('dispatch_orders').insert(rows)
-      await loadOrders(activeSession.id)
-      await supabase.from('dispatch_sessions').update({ total_orders: (existing?.length || 0) + newOrders.length }).eq('id', activeSession.id)
+      // Use a placeholder session_id (create a batch record for tracking)
+      const batchLabel = `Import ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+      const { data: session } = await supabase.from('dispatch_sessions')
+        .insert({ created_by: user.id, session_date: new Date().toISOString().split('T')[0], label: batchLabel, total_orders: newOrders.length })
+        .select().single()
+      if (session) {
+        const rows = newOrders.map(o => ({
+          session_id: session.id, ...o,
+          plan_decision: o.is_dispatched ? 'scheduled' : 'undecided',
+        }))
+        await supabase.from('dispatch_orders').insert(rows)
+        await loadOrders()
+      }
     }
     setImportResult({ added: newOrders.length, skipped: allParsed.length - newOrders.length })
     setImporting(false)
@@ -327,6 +280,8 @@ export default function DashboardClient({ user, access, initialSessions }: Props
     await supabase.from('dispatch_orders').update({ target_dispatch_date: date, updated_at: new Date().toISOString() }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, target_dispatch_date: date } : o))
     setSavingReview(null)
+    // Reload to pick up any auto-carried orders
+    await loadOrders()
   }
 
   // ── Review: cancel from review ──
@@ -365,18 +320,12 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   }
 
   const confirmEOD = async () => {
-    if (!eodMatchResult || !activeSession) return
+    if (!eodMatchResult) return
     const now = new Date().toISOString()
     for (const m of eodMatchResult.matched) {
       await supabase.from('dispatch_orders').update({ is_dispatched: true, dispatched_at: now, tracking_number: m.awb }).eq('id', m.orderId)
     }
-    await supabase.from('dispatch_sessions').update({
-      is_eod_done: true,
-      dispatched_count: eodMatchResult.matched.length,
-      held_count: orders.filter(o => o.plan_decision === 'hold').length,
-      unfulfillable_count: orders.filter(o => o.plan_decision === 'unfulfillable').length,
-    }).eq('id', activeSession.id)
-    await loadOrders(activeSession.id)
+    await loadOrders()
     setShowEodConfirm(false)
     setEodDone(true)
   }
@@ -784,7 +733,9 @@ export default function DashboardClient({ user, access, initialSessions }: Props
           ))}
         </nav>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {activeSession && <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)' }}>{activeSession.label}</span>}
+          <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)' }}>
+            {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {user.user_metadata?.avatar_url && <img src={user.user_metadata.avatar_url} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />}
             <span style={{ fontSize: 13, color: 'var(--text2)' }}>{user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0]}</span>
@@ -799,27 +750,14 @@ export default function DashboardClient({ user, access, initialSessions }: Props
         {tab === 'import' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <h1 style={{ fontSize: 18, fontWeight: 600 }}>
-                {activeSession ? activeSession.label : 'Loading…'}
-              </h1>
-              {activeSession && orders.length > 0 && (
+              <h1 style={{ fontSize: 18, fontWeight: 600 }}>Import Orders</h1>
+              {orders.length > 0 && (
                 <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
-                  {orders.filter(o => !o.is_cancelled && !o.is_dispatched).length} active orders
+                  {orders.filter(o => !o.is_cancelled && !o.is_dispatched).length} active orders in pool
                 </span>
               )}
-              {sessions.length > 1 && (
-                <select onChange={e => { const s = sessions.find(x => x.id === e.target.value); if (s) selectSession(s) }} value={activeSession?.id || ''} style={{ marginLeft: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 12px', borderRadius: 7, fontSize: 13 }}>
-                  {sessions.map(s => <option key={s.id} value={s.id}>{s.label} · {s.total_orders} orders</option>)}
-                </select>
-              )}
             </div>
-            {!activeSession ? (
-              <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text2)' }}>
-                <RefreshCw size={24} style={{ margin: '0 auto 12px', color: 'var(--text3)' }} />
-                <p>Setting up today's session…</p>
-              </div>
-            ) : (
-              <>
+            <>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                   {[
                     { key: 'dl', label: 'DELHIVERY', color: '#7c3aed', text: delhiveryText, set: setDelhiveryText },
@@ -856,8 +794,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                     </button>
                   )}
                 </div>
-              </>
-            )}
+            </>
           </div>
         )}
 
@@ -902,11 +839,9 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                     </button>
                   )
                 })}
-                {activeSession && (
-                  <button onClick={() => loadOrders(activeSession.id)} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-                    <RefreshCw size={12} />
-                  </button>
-                )}
+                <button onClick={() => loadOrders()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                  <RefreshCw size={12} />
+                </button>
               </div>
             </div>
 
@@ -1492,8 +1427,8 @@ export default function DashboardClient({ user, access, initialSessions }: Props
         {/* ════ EOD ════ */}
         {tab === 'eod' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24, maxWidth: 700 }}>
-            <h1 style={{ fontSize: 18, fontWeight: 600 }}>End of Day — {activeSession?.label || 'No session'}</h1>
-            {eodDone || activeSession?.is_eod_done ? (
+            <h1 style={{ fontSize: 18, fontWeight: 600 }}>End of Day — {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</h1>
+            {eodDone ? (
               <div style={{ ...card, padding: 32, border: '1px solid #bbf7d0', background: 'var(--dispatched-bg)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--dispatched)', marginBottom: 20 }}>
                   <CheckCircle size={22} /><span style={{ fontWeight: 700, fontSize: 16 }}>EOD Complete</span>

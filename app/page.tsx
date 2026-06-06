@@ -38,19 +38,17 @@ export default async function Home() {
     return <AccessGate status={access?.status || 'pending'} email={email} user={user} />
   }
 
-  // Load today's sessions
-  const today = new Date().toISOString().split('T')[0]
-  const { data: sessions } = await supabase
-    .from('dispatch_sessions')
+  // Load ALL active orders across all sessions — no date boundary
+  const { data: orders } = await supabase
+    .from('dispatch_orders')
     .select('*')
-    .eq('session_date', today)
     .order('created_at', { ascending: false })
 
   return (
     <DashboardClient
       user={user}
       access={access}
-      initialSessions={sessions || []}
+      initialOrders={orders || []}
     />
   )
 }
