@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'users'
-type ActiveFilter = 'ALL' | UrgencyTier | 'dispatch_today' | 'hold' | 'unfulfillable' | 'undecided'
+type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'hold' | 'unfulfillable' | 'undecided'
 
 interface Props {
   user: User
@@ -67,10 +67,12 @@ export default function DashboardClient({ user, access, initialSessions }: Props
 
   // Plan
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
+  const [schedulingId, setSchedulingId] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
   const [showDaysPopover, setShowDaysPopover] = useState(false)
+  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDecision, setBulkDecision] = useState<PlanDecision | ''>('')
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
@@ -168,7 +170,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
     const existingIds = new Set((existing || []).map((o: { order_id: string }) => o.order_id))
     const newOrders = allParsed.filter(o => !existingIds.has(o.order_id))
     if (newOrders.length > 0) {
-      const rows = newOrders.map(o => ({ session_id: activeSession.id, ...o, plan_decision: o.is_dispatched ? 'dispatch_today' : 'undecided' }))
+      const rows = newOrders.map(o => ({ session_id: activeSession.id, ...o, plan_decision: o.is_dispatched ? 'scheduled' : 'undecided' }))
       await supabase.from('dispatch_orders').insert(rows)
       await loadOrders(activeSession.id)
       await supabase.from('dispatch_sessions').update({ total_orders: (existing?.length || 0) + newOrders.length }).eq('id', activeSession.id)
@@ -181,23 +183,53 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   }
 
   // ── Single decision ──
-  const updateDecision = async (orderId: string, decision: PlanDecision) => {
+  const updateDecision = async (orderId: string, decision: PlanDecision, scheduledDate?: string) => {
     setUpdatingIds(prev => new Set(prev).add(orderId))
-    await supabase.from('dispatch_orders').update({ plan_decision: decision, updated_at: new Date().toISOString() }).eq('id', orderId)
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, plan_decision: decision } : o))
+    const update: Record<string, string | null> = {
+      plan_decision: decision,
+      updated_at: new Date().toISOString(),
+    }
+    if (decision === 'scheduled') update.scheduled_date = scheduledDate || null
+    if (decision === 'hold' || decision === 'undecided' || decision === 'unfulfillable') update.scheduled_date = null
+    await supabase.from('dispatch_orders').update(update).eq('id', orderId)
+    setOrders(prev => prev.map(o => o.id === orderId ? {
+      ...o, plan_decision: decision,
+      scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
+    } : o))
     setUpdatingIds(prev => { const n = new Set(prev); n.delete(orderId); return n })
   }
 
+  // ── Schedule with date (called from row date picker) ──
+  const scheduleOrder = async (orderId: string, date: string) => {
+    if (!date) {
+      await updateDecision(orderId, 'undecided')
+      return
+    }
+    await updateDecision(orderId, 'scheduled', date)
+  }
+
   // ── Bulk decision ──
+  const [bulkScheduleDate, setBulkScheduleDate] = useState('')
+
   const handleBulkConfirm = async () => {
     if (!bulkDecision || selectedIds.size === 0) return
     const ids = Array.from(selectedIds)
     ids.forEach(id => setUpdatingIds(prev => new Set(prev).add(id)))
-    await supabase.from('dispatch_orders').update({ plan_decision: bulkDecision, updated_at: new Date().toISOString() }).in('id', ids)
-    setOrders(prev => prev.map(o => selectedIds.has(o.id) ? { ...o, plan_decision: bulkDecision as PlanDecision } : o))
+    const update: Record<string, string | null> = {
+      plan_decision: bulkDecision,
+      updated_at: new Date().toISOString(),
+    }
+    if (bulkDecision === 'scheduled') update.scheduled_date = bulkScheduleDate || new Date().toISOString().split('T')[0]
+    else update.scheduled_date = null
+    await supabase.from('dispatch_orders').update(update).in('id', ids)
+    setOrders(prev => prev.map(o => selectedIds.has(o.id) ? {
+      ...o, plan_decision: bulkDecision as PlanDecision,
+      scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
+    } : o))
     setUpdatingIds(new Set())
     setSelectedIds(new Set())
     setBulkDecision('')
+    setBulkScheduleDate('')
     setShowBulkConfirm(false)
   }
 
@@ -223,7 +255,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const computeAllocation = (sku: string, available: number) => {
     const tierOrder: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
     const skuOrders = orders
-      .filter(o => o.sku === sku && o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched)
+      .filter(o => o.sku === sku && o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched)
       .sort((a, b) => {
         const ta = tierOrder[a.urgency || 'HOLD'] ?? 3
         const tb = tierOrder[b.urgency || 'HOLD'] ?? 3
@@ -294,7 +326,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
       if (!skuAwbs[sku]) skuAwbs[sku] = []
       skuAwbs[sku].push(awb)
     }
-    const toDispatch = orders.filter(o => o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched)
+    const toDispatch = orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched)
     const ordersBySku: Record<string, DBOrder[]> = {}
     toDispatch.forEach(o => { if (!ordersBySku[o.sku]) ordersBySku[o.sku] = []; ordersBySku[o.sku].push(o) })
     const matched: Array<{ orderId: string; sku: string; awb: string; customerName: string }> = []
@@ -334,7 +366,9 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
   const unfulfillableOrders = useMemo(() => activeOrders.filter(o => o.plan_decision === 'unfulfillable'), [activeOrders])
 
-  const dispatchTodayCount = useMemo(() => orders.filter(o => o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched).length, [orders])
+  const today = new Date().toISOString().split('T')[0]
+  const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
+  const dispatchTodayCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
   const holdCount = useMemo(() => orders.filter(o => o.plan_decision === 'hold' && !o.is_cancelled).length, [orders])
   const unfulfillableCount = useMemo(() => unfulfillableOrders.length, [unfulfillableOrders])
   const undecidedCount = useMemo(() => activeOrders.filter(o => o.plan_decision === 'undecided').length, [activeOrders])
@@ -351,7 +385,8 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   const filteredActive = useMemo(() => {
     let list = [...activeOrders]
     // Decision/urgency filter
-    if (activeFilter === 'dispatch_today') list = list.filter(o => o.plan_decision === 'dispatch_today')
+    if (activeFilter === 'scheduled') list = list.filter(o => o.plan_decision === 'scheduled')
+    else if (activeFilter === 'scheduled_today') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
     else if (activeFilter === 'hold') list = list.filter(o => o.plan_decision === 'hold')
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
@@ -403,14 +438,30 @@ export default function DashboardClient({ user, access, initialSessions }: Props
   }
 
   const picklist = useMemo(() => {
-    const dt = orders.filter(o => o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched)
-    const m: Record<string, { sku: string; courier: Courier; qty: number; count: number }> = {}
-    dt.forEach(o => {
-      const k = `${o.sku}__${o.courier}`
-      if (!m[k]) m[k] = { sku: o.sku, courier: o.courier as Courier, qty: 0, count: 0 }
-      m[k].qty += o.qty; m[k].count += 1
+    const scheduled = orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched)
+    // Group by date -> courier -> sku
+    const dateMap: Record<string, Record<string, Record<string, { sku: string; courier: Courier; qty: number; count: number; orders: DBOrder[] }>>> = {}
+    scheduled.forEach(o => {
+      const date = o.scheduled_date || 'Unscheduled'
+      const courier = o.courier
+      const key = `${o.sku}__${courier}`
+      if (!dateMap[date]) dateMap[date] = {}
+      if (!dateMap[date][courier]) dateMap[date][courier] = {}
+      if (!dateMap[date][courier][key]) dateMap[date][courier][key] = { sku: o.sku, courier: courier as Courier, qty: 0, count: 0, orders: [] }
+      dateMap[date][courier][key].qty += o.qty
+      dateMap[date][courier][key].count += 1
+      dateMap[date][courier][key].orders.push(o)
     })
-    return Object.values(m).sort((a, b) => a.sku.localeCompare(b.sku))
+    // Sort dates ascending
+    return Object.entries(dateMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, courierMap]) => ({
+        date,
+        couriers: Object.entries(courierMap).map(([courier, skuMap]) => ({
+          courier: courier as Courier,
+          items: Object.values(skuMap).sort((a, b) => a.sku.localeCompare(b.sku)),
+        }))
+      }))
   }, [orders])
 
   const allVisibleSelected = filteredActive.length > 0 && filteredActive.every(o => selectedIds.has(o.id))
@@ -443,10 +494,21 @@ export default function DashboardClient({ user, access, initialSessions }: Props
         <Modal title={`Apply to ${selectedIds.size} orders`} onClose={() => setShowBulkConfirm(false)}>
           <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 12 }}>
             Mark <strong>{selectedIds.size} orders</strong> as{' '}
-            <strong style={{ color: bulkDecision === 'dispatch_today' ? 'var(--dispatched)' : bulkDecision === 'hold' ? 'var(--hold)' : 'var(--critical)' }}>
-              {bulkDecision === 'dispatch_today' ? 'Dispatch Today' : bulkDecision === 'hold' ? 'On Hold' : 'Unfulfillable'}
+            <strong style={{ color: bulkDecision === 'scheduled' ? 'var(--dispatched)' : bulkDecision === 'hold' ? 'var(--hold)' : 'var(--critical)' }}>
+              {bulkDecision === 'scheduled' ? 'Scheduled' : bulkDecision === 'hold' ? 'On Hold' : 'Unfulfillable'}
             </strong>?
           </p>
+          {bulkDecision === 'scheduled' && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>Dispatch date</label>
+              <input type="date"
+                value={bulkScheduleDate}
+                min={new Date().toISOString().split('T')[0]}
+                onChange={e => setBulkScheduleDate(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono' }}
+              />
+            </div>
+          )}
           <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 4 }}>
             {Array.from(selectedIds).map(id => {
               const o = orders.find(x => x.id === id)
@@ -462,7 +524,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
           </div>
           <ModalActions onCancel={() => setShowBulkConfirm(false)} onConfirm={handleBulkConfirm}
             confirmLabel="Confirm"
-            confirmColor={bulkDecision === 'dispatch_today' ? 'var(--dispatched)' : bulkDecision === 'hold' ? 'var(--hold)' : 'var(--critical)'} />
+            confirmColor={bulkDecision === 'scheduled' ? 'var(--dispatched)' : bulkDecision === 'hold' ? 'var(--hold)' : 'var(--critical)'} />
         </Modal>
       )}
 
@@ -485,7 +547,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
 
       {/* Unfulfillable SKU — partial allocation */}
       {unfulfillableSku && (() => {
-        const skuOrders = orders.filter(o => o.sku === unfulfillableSku && o.plan_decision === 'dispatch_today' && !o.is_cancelled && !o.is_dispatched)
+        const skuOrders = orders.filter(o => o.sku === unfulfillableSku && o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched)
         const totalQty = skuOrders.reduce((s, o) => s + o.qty, 0)
         const closeModal = () => { setUnfulfillableSku(null); setUnfulfillableReason('Not ready'); setUnfulfillableNote(''); setAvailableQty(''); setAllocationPreview(null) }
         const showPreview = allocationPreview !== null
@@ -779,7 +841,8 @@ export default function DashboardClient({ user, access, initialSessions }: Props
               {[
                 { key: 'ALL' as ActiveFilter, label: 'Total Active', value: activeOrders.length, color: 'var(--text)', bg: 'var(--surface)', border: 'var(--border)' },
                 { key: 'undecided' as ActiveFilter, label: 'Undecided', value: undecidedCount, color: 'var(--today)', bg: 'var(--today-bg)', border: '#fed7aa' },
-                { key: 'dispatch_today' as ActiveFilter, label: 'Dispatch Today', value: dispatchTodayCount, color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' },
+                { key: 'scheduled' as ActiveFilter, label: 'Scheduled', value: scheduledCount, color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' },
+                { key: 'scheduled_today' as ActiveFilter, label: 'Going Today', value: dispatchTodayCount, color: '#059669', bg: '#ecfdf5', border: '#6ee7b7' },
                 { key: 'hold' as ActiveFilter, label: 'On Hold', value: holdCount, color: 'var(--hold)', bg: 'var(--hold-bg)', border: '#bfdbfe' },
                 { key: 'unfulfillable' as ActiveFilter, label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
               ].map(kpi => {
@@ -826,7 +889,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                 <div style={{ flex: 1 }} />
                 <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Mark as:</span>
                 {([
-                  { d: 'dispatch_today' as PlanDecision, label: 'Dispatch Today', bg: 'var(--dispatched)' },
+                  { d: 'scheduled' as PlanDecision, label: 'Schedule', bg: 'var(--dispatched)' },
                   { d: 'hold' as PlanDecision, label: 'Hold', bg: 'var(--hold)' },
                   { d: 'unfulfillable' as PlanDecision, label: 'Unfulfillable', bg: 'var(--critical)' },
                 ]).map(({ d, label, bg }) => (
@@ -886,7 +949,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                           </th>
                         ))}
                         {/* Days Left — with filter popover */}
-                        <th style={{ padding: '9px 12px', textAlign: 'left' as const, whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
+                        <th style={{ padding: '9px 12px', textAlign: 'left' as const, whiteSpace: 'nowrap' as const }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span
                               onClick={() => handleColSort('days_left')}
@@ -897,7 +960,12 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                             </span>
                             {/* Filter button */}
                             <button
-                              onClick={e => { e.stopPropagation(); setShowDaysPopover(v => !v) }}
+                              onClick={e => {
+                                e.stopPropagation()
+                                const rect = e.currentTarget.getBoundingClientRect()
+                                setPopoverPos({ top: rect.bottom + 6, left: rect.left })
+                                setShowDaysPopover(v => !v)
+                              }}
                               style={{
                                 background: daysFilter.size > 0 ? 'var(--accent-bg)' : 'none',
                                 border: daysFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
@@ -912,13 +980,16 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                               <button onClick={() => setDaysFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>
                             )}
                           </div>
-                          {/* Popover */}
+                          {/* Popover — fixed position to escape table clipping */}
                           {showDaysPopover && (
                             <div
                               style={{
-                                position: 'absolute' as const, top: '100%', left: 0, zIndex: 200,
+                                position: 'fixed' as const,
+                                top: popoverPos.top,
+                                left: popoverPos.left,
+                                zIndex: 500,
                                 background: 'var(--surface)', border: '1px solid var(--border)',
-                                borderRadius: 8, padding: 12, minWidth: 160,
+                                borderRadius: 8, padding: 12, minWidth: 180,
                                 boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                               }}
                               onClick={e => e.stopPropagation()}
@@ -971,6 +1042,7 @@ export default function DashboardClient({ user, access, initialSessions }: Props
                           daysLeftDisplay={displayDaysLeft(order.days_left)}
                           onSelect={toggleSelect}
                           onDecision={updateDecision}
+                          onSchedule={scheduleOrder}
                           onPriority={togglePriority}
                           onCancel={id => setCancelOrderId(id)}
                         />
@@ -1193,75 +1265,113 @@ export default function DashboardClient({ user, access, initialSessions }: Props
 
         {/* ════ PICKLIST ════ */}
         {tab === 'picklist' && (
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Picklist</h1>
-              <span style={{ color: 'var(--text3)', fontSize: 14 }}>{dispatchTodayCount} orders · {picklist.reduce((s, i) => s + i.qty, 0)} pieces</span>
+              <span style={{ color: 'var(--text3)', fontSize: 14 }}>
+                {scheduledCount} orders scheduled · {picklist.reduce((s, g) => s + g.couriers.reduce((cs, c) => cs + c.items.reduce((is, i) => is + i.qty, 0), 0), 0)} pieces
+              </span>
               <button onClick={() => window.print()} style={{ marginLeft: 'auto', padding: '8px 16px', borderRadius: 7, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
                 <Printer size={14} /> Print
               </button>
             </div>
+
             {picklist.length === 0 ? (
-              <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text2)' }}>No orders marked "Dispatch Today" yet.</div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-                {(['Bluedart', 'Delhivery'] as Courier[]).map(courier => {
-                  const items = picklist.filter(p => p.courier === courier)
-                  if (!items.length) return null
-                  const totalQty = items.reduce((s, i) => s + i.qty, 0)
-                  const cc = courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
-                  return (
-                    <div key={courier} style={{ ...card, overflow: 'hidden' }}>
-                      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: cc }} />
-                        <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14 }}>{courier}</span>
-                        <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 12 }}>{items.length} SKUs · {totalQty} pcs</span>
-                      </div>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                            {['SKU', 'ORDERS', 'QTY', 'ACTION'].map(h => (
-                              <th key={h} style={{ padding: '8px 20px', textAlign: h === 'SKU' || h === 'ACTION' ? 'left' as const : 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {items.map((item, i) => {
-                            const isUnfulfillable = orders.some(o => o.sku === item.sku && o.plan_decision === 'unfulfillable' && !o.is_cancelled)
-                            return (
-                              <tr key={item.sku} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none', background: isUnfulfillable ? 'var(--critical-bg)' : 'transparent' }}>
-                                <td style={{ padding: '10px 20px', fontFamily: 'DM Mono', fontSize: 12, color: isUnfulfillable ? 'var(--critical)' : 'var(--text)' }}>{item.sku}</td>
-                                <td style={{ padding: '10px 20px', textAlign: 'right' as const, color: 'var(--text2)', fontSize: 13 }}>{item.count}</td>
-                                <td style={{ padding: '10px 20px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, color: cc, fontSize: 15 }}>{item.qty}</td>
-                                <td style={{ padding: '10px 20px' }}>
-                                  {!isUnfulfillable ? (
-                                    <button onClick={() => { setUnfulfillableSku(item.sku); setUnfulfillableReason('Not ready'); setUnfulfillableNote('') }} style={{ padding: '4px 10px', borderRadius: 5, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
-                                      Mark Unfulfillable
-                                    </button>
-                                  ) : (
-                                    <span style={{ fontSize: 11, color: 'var(--critical)', fontFamily: 'DM Mono', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                      <AlertCircle size={11} />
-                                      {orders.find(o => o.sku === item.sku && o.unfulfillable_reason)?.unfulfillable_reason || 'Unfulfillable'}
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                        <tfoot>
-                          <tr style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)' }}>
-                            <td style={{ padding: '10px 20px', fontWeight: 600, fontSize: 13 }}>Total</td>
-                            <td style={{ padding: '10px 20px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{items.reduce((s, i) => s + i.count, 0)}</td>
-                            <td style={{ padding: '10px 20px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: cc, fontSize: 18 }}>{totalQty}</td>
-                            <td />
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  )
-                })}
+              <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text2)' }}>
+                No orders scheduled yet. Go to Plan tab and assign dispatch dates.
               </div>
+            ) : (
+              picklist.map(({ date, couriers: courierGroups }) => {
+                const isToday = date === today
+                const isFuture = date > today
+                const dateLabel = isToday
+                  ? `Today — ${new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}`
+                  : date === 'Unscheduled' ? 'No date set'
+                  : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+                const totalOrders = courierGroups.reduce((s, c) => s + c.items.reduce((si, i) => si + i.count, 0), 0)
+                const totalPcs = courierGroups.reduce((s, c) => s + c.items.reduce((si, i) => si + i.qty, 0), 0)
+
+                return (
+                  <div key={date}>
+                    {/* Date header */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '6px 14px', borderRadius: 20,
+                        background: isToday ? '#ecfdf5' : isFuture ? 'var(--hold-bg)' : 'var(--bg2)',
+                        border: `1px solid ${isToday ? '#6ee7b7' : isFuture ? '#bfdbfe' : 'var(--border)'}`,
+                      }}>
+                        <Calendar size={13} style={{ color: isToday ? '#059669' : isFuture ? 'var(--hold)' : 'var(--text3)' }} />
+                        <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: isToday ? '#059669' : isFuture ? 'var(--hold)' : 'var(--text2)' }}>
+                          {dateLabel}
+                        </span>
+                      </div>
+                      <span style={{ color: 'var(--text3)', fontSize: 13 }}>{totalOrders} orders · {totalPcs} pcs</span>
+                    </div>
+
+                    {/* Courier tables side by side */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                      {courierGroups.map(({ courier, items }) => {
+                        const totalQty = items.reduce((s, i) => s + i.qty, 0)
+                        const cc = courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
+                        return (
+                          <div key={courier} style={{ ...card, overflow: 'hidden' }}>
+                            <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: '50%', background: cc }} />
+                              <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 13 }}>{courier}</span>
+                              <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 12 }}>{items.length} SKUs · {totalQty} pcs</span>
+                            </div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
+                              <thead>
+                                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                  {['SKU', 'ORDERS', 'QTY', 'ACTION'].map(h => (
+                                    <th key={h} style={{ padding: '7px 16px', textAlign: h === 'SKU' || h === 'ACTION' ? 'left' as const : 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {items.map((item, i) => {
+                                  const isUnfulfillable = orders.some(o => o.sku === item.sku && o.plan_decision === 'unfulfillable' && !o.is_cancelled)
+                                  return (
+                                    <tr key={item.sku} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none', background: isUnfulfillable ? 'var(--critical-bg)' : 'transparent' }}>
+                                      <td style={{ padding: '9px 16px', fontFamily: 'DM Mono', fontSize: 12, color: isUnfulfillable ? 'var(--critical)' : 'var(--text)' }}>{item.sku}</td>
+                                      <td style={{ padding: '9px 16px', textAlign: 'right' as const, color: 'var(--text2)', fontSize: 13 }}>{item.count}</td>
+                                      <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, color: cc, fontSize: 14 }}>{item.qty}</td>
+                                      <td style={{ padding: '9px 16px' }}>
+                                        {!isUnfulfillable ? (
+                                          <button onClick={() => { setUnfulfillableSku(item.sku); setUnfulfillableReason('Not ready'); setUnfulfillableNote(''); setAvailableQty(''); setAllocationPreview(null) }}
+                                            style={{ padding: '3px 9px', borderRadius: 5, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
+                                            Unfulfillable
+                                          </button>
+                                        ) : (
+                                          <span style={{ fontSize: 11, color: 'var(--critical)', fontFamily: 'DM Mono', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                            <AlertCircle size={11} />
+                                            {orders.find(o => o.sku === item.sku && o.unfulfillable_reason)?.unfulfillable_reason || 'Unfulfillable'}
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)' }}>
+                                  <td style={{ padding: '9px 16px', fontWeight: 600, fontSize: 13 }}>Total</td>
+                                  <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{items.reduce((s, i) => s + i.count, 0)}</td>
+                                  <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: cc, fontSize: 16 }}>{totalQty}</td>
+                                  <td />
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )
+                      })}
+                      {/* Fill empty column if only one courier */}
+                      {courierGroups.length === 1 && <div />}
+                    </div>
+                  </div>
+                )
+              })
             )}
           </div>
         )}
@@ -1286,14 +1396,40 @@ export default function DashboardClient({ user, access, initialSessions }: Props
               </div>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                  {[{ label: 'Marked Dispatch Today', value: dispatchTodayCount, color: 'var(--dispatched)', bg: 'var(--dispatched-bg)' }, { label: 'On Hold', value: holdCount, color: 'var(--hold)', bg: 'var(--hold-bg)' }, { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)' }].map(s => (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                  {[
+                    { label: "Going Today", value: dispatchTodayCount, color: '#059669', bg: '#ecfdf5' },
+                    { label: 'Future Scheduled', value: scheduledCount - dispatchTodayCount, color: 'var(--hold)', bg: 'var(--hold-bg)' },
+                    { label: 'On Hold', value: holdCount, color: 'var(--text2)', bg: 'var(--surface)' },
+                    { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)' }
+                  ].map(s => (
                     <div key={s.label} style={{ padding: 16, background: s.bg, border: '1px solid var(--border)', borderRadius: 8, textAlign: 'center' as const }}>
-                      <div style={{ fontSize: 28, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
+                      <div style={{ fontSize: 24, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
                       <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>{s.label}</div>
                     </div>
                   ))}
                 </div>
+                {/* Future scheduled orders info */}
+                {scheduledCount - dispatchTodayCount > 0 && (
+                  <div style={{ ...card, padding: 16 }}>
+                    <div style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 500, color: 'var(--text2)', marginBottom: 10 }}>SCHEDULED FOR FUTURE DATES</div>
+                    {Array.from(new Set(
+                      orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date > today && !o.is_cancelled && !o.is_dispatched)
+                        .map(o => o.scheduled_date!)
+                    )).sort().map(date => {
+                      const count = orders.filter(o => o.scheduled_date === date && o.plan_decision === 'scheduled').length
+                      return (
+                        <div key={date} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                          <Calendar size={13} style={{ color: 'var(--hold)' }} />
+                          <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text)' }}>
+                            {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+                          </span>
+                          <span style={{ color: 'var(--text3)', fontSize: 12 }}>{count} orders</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
                 {undecidedCount > 0 && (
                   <div style={{ padding: '12px 16px', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 8, color: 'var(--today)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <AlertTriangle size={15} />{undecidedCount} orders still undecided — complete Plan tab first.
@@ -1330,11 +1466,12 @@ export default function DashboardClient({ user, access, initialSessions }: Props
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onPriority, onCancel, daysLeftDisplay }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, daysLeftDisplay }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   onSelect: (id: string) => void
   onDecision: (id: string, d: PlanDecision) => void
+  onSchedule: (id: string, date: string) => void
   onPriority: (id: string, current: boolean) => void
   onCancel: (id: string) => void
 }) {
@@ -1345,7 +1482,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onPriority,
     HOLD:     { color: 'var(--hold)',     bg: 'var(--hold-bg)',     border: '#bfdbfe' },
   }[order.urgency as string] || { color: 'var(--text3)', bg: 'var(--bg2)', border: 'var(--border)' }
 
-  const rowBg: Record<PlanDecision, string> = { dispatch_today: '#f0fdf4', hold: '#eff6ff', unfulfillable: '#fef2f2', undecided: 'transparent' }
+  const rowBg: Record<PlanDecision, string> = { scheduled: '#f0fdf4', hold: '#eff6ff', unfulfillable: '#fef2f2', undecided: 'transparent' }
 
   return (
     <tr style={{ borderBottom: '1px solid var(--border)', background: selected ? '#fefce8' : updating ? 'var(--accent-bg)' : rowBg[order.plan_decision], transition: 'background 0.1s' }}>
@@ -1372,18 +1509,50 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onPriority,
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{daysLeftDisplay !== null ? daysLeftDisplay : '—'}</span></td>
-      <td style={{ padding: '8px 12px' }}>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {([
-            { d: 'dispatch_today' as PlanDecision, label: 'Dispatch', ac: 'var(--dispatched)', ab: 'var(--dispatched-bg)', ab2: '#bbf7d0' },
-            { d: 'hold' as PlanDecision, label: 'Hold', ac: 'var(--hold)', ab: 'var(--hold-bg)', ab2: '#bfdbfe' },
-            { d: 'unfulfillable' as PlanDecision, label: 'Unfulfil.', ac: 'var(--critical)', ab: 'var(--critical-bg)', ab2: '#fecaca' },
-          ]).map(({ d, label, ac, ab, ab2 }) => {
-            const isActive = order.plan_decision === d
-            return (
-              <button key={d} onClick={() => onDecision(order.id, d)} style={{ padding: '4px 10px', borderRadius: 5, fontSize: 11, cursor: 'pointer', fontFamily: 'DM Sans', fontWeight: 500, background: isActive ? ab : 'var(--surface)', border: `1px solid ${isActive ? ab2 : 'var(--border)'}`, color: isActive ? ac : 'var(--text3)', transition: 'all 0.1s', whiteSpace: 'nowrap' as const }}>{label}</button>
-            )
-          })}
+      <td style={{ padding: '6px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {/* Date picker — sets scheduled */}
+          <div style={{ position: 'relative' as const }}>
+            <input
+              type="date"
+              value={order.scheduled_date || ''}
+              onChange={e => onSchedule(order.id, e.target.value)}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 5, fontSize: 11,
+                border: `1px solid ${order.plan_decision === 'scheduled' ? '#bbf7d0' : 'var(--border)'}`,
+                background: order.plan_decision === 'scheduled' ? 'var(--dispatched-bg)' : 'var(--surface)',
+                color: order.plan_decision === 'scheduled' ? 'var(--dispatched)' : 'var(--text3)',
+                cursor: 'pointer', fontFamily: 'DM Mono',
+                width: 130,
+              }}
+            />
+            {order.plan_decision === 'scheduled' && order.scheduled_date && (
+              <button
+                onClick={() => onSchedule(order.id, '')}
+                title="Clear date"
+                style={{ position: 'absolute' as const, right: 4, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px', lineHeight: 1 }}
+              >✕</button>
+            )}
+          </div>
+          {/* Hold */}
+          <button onClick={() => onDecision(order.id, 'hold')} style={{
+            padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+            fontFamily: 'DM Sans', fontWeight: 500,
+            background: order.plan_decision === 'hold' ? 'var(--hold-bg)' : 'var(--surface)',
+            border: `1px solid ${order.plan_decision === 'hold' ? '#bfdbfe' : 'var(--border)'}`,
+            color: order.plan_decision === 'hold' ? 'var(--hold)' : 'var(--text3)',
+            whiteSpace: 'nowrap' as const,
+          }}>Hold</button>
+          {/* Unfulfillable */}
+          <button onClick={() => onDecision(order.id, 'unfulfillable')} style={{
+            padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+            fontFamily: 'DM Sans', fontWeight: 500,
+            background: order.plan_decision === 'unfulfillable' ? 'var(--critical-bg)' : 'var(--surface)',
+            border: `1px solid ${order.plan_decision === 'unfulfillable' ? '#fecaca' : 'var(--border)'}`,
+            color: order.plan_decision === 'unfulfillable' ? 'var(--critical)' : 'var(--text3)',
+            whiteSpace: 'nowrap' as const,
+          }}>Unfulfil.</button>
         </div>
       </td>
       <td style={{ padding: '8px 12px' }}>
