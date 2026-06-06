@@ -101,7 +101,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [shypassistText, setShypassistText] = useState('')
   const [eodMatchResult, setEodMatchResult] = useState<{
     matched: Array<{ orderId: string; sku: string; awb: string; customerName: string }>
-    unmatched: Array<{ orderId: string; sku: string; customerName: string }>
+    unmatched: Array<{ orderId: string; sku: string; customerName: string; storedAwb?: string | null }>
   } | null>(null)
   const [showEodConfirm, setShowEodConfirm] = useState(false)
   const [eodDone, setEodDone] = useState(false)
