@@ -331,13 +331,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const date = targetDates[orderId]
     if (!date) return
     setSavingReview(orderId)
-    await supabase.from('dispatch_orders').update({ target_dispatch_date: date, updated_at: new Date().toISOString() }).eq('id', orderId)
+    // Update both target_dispatch_date AND scheduled_date so picklist reflects the new date
+    await supabase.from('dispatch_orders').update({
+      target_dispatch_date: date,
+      scheduled_date: date,
+      plan_decision: 'scheduled',
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId)
     const order = orders.find(o => o.id === orderId)
     if (order) {
       const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
       logEvent(order.order_id, 'target_set', `Target dispatch date set to ${dateLabel}`)
     }
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, target_dispatch_date: date } : o))
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, target_dispatch_date: date, scheduled_date: date, plan_decision: 'scheduled' } : o))
     setSavingReview(null)
     await loadOrders()
   }
