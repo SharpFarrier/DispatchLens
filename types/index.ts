@@ -1,5 +1,5 @@
 export type Courier = 'Bluedart' | 'Delhivery'
-export type PlanDecision = 'dispatch_today' | 'hold' | 'unfulfillable' | 'undecided'
+export type PlanDecision = 'scheduled' | 'hold' | 'unfulfillable' | 'undecided'
 export type UrgencyTier = 'CRITICAL' | 'TODAY' | 'PLAN' | 'HOLD'
 export type UnfulfillableReason = 'Not ready' | 'No stock available' | 'Other'
 export type AccessStatus = 'pending' | 'approved' | 'rejected'
@@ -68,6 +68,7 @@ export interface DBOrder {
   is_dispatched: boolean
   is_priority: boolean
   plan_decision: PlanDecision
+  scheduled_date: string | null
   dispatched_at: string | null
   unfulfillable_reason: UnfulfillableReason | null
   unfulfillable_note: string | null
