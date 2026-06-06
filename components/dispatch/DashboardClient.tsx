@@ -508,12 +508,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     return list
   }, [activeOrders, activeFilter, daysFilter, courierFilter, sortCol, sortDir])
 
-  // Unique display days left values for filter popover
+  // Unique display days left values — based on currently filtered list (respects active KPI/urgency filter)
   const uniqueDaysLeft = useMemo(() => {
     const vals = new Set<number>()
-    activeOrders.forEach(o => { const d = displayDaysLeft(o.days_left); if (d !== null) vals.add(d) })
+    // Use filteredActive but without the daysFilter applied to avoid circular dependency
+    let baseList = [...activeOrders]
+    if (activeFilter === 'scheduled_today') baseList = baseList.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
+    else if (activeFilter === 'scheduled') baseList = baseList.filter(o => o.plan_decision === 'scheduled')
+    else if (activeFilter === 'hold') baseList = baseList.filter(o => o.plan_decision === 'hold')
+    else if (activeFilter === 'unfulfillable') baseList = baseList.filter(o => o.plan_decision === 'unfulfillable')
+    else if (activeFilter === 'undecided') baseList = baseList.filter(o => o.plan_decision === 'undecided')
+    else if (activeFilter !== 'ALL') baseList = baseList.filter(o => o.urgency === activeFilter)
+    if (courierFilter.size > 0) baseList = baseList.filter(o => courierFilter.has(o.courier))
+    baseList.forEach(o => { const d = displayDaysLeft(o.days_left); if (d !== null) vals.add(d) })
     return Array.from(vals).sort((a, b) => a - b)
-  }, [activeOrders])
+  }, [activeOrders, activeFilter, courierFilter, today])
 
   const handleColSort = (col: string) => {
     if (sortCol === col) {
@@ -1285,7 +1294,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                       </span>
                                       <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color }}>{d}</span>
                                       <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 'auto' }}>
-                                        {activeOrders.filter(o => displayDaysLeft(o.days_left) === d).length}
+                                        {(() => {
+                                        let base = [...activeOrders]
+                                        if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
+                                        else if (activeFilter === 'hold') base = base.filter(o => o.plan_decision === 'hold')
+                                        else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
+                                        else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
+                                        else if (activeFilter !== 'ALL' && activeFilter !== 'scheduled_today') base = base.filter(o => o.urgency === activeFilter)
+                                        if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
+                                        return base.filter(o => displayDaysLeft(o.days_left) === d).length
+                                      })()}
                                       </span>
                                     </button>
                                   )
