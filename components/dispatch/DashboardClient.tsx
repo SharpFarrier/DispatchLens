@@ -331,11 +331,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const date = targetDates[orderId]
     if (!date) return
     setSavingReview(orderId)
-    // Update both target_dispatch_date AND scheduled_date so picklist reflects the new date
+    // Only update target_dispatch_date — keep plan_decision as unfulfillable
+    // scheduled_date is set separately when manager approves for dispatch
     await supabase.from('dispatch_orders').update({
       target_dispatch_date: date,
-      scheduled_date: date,
-      plan_decision: 'scheduled',
       updated_at: new Date().toISOString()
     }).eq('id', orderId)
     const order = orders.find(o => o.id === orderId)
@@ -343,9 +342,23 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
       logEvent(order.order_id, 'target_set', `Target dispatch date set to ${dateLabel}`)
     }
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, target_dispatch_date: date, scheduled_date: date, plan_decision: 'scheduled' } : o))
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, target_dispatch_date: date } : o))
     setSavingReview(null)
     await loadOrders()
+  }
+
+  // ── Review: approve unfulfillable for dispatch on target date ──
+  const approveForDispatch = async (orderId: string) => {
+    const order = orders.find(o => o.id === orderId)
+    if (!order?.target_dispatch_date) return
+    await supabase.from('dispatch_orders').update({
+      plan_decision: 'scheduled',
+      scheduled_date: order.target_dispatch_date,
+      updated_at: new Date().toISOString(),
+    }).eq('id', orderId)
+    const dateLabel = new Date(order.target_dispatch_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+    logEvent(order.order_id, 'scheduled', `Approved for dispatch on ${dateLabel} from Review`)
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, plan_decision: 'scheduled', scheduled_date: order.target_dispatch_date } : o))
   }
 
   // ── Review: cancel from review ──
@@ -511,11 +524,23 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   const picklist = useMemo(() => {
-    const scheduled = orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched)
+    // Include scheduled orders AND unfulfillable orders that have been given a target date by manager
+    const scheduled = orders.filter(o =>
+      !o.is_cancelled && !o.is_dispatched && (
+        o.plan_decision === 'scheduled' ||
+        (o.plan_decision === 'unfulfillable' && o.target_dispatch_date)
+      )
+    )
+    // Use target_dispatch_date for unfulfillable orders, scheduled_date for scheduled
+    scheduled.forEach(o => {
+      if (o.plan_decision === 'unfulfillable' && o.target_dispatch_date && !o.scheduled_date) {
+        o = { ...o, scheduled_date: o.target_dispatch_date }
+      }
+    })
     // Group by date -> courier -> sku
     const dateMap: Record<string, Record<string, Record<string, { sku: string; courier: Courier; qty: number; count: number; orders: DBOrder[] }>>> = {}
     scheduled.forEach(o => {
-      const date = o.scheduled_date || 'Unscheduled'
+      const date = (o.plan_decision === 'unfulfillable' ? o.target_dispatch_date : o.scheduled_date) || 'Unscheduled'
       const courier = o.courier
       const key = `${o.sku}__${courier}`
       if (!dateMap[date]) dateMap[date] = {}
@@ -1424,9 +1449,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 </td>
                                 {/* Cancel from review */}
                                 <td style={{ padding: '10px 16px' }}>
-                                  <button onClick={() => cancelFromReview(order.id)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <Ban size={11} /> Cancel Order
-                                  </button>
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    {order.target_dispatch_date && (
+                                      <button onClick={() => approveForDispatch(order.id)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #bbf7d0', background: 'var(--dispatched-bg)', color: 'var(--dispatched)', fontSize: 11, cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <CheckCircle size={11} /> Approve
+                                      </button>
+                                    )}
+                                    <button onClick={() => cancelFromReview(order.id)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <Ban size={11} /> Cancel
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             )
@@ -1485,9 +1517,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   </div>
                                 </td>
                                 <td style={{ padding: '10px 16px' }}>
-                                  <button onClick={() => cancelFromReview(order.id)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <Ban size={11} /> Cancel Order
-                                  </button>
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    {order.target_dispatch_date && (
+                                      <button onClick={() => approveForDispatch(order.id)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #bbf7d0', background: 'var(--dispatched-bg)', color: 'var(--dispatched)', fontSize: 11, cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <CheckCircle size={11} /> Approve
+                                      </button>
+                                    )}
+                                    <button onClick={() => cancelFromReview(order.id)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                      <Ban size={11} /> Cancel
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             )
