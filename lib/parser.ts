@@ -1,5 +1,20 @@
 import { Courier, ParsedOrder, UrgencyTier } from '@/types'
 
+// Parse scientific notation (e.g. 2.08945E+13) to full integer string
+function parsePossibleScientific(val: string): string {
+  if (!val || val.trim() === '') return val
+  const s = val.trim()
+  // Check if it looks like scientific notation
+  if (/^[\d.]+[eE][+\-]?\d+$/.test(s)) {
+    try {
+      return BigInt(Math.round(parseFloat(s))).toString()
+    } catch {
+      return String(Math.round(parseFloat(s)))
+    }
+  }
+  return s
+}
+
 // Parse date strings in multiple formats
 function parseDate(raw: string | undefined): string | null {
   if (!raw || raw === '#N/A' || raw === '#REF!' || raw.trim() === '') return null
@@ -136,7 +151,7 @@ export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
       customer_name: get('name'),
       qty: parseInt(get('qty')) || 1,
       courier,
-      tracking_number: (courier === 'Delhivery' ? get('master') : get('tracking')) || null,
+      tracking_number: (courier === 'Delhivery' ? parsePossibleScientific(get('master')) : get('tracking')) || null,
       sku: skuRaw,
       raw_status: rawStatus,
       promise_date: promiseDateStr,
