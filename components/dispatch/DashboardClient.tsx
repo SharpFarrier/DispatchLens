@@ -338,7 +338,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (!eodMatchResult) return
     const now = new Date().toISOString()
     for (const m of eodMatchResult.matched) {
-      await supabase.from('dispatch_orders').update({ is_dispatched: true, dispatched_at: now, tracking_number: m.awb }).eq('id', m.orderId)
+      await supabase.from('dispatch_orders').update({
+        is_dispatched: true,
+        dispatched_at: now,
+        tracking_number: m.awb,
+        sku: m.sku, // store Shypassist SKU
+      }).eq('id', m.orderId)
     }
     await loadOrders()
     setShowEodConfirm(false)
