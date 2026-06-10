@@ -13,7 +13,7 @@ import {
   Ban, History, Search
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided'
 
 interface Props {
@@ -68,6 +68,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [dispatchedSortCol, setDispatchedSortCol] = useState<string | null>('dispatched_at')
+  const [dispatchedSortDir, setDispatchedSortDir] = useState<'asc' | 'desc'>('desc')
+  const [dispatchedSearch, setDispatchedSearch] = useState('')
   const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
   const [showDaysPopover, setShowDaysPopover] = useState(false)
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 })
@@ -495,6 +498,28 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     return Array.from(vals).sort()
   }, [activeOrders, activeFilter, courierFilter, daysFilter, today])
   const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
+
+  const filteredDispatched = useMemo(() => {
+    let list = [...dispatchedOrders]
+    if (dispatchedSearch.trim().length >= 2) {
+      const q = dispatchedSearch.toLowerCase()
+      list = list.filter(o =>
+        o.order_id.toLowerCase().includes(q) ||
+        o.customer_name.toLowerCase().includes(q) ||
+        o.sku.toLowerCase().includes(q) ||
+        (o.tracking_number && o.tracking_number.toLowerCase().includes(q))
+      )
+    }
+    if (dispatchedSortCol) {
+      list.sort((a, b) => {
+        const av = (a as unknown as Record<string, unknown>)[dispatchedSortCol] ?? ''
+        const bv = (b as unknown as Record<string, unknown>)[dispatchedSortCol] ?? ''
+        const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true })
+        return dispatchedSortDir === 'asc' ? cmp : -cmp
+      })
+    }
+    return list
+  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir])
   const unfulfillableOrders = useMemo(() => activeOrders.filter(o => o.plan_decision === 'unfulfillable'), [activeOrders])
 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
@@ -1896,6 +1921,106 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 )
               })
             )}
+          </div>
+        )}
+
+        {/* ════ DISPATCHED ════ */}
+        {tab === 'dispatched' && (
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <h1 style={{ fontSize: 18, fontWeight: 600 }}>Dispatched Orders</h1>
+              <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filteredDispatched.length} of {dispatchedOrders.length}</span>
+              {/* Search */}
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 12px' }}>
+                <Search size={13} style={{ color: 'var(--text3)' }} />
+                <input
+                  value={dispatchedSearch}
+                  onChange={e => setDispatchedSearch(e.target.value)}
+                  placeholder="Search dispatched…"
+                  style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'DM Sans', width: 200 }}
+                />
+                {dispatchedSearch && <button onClick={() => setDispatchedSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0 }}><X size={12} /></button>}
+              </div>
+            </div>
+
+            <div style={{ ...card, overflow: 'hidden' }}>
+              <div style={{ overflowX: 'auto' as const }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' as const, minWidth: 900 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
+                      {([
+                        { label: 'Dispatched', col: 'dispatched_at' },
+                        { label: 'Order ID', col: 'order_id' },
+                        { label: 'Customer', col: 'customer_name' },
+                        { label: 'SKU', col: 'sku' },
+                        { label: 'Cour.', col: 'courier' },
+                        { label: 'AWB', col: 'tracking_number' },
+                        { label: 'Pincode · City', col: 'pincode' },
+                        { label: 'Promise', col: 'promise_date' },
+                        { label: '', col: null },
+                      ] as { label: string; col: string | null }[]).map(({ label, col }) => (
+                        <th key={label || 'action'}
+                          onClick={() => {
+                            if (!col) return
+                            if (dispatchedSortCol === col) setDispatchedSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                            else { setDispatchedSortCol(col); setDispatchedSortDir('asc') }
+                          }}
+                          style={{
+                            padding: '9px 12px', textAlign: 'left' as const,
+                            color: dispatchedSortCol === col ? 'var(--accent)' : 'var(--text3)',
+                            fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500,
+                            whiteSpace: 'nowrap' as const,
+                            cursor: col ? 'pointer' : 'default',
+                            userSelect: 'none' as const,
+                          }}>
+                          {label}
+                          {col && dispatchedSortCol === col && <span style={{ marginLeft: 4 }}>{dispatchedSortDir === 'asc' ? '↑' : '↓'}</span>}
+                          {col && dispatchedSortCol !== col && <span style={{ marginLeft: 4, opacity: 0.3 }}>↕</span>}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDispatched.length === 0 ? (
+                      <tr><td colSpan={9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders yet</td></tr>
+                    ) : filteredDispatched.map((order, i) => {
+                      const cc = order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
+                      const dispDate = order.dispatched_at ? new Date(order.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+                      return (
+                        <tr key={order.id} style={{ borderBottom: i < filteredDispatched.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
+                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', whiteSpace: 'nowrap' as const }}>{dispDate}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
+                          <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{order.sku}</td>
+                          <td style={{ padding: '9px 12px' }}>
+                            <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: cc, background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>
+                              {order.courier === 'Bluedart' ? 'BD' : 'DL'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '9px 12px' }}>
+                            {order.tracking_number
+                              ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 7px', borderRadius: 4, border: '1px solid #bbf7d0' }}>{order.tracking_number}</span>
+                              : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>
+                            }
+                          </td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}{order.city ? ` · ${order.city}` : ''}</td>
+                          <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
+                          <td style={{ padding: '9px 12px' }}>
+                            <button onClick={() => setHistoryOrder(order)} title="View history"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', borderRadius: 4, transition: 'color 0.15s' }}
+                              onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+                              onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
+                            >
+                              <History size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 
