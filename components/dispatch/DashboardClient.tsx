@@ -87,7 +87,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [historyOrder, setHistoryOrder] = useState<DBOrder | null>(null)
   // Manual dispatch
   const [manualDispatchOrder, setManualDispatchOrder] = useState<DBOrder | null>(null)
-  const [manualDispatchAwb, setManualDispatchAwb] = useState('')
+  const [manualDispatchSku, setManualDispatchSku] = useState('')
   const [manualDispatching, setManualDispatching] = useState(false)
   // Global search
   const [searchQuery, setSearchQuery] = useState('')
@@ -310,17 +310,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     await supabase.from('dispatch_orders').update({
       is_dispatched: true,
       dispatched_at: now,
-      tracking_number: manualDispatchAwb.trim() || manualDispatchOrder.tracking_number,
       updated_at: now,
     }).eq('id', manualDispatchOrder.id)
-    logEvent(manualDispatchOrder.order_id, 'dispatched',
-      `Manually dispatched${manualDispatchAwb.trim() ? ` · AWB ${manualDispatchAwb.trim()}` : ''}`)
+    logEvent(manualDispatchOrder.order_id, 'dispatched', `Manually dispatched · Barcode SKU: ${manualDispatchSku.trim()}`)
     setOrders(prev => prev.map(o => o.id === manualDispatchOrder.id ? {
       ...o, is_dispatched: true, dispatched_at: now,
-      tracking_number: manualDispatchAwb.trim() || o.tracking_number,
     } : o))
     setManualDispatchOrder(null)
-    setManualDispatchAwb('')
+    setManualDispatchSku('')
     setManualDispatching(false)
   }
 
@@ -687,7 +684,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       {/* Manual cancel */}
       {/* Manual dispatch modal */}
       {manualDispatchOrder && (
-        <Modal title="Mark as Dispatched" onClose={() => { setManualDispatchOrder(null); setManualDispatchAwb('') }}>
+        <Modal title="Mark as Dispatched" onClose={() => { setManualDispatchOrder(null); setManualDispatchSku('') }}>
           <div style={{ marginBottom: 4 }}>
             <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '12px 14px', fontFamily: 'DM Mono', fontSize: 12, marginBottom: 16, display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
               <span style={{ color: 'var(--text)', fontWeight: 500 }}>{manualDispatchOrder.customer_name}</span>
@@ -695,37 +692,34 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               <span style={{ color: 'var(--text3)' }}>{manualDispatchOrder.order_id}</span>
             </div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>
-              AWB / Tracking Number <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(optional)</span>
+              Barcode SKU from Shypassist
             </label>
             <input
               type="text"
-              value={manualDispatchAwb}
-              onChange={e => setManualDispatchAwb(e.target.value)}
+              value={manualDispatchSku}
+              onChange={e => setManualDispatchSku(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleManualDispatch() }}
-              placeholder={manualDispatchOrder.tracking_number || 'Scan or enter AWB…'}
+              placeholder="Scan or type barcode SKU…"
               autoFocus
               style={{
                 width: '100%', padding: '9px 12px',
                 borderRadius: 7, border: '1px solid var(--border)',
                 background: 'var(--bg)', color: 'var(--text)',
-                fontSize: 14, fontFamily: 'DM Mono', outline: 'none',
-                transition: 'border-color 0.15s',
+                fontSize: 13, fontFamily: 'DM Mono', outline: 'none',
               }}
               onFocus={e => e.target.style.borderColor = 'var(--dispatched)'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
             />
-            {manualDispatchOrder.tracking_number && !manualDispatchAwb && (
-              <p style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
-                Leave blank to use existing AWB: {manualDispatchOrder.tracking_number}
-              </p>
-            )}
+            <p style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
+              This will be stored in the order history for reference.
+            </p>
           </div>
           <ModalActions
-            onCancel={() => { setManualDispatchOrder(null); setManualDispatchAwb('') }}
+            onCancel={() => { setManualDispatchOrder(null); setManualDispatchSku('') }}
             onConfirm={handleManualDispatch}
             confirmLabel={manualDispatching ? 'Marking…' : 'Mark as Dispatched'}
             confirmColor="var(--dispatched)"
-            disabled={manualDispatching}
+            disabled={manualDispatching || !manualDispatchSku.trim()}
           />
         </Modal>
       )}
