@@ -641,11 +641,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const isPast = date < today
       const isToday = date === today
       const daysDiff = Math.round((new Date(date).getTime() - new Date(today).getTime()) / 86400000)
-      const label = isPast ? `${Math.abs(daysDiff)}d late`
-        : isToday ? 'Today'
+      // Always show actual date as primary label
+      const dateLabel = isToday ? 'Today'
         : date === tomorrow ? 'Tomorrow'
         : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-      return { key: date, label, isUrgent: date <= todayPlus2 && !isPast, isOverdue: isPast }
+      // Sub-label shows overdue indicator
+      const sublabel = isPast ? `${Math.abs(daysDiff)}d late` : undefined
+      return { key: date, label: dateLabel, sublabel, isUrgent: date <= todayPlus2 && !isPast, isOverdue: isPast }
     })
 
     const totalOrders = undecided.length
