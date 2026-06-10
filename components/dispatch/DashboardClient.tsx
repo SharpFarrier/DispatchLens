@@ -592,29 +592,30 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
     // Group into ISO weeks
     const weekBuckets: Record<string, string[]> = {}
-    const weekMeta: Record<string, { weekNum: number; startDate: string; endDate: string }> = {}
+    const weekMeta: Record<string, { weekNum: number; startDate: string; endDate: string; label: string }> = {}
     allDates.forEach(date => {
       const wNum = getISOWeek(date)
       const d = new Date(date + 'T00:00:00')
       const dayOfWeek = d.getDay() === 0 ? 6 : d.getDay() - 1
       const weekStart = new Date(d); weekStart.setDate(d.getDate() - dayOfWeek)
       const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6)
+      // Use week number as the unique key — prevents duplicate week entries
       const wKey = `W${String(wNum).padStart(2, '0')}`
       const startFmt = weekStart.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
       const endFmt = weekEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
       const wLabel = `${wKey}·${startFmt}–${endFmt}`
-      if (!weekBuckets[wLabel]) { weekBuckets[wLabel] = []; weekMeta[wLabel] = { weekNum: wNum, startDate: weekStart.toISOString().split('T')[0], endDate: weekEnd.toISOString().split('T')[0] } }
-      weekBuckets[wLabel].push(date)
+      if (!weekBuckets[wKey]) { weekBuckets[wKey] = []; weekMeta[wKey] = { weekNum: wNum, startDate: weekStart.toISOString().split('T')[0], endDate: weekEnd.toISOString().split('T')[0], label: wLabel } }
+      weekBuckets[wKey].push(date)
     })
 
     const weekSkuQty: Record<string, Record<string, number>> = {}
     const weekSkuOrders: Record<string, Record<string, number>> = {}
-    Object.entries(weekBuckets).forEach(([wLabel, dates]) => {
-      weekSkuQty[wLabel] = {}; weekSkuOrders[wLabel] = {}
+    Object.entries(weekBuckets).forEach(([wKey, dates]) => {
+      weekSkuQty[wKey] = {}; weekSkuOrders[wKey] = {}
       dates.forEach(date => {
         Object.entries(dateSkuQty[date] || {}).forEach(([sku, qty]) => {
-          weekSkuQty[wLabel][sku] = (weekSkuQty[wLabel][sku] || 0) + qty
-          weekSkuOrders[wLabel][sku] = (weekSkuOrders[wLabel][sku] || 0) + (dateSkuOrders[date][sku] || 0)
+          weekSkuQty[wKey][sku] = (weekSkuQty[wKey][sku] || 0) + qty
+          weekSkuOrders[wKey][sku] = (weekSkuOrders[wKey][sku] || 0) + (dateSkuOrders[date][sku] || 0)
         })
       })
     })
@@ -626,12 +627,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     undecided.forEach(o => { skuTotals[o.sku] = (skuTotals[o.sku] || 0) + o.qty })
     allSkus.sort((a, b) => (skuTotals[b] || 0) - (skuTotals[a] || 0))
 
-    const weeklyCols = sortedWeekLabels.map(wLabel => {
-      const meta = weekMeta[wLabel]
-      const parts = wLabel.split('·')
+    const weeklyCols = sortedWeekLabels.map(wKey => {
+      const meta = weekMeta[wKey]
+      const parts = meta.label.split('·')
       const isThisWeek = today >= meta.startDate && today <= meta.endDate
       const isPast = meta.endDate < today
-      return { key: wLabel, label: parts[0].trim(), sublabel: parts[1]?.trim() || '', isUrgent: isThisWeek, isOverdue: isPast, startDate: meta.startDate }
+      return { key: wKey, label: parts[0].trim(), sublabel: parts[1]?.trim() || '', isUrgent: isThisWeek, isOverdue: isPast, startDate: meta.startDate }
     })
 
     const todayPlus2 = new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0]
