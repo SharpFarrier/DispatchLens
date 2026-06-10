@@ -967,6 +967,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'plan', label: activeOrders.length ? `Plan (${activeOrders.length})` : 'Plan', show: access.can_plan },
             { key: 'review', label: reviewCount > 0 ? `Review (${reviewCount})` : 'Review', show: access.can_review },
             { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: access.can_picklist },
+            { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_eod },
             { key: 'eod', label: 'End of Day', show: access.can_eod },
             { key: 'users', label: 'Users', show: access.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
