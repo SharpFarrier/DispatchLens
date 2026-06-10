@@ -85,11 +85,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
   // History panel
   const [historyOrder, setHistoryOrder] = useState<DBOrder | null>(null)
+  // Manual dispatch
+  const [manualDispatchOrder, setManualDispatchOrder] = useState<DBOrder | null>(null)
+  const [manualDispatchAwb, setManualDispatchAwb] = useState('')
+  const [manualDispatching, setManualDispatching] = useState(false)
   // Global search
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   // Picklist print selection
   const [selectedPrintDates, setSelectedPrintDates] = useState<Set<string>>(new Set())
+  // Dispatch date filter (Plan tab)
+  const [dispatchDateFilter, setDispatchDateFilter] = useState<Set<string>>(new Set())
+  const [showDispatchDatePopover, setShowDispatchDatePopover] = useState(false)
+  const [dispatchDatePopoverPos, setDispatchDatePopoverPos] = useState({ top: 0, left: 0 })
 
   // Unfulfillable from picklist
   const [unfulfillableSku, setUnfulfillableSku] = useState<string | null>(null)
@@ -448,12 +456,28 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }, [orders, searchQuery])
 
   // ── Computed ──
+  const today = new Date().toISOString().split('T')[0]
   const activeOrders = useMemo(() => orders.filter(o => !o.is_cancelled && !o.is_dispatched), [orders])
   const cancelledOrders = useMemo(() => orders.filter(o => o.is_cancelled), [orders])
+
+  // Unique scheduled dates for dispatch date filter
+  const uniqueDispatchDates = useMemo(() => {
+    const vals = new Set<string>()
+    let base = [...activeOrders]
+    if (activeFilter === 'scheduled_today') base = base.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
+    else if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
+    else if (activeFilter === 'hold') base = base.filter(o => o.plan_decision === 'hold')
+    else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
+    else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
+    else if (activeFilter !== 'ALL') base = base.filter(o => o.urgency === (activeFilter as string))
+    if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
+    if (daysFilter.size > 0) base = base.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
+    base.forEach(o => vals.add(o.scheduled_date || 'none'))
+    return Array.from(vals).sort()
+  }, [activeOrders, activeFilter, courierFilter, daysFilter, today])
   const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
   const unfulfillableOrders = useMemo(() => activeOrders.filter(o => o.plan_decision === 'unfulfillable'), [activeOrders])
 
-  const today = new Date().toISOString().split('T')[0]
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
   const dispatchTodayCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
   const holdCount = useMemo(() => orders.filter(o => o.plan_decision === 'hold' && !o.is_cancelled).length, [orders])
@@ -481,6 +505,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     // Days left filter (applied to display value = raw - 1)
     if (daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
     if (courierFilter.size > 0) list = list.filter(o => courierFilter.has(o.courier))
+    if (dispatchDateFilter.size > 0) list = list.filter(o => dispatchDateFilter.has(o.scheduled_date || 'none'))
     // Sort
     const to: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
     if (sortCol) {
@@ -506,7 +531,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [activeOrders, activeFilter, daysFilter, courierFilter, sortCol, sortDir])
+  }, [activeOrders, activeFilter, daysFilter, courierFilter, dispatchDateFilter, sortCol, sortDir])
 
   // Unique display days left values — based on currently filtered list (respects active KPI/urgency filter)
   const uniqueDaysLeft = useMemo(() => {
@@ -594,7 +619,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false) }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -1313,7 +1338,86 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             </div>
                           )}
                         </th>
-                        <th style={{ padding: '9px 12px', color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Decision</th>
+                        <th style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Decision</span>
+                            <button
+                              onClick={e => {
+                                e.stopPropagation()
+                                const rect = e.currentTarget.getBoundingClientRect()
+                                setDispatchDatePopoverPos({ top: rect.bottom + 6, left: rect.left })
+                                setShowDispatchDatePopover(v => !v)
+                                setShowDaysPopover(false)
+                                setShowCourierPopover(false)
+                              }}
+                              style={{
+                                background: dispatchDateFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                border: dispatchDateFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                color: dispatchDateFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                              }}
+                            >
+                              {dispatchDateFilter.size > 0 ? `${dispatchDateFilter.size} ▾` : '▾'}
+                            </button>
+                            {dispatchDateFilter.size > 0 && (
+                              <button onClick={() => setDispatchDateFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>
+                            )}
+                          </div>
+                          {/* Dispatch date popover */}
+                          {showDispatchDatePopover && (
+                            <div
+                              style={{
+                                position: 'fixed' as const,
+                                top: dispatchDatePopoverPos.top,
+                                left: dispatchDatePopoverPos.left,
+                                zIndex: 500,
+                                background: 'var(--surface)', border: '1px solid var(--border)',
+                                borderRadius: 8, padding: 12, minWidth: 200,
+                                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                              }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DISPATCH DATE</span>
+                                <button onClick={() => { setDispatchDateFilter(new Set()); setShowDispatchDatePopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
+                                {uniqueDispatchDates.map(date => {
+                                  const isSelected = dispatchDateFilter.has(date)
+                                  const isToday = date === today
+                                  const label = date === 'none' ? 'No date set'
+                                    : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+                                  const color = date === 'none' ? 'var(--text3)' : isToday ? '#059669' : 'var(--hold)'
+                                  const count = activeOrders.filter(o => (o.scheduled_date || 'none') === date).length
+                                  return (
+                                    <button key={date} onClick={() => {
+                                      setDispatchDateFilter(prev => {
+                                        const n = new Set(prev)
+                                        n.has(date) ? n.delete(date) : n.add(date)
+                                        return n
+                                      })
+                                    }} style={{
+                                      display: 'flex', alignItems: 'center', gap: 8,
+                                      padding: '5px 8px', borderRadius: 5, border: 'none',
+                                      background: isSelected ? 'var(--accent-bg)' : 'transparent',
+                                      cursor: 'pointer', textAlign: 'left' as const, width: '100%',
+                                    }}>
+                                      <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                        {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+                                      </span>
+                                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color, flex: 1 }}>
+                                        {label}{isToday && ' (Today)'}
+                                      </span>
+                                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              <button onClick={() => setShowDispatchDatePopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                            </div>
+                          )}
+                        </th>
                         <th style={{ padding: '9px 12px', width: 32 }} />
                       </tr>
                     </thead>
@@ -1329,6 +1433,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           onPriority={togglePriority}
                           onCancel={id => setCancelOrderId(id)}
                           onHistory={order => setHistoryOrder(order)}
+                          onManualDispatch={order => setManualDispatchOrder(order)}
                         />
                       ))}
                     </tbody>
@@ -1825,7 +1930,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, daysLeftDisplay }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, daysLeftDisplay }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   onSelect: (id: string) => void
@@ -1834,6 +1939,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onPriority: (id: string, current: boolean) => void
   onCancel: (id: string) => void
   onHistory: (order: DBOrder) => void
+  onManualDispatch: (order: DBOrder) => void
 }) {
   const uc = {
     CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
