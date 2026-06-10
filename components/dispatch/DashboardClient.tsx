@@ -402,7 +402,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1/awbno`, {
                 method: 'GET',
                 headers: {
-                  'JWTToken': `Bearer ${bdToken}`,
+                  'JWTToken': bdToken,
                   'LoginID': BD_LOGIN_ID,
                   'LicenceKey': BD_LICENCE_KEY,
                   'AWBNo': o.tracking_number!,
