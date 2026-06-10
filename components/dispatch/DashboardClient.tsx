@@ -71,6 +71,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispatchedSortCol, setDispatchedSortCol] = useState<string | null>('dispatched_at')
   const [dispatchedSortDir, setDispatchedSortDir] = useState<'asc' | 'desc'>('desc')
   const [dispatchedSearch, setDispatchedSearch] = useState('')
+  // Tracking
+  const [trackingData, setTrackingData] = useState<Record<string, { status: string; label: string; lastUpdate: string }>>({})
+  const [trackingLoading, setTrackingLoading] = useState(false)
+  const [trackingLastSync, setTrackingLastSync] = useState<Date | null>(null)
   const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
   const [showDaysPopover, setShowDaysPopover] = useState(false)
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 })
@@ -338,6 +342,28 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, tracking_number: val || null } : o))
     setEditingAwbId(null)
     setEditingAwbValue('')
+  }
+
+  // ── Sync tracking ──
+  const syncTracking = async () => {
+    const toTrack = dispatchedOrders.filter(o => o.tracking_number)
+    if (!toTrack.length) return
+    setTrackingLoading(true)
+    try {
+      const res = await fetch('/api/tracking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orders: toTrack.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier }))
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setTrackingData(data)
+        setTrackingLastSync(new Date())
+      }
+    } catch (e) { console.error('Tracking sync failed:', e) }
+    setTrackingLoading(false)
   }
 
   // ── Unfulfillable by SKU (partial or full) ──
@@ -2213,8 +2239,24 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Dispatched Orders</h1>
               <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filteredDispatched.length} of {dispatchedOrders.length}</span>
+              {/* Sync tracking */}
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                {trackingLastSync && (
+                  <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                    Synced {trackingLastSync.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+                <button onClick={syncTracking} disabled={trackingLoading} style={{
+                  padding: '7px 16px', borderRadius: 7, border: 'none', cursor: trackingLoading ? 'default' : 'pointer',
+                  background: trackingLoading ? 'var(--bg2)' : 'var(--accent)', color: trackingLoading ? 'var(--text3)' : '#fff',
+                  fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <RefreshCw size={13} style={{ animation: trackingLoading ? 'spin 1s linear infinite' : 'none' }} />
+                  {trackingLoading ? 'Syncing…' : 'Sync Tracking'}
+                </button>
+              </div>
               {/* Search */}
-              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 12px' }}>
                 <Search size={13} style={{ color: 'var(--text3)' }} />
                 <input
                   value={dispatchedSearch}
@@ -2240,6 +2282,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         { label: 'AWB', col: 'tracking_number' },
                         { label: 'Pincode · City', col: 'pincode' },
                         { label: 'Promise', col: 'promise_date' },
+                        { label: 'Status', col: null },
                         { label: '', col: null },
                       ] as { label: string; col: string | null }[]).map(({ label, col }) => (
                         <th key={label || 'action'}
@@ -2310,6 +2353,39 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           </td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}{order.city ? ` · ${order.city}` : ''}</td>
                           <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
+                          <td style={{ padding: '9px 12px' }}>
+                            {order.tracking_number && trackingData[order.tracking_number] ? (() => {
+                              const t = trackingData[order.tracking_number]
+                              const colors: Record<string, { color: string; bg: string; border: string }> = {
+                                delivered:   { color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' },
+                                ofd:         { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7' },
+                                in_transit:  { color: 'var(--hold)', bg: 'var(--hold-bg)', border: '#bfdbfe' },
+                                picked_up:   { color: 'var(--plan)', bg: 'var(--bg2)', border: 'var(--border)' },
+                                ndr:         { color: 'var(--today)', bg: 'var(--today-bg)', border: '#fed7aa' },
+                                rto:         { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
+                                booked:      { color: 'var(--text3)', bg: 'var(--bg2)', border: 'var(--border)' },
+                                unknown:     { color: 'var(--text3)', bg: 'var(--bg2)', border: 'var(--border)' },
+                              }
+                              const c = colors[t.status] || colors.unknown
+                              return (
+                                <a
+                                  href={order.courier === 'Bluedart'
+                                    ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${order.tracking_number}`
+                                    : `https://www.delhivery.com/track/package/${order.tracking_number}`}
+                                  target="_blank" rel="noopener noreferrer"
+                                  style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 4, border: `1px solid ${c.border}`, background: c.bg, color: c.color, fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap' as const }}
+                                  onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+                                  onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
+                                >
+                                  {t.label} <ExternalLink size={9} />
+                                </a>
+                              )
+                            })() : (
+                              <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+                                {order.tracking_number ? '—' : 'No AWB'}
+                              </span>
+                            )}
+                          </td>
                           <td style={{ padding: '9px 12px' }}>
                             <button onClick={() => setHistoryOrder(order)} title="View history"
                               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'flex', alignItems: 'center', borderRadius: 4, transition: 'color 0.15s' }}
