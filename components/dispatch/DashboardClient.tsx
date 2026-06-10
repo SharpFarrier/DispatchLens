@@ -344,25 +344,110 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setEditingAwbValue('')
   }
 
-  // ── Sync tracking ──
+  // ── Sync tracking (called directly from browser) ──
+  const WORKER = 'https://tracklens-proxy.adityaramnani91581.workers.dev'
+  const BD_API_KEY = 'WxObKDF1pSM0GWYCBBjnemimMH7Ed3Gp'
+  const BD_API_SECRET = 'j2FGlGEWnGcgVYDs'
+  const BD_LOGIN_ID = 'BOM41184'
+  const BD_LICENCE_KEY = 'hkfoiszukslp0umqriqgn2bolmgovtge'
+
+  const normalizeBD = (code: string, desc: string) => {
+    const s = (code + ' ' + desc).toLowerCase()
+    if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
+    if (s.includes('out for delivery') || s.includes('ofd')) return { status: 'ofd', label: 'Out for Delivery' }
+    if (s.includes('ndr') || s.includes('delivery attempt') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
+    if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
+    if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
+    if (s.includes('transit') || s.includes('arrived') || s.includes('departed')) return { status: 'in_transit', label: 'In Transit' }
+    if (s.includes('booked') || s.includes('manifested')) return { status: 'booked', label: 'Booked' }
+    return { status: 'unknown', label: desc || code || 'Unknown' }
+  }
+
+  const normalizeDL = (status: string) => {
+    const s = (status || '').toLowerCase()
+    if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
+    if (s.includes('out for delivery')) return { status: 'ofd', label: 'Out for Delivery' }
+    if (s.includes('failed delivery') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
+    if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
+    if (s.includes('transit')) return { status: 'in_transit', label: 'In Transit' }
+    if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
+    return { status: 'booked', label: status || 'Booked' }
+  }
+
   const syncTracking = async () => {
     const toTrack = dispatchedOrders.filter(o => o.tracking_number)
     if (!toTrack.length) return
     setTrackingLoading(true)
+    const results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
+
     try {
-      const res = await fetch('/api/tracking', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orders: toTrack.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier }))
-        }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setTrackingData(data)
-        setTrackingLastSync(new Date())
+      // 1. Get Bluedart JWT
+      const bdOrders = toTrack.filter(o => o.courier === 'Bluedart')
+      const dlOrders = toTrack.filter(o => o.courier === 'Delhivery')
+
+      if (bdOrders.length) {
+        let bdToken: string | null = null
+        try {
+          const tokenRes = await fetch(`${WORKER}/bluedart/in/transportation/token/v1/login`, {
+            method: 'GET',
+            headers: { 'ClientID': BD_API_KEY, 'ClientSecret': BD_API_SECRET },
+          })
+          const tokenData = await tokenRes.json()
+          bdToken = tokenData?.JWTToken || null
+        } catch { /* token failed */ }
+
+        if (bdToken) {
+          await Promise.all(bdOrders.map(async o => {
+            try {
+              const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1/awbno`, {
+                method: 'GET',
+                headers: {
+                  'JWTToken': `Bearer ${bdToken}`,
+                  'LoginID': BD_LOGIN_ID,
+                  'LicenceKey': BD_LICENCE_KEY,
+                  'AWBNo': o.tracking_number!,
+                },
+              })
+              const data = await res.json()
+              const shipment = data?.ShipmentData?.[0]?.Shipment
+              if (shipment) {
+                const scan = shipment.Scans?.[0]?.ScanDetail
+                results[o.tracking_number!] = {
+                  ...normalizeBD(scan?.ScanType || '', scan?.Scan || shipment.Status || ''),
+                  lastUpdate: scan?.ScanDate || '',
+                }
+              }
+            } catch { /* skip */ }
+          }))
+        }
+      }
+
+      // 2. Delhivery — batch
+      if (dlOrders.length) {
+        const batches = []
+        for (let i = 0; i < dlOrders.length; i += 10) batches.push(dlOrders.slice(i, i + 10))
+        await Promise.all(batches.map(async batch => {
+          try {
+            const awbs = batch.map(o => o.tracking_number!).join(',')
+            const res = await fetch(`${WORKER}/delhivery/v1/packages/json/?waybill=${awbs}`)
+            const data = await res.json()
+            ;(data?.ShipmentData || []).forEach((pkg: Record<string, unknown>) => {
+              const awb = pkg.AWB as string
+              if (awb) {
+                const scans = pkg.Scans as Record<string, unknown>[] || []
+                results[awb] = {
+                  ...normalizeDL(pkg.Status as string || ''),
+                  lastUpdate: scans[0]?.ScanDateTime as string || '',
+                }
+              }
+            })
+          } catch { /* skip */ }
+        }))
       }
     } catch (e) { console.error('Tracking sync failed:', e) }
+
+    setTrackingData(results)
+    setTrackingLastSync(new Date())
     setTrackingLoading(false)
   }
 
