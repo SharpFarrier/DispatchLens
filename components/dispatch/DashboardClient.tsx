@@ -580,10 +580,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const dateSkuQty: Record<string, Record<string, number>> = {}
     const dateSkuOrders: Record<string, Record<string, number>> = {}
     undecided.forEach(o => {
+      // Always compute dispatch deadline from days_left + today
       const dl = displayDaysLeft(o.days_left) ?? 999
-      const dateKey = o.dispatch_by_date
-        ? (typeof o.dispatch_by_date === 'string' ? o.dispatch_by_date.slice(0, 10) : String(o.dispatch_by_date))
-        : daysLeftToDate(dl)
+      const dateKey = daysLeftToDate(dl)
       if (!dateSkuQty[dateKey]) { dateSkuQty[dateKey] = {}; dateSkuOrders[dateKey] = {} }
       dateSkuQty[dateKey][o.sku] = (dateSkuQty[dateKey][o.sku] || 0) + o.qty
       dateSkuOrders[dateKey][o.sku] = (dateSkuOrders[dateKey][o.sku] || 0) + 1
