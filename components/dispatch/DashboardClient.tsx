@@ -97,6 +97,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [showSearch, setShowSearch] = useState(false)
   // Picklist print selection
   const [selectedPrintDates, setSelectedPrintDates] = useState<Set<string>>(new Set())
+  // Upcoming demand expanded weeks
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set())
   // Dispatch date filter (Plan tab)
   const [dispatchDateFilter, setDispatchDateFilter] = useState<Set<string>>(new Set())
   const [showDispatchDatePopover, setShowDispatchDatePopover] = useState(false)
@@ -537,6 +539,65 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // Display days left = raw - 1 (buffer)
   const displayDaysLeft = (raw: number | null) => raw === null ? null : raw - 1
+
+  // ── Upcoming demand (undecided orders grouped by days left) ──
+  const upcomingDemand = useMemo(() => {
+    const undecided = orders.filter(o => o.plan_decision === 'undecided' && !o.is_cancelled && !o.is_dispatched)
+
+    // Group by days_left bucket
+    const dayMap: Record<number, DBOrder[]> = {}
+    undecided.forEach(o => {
+      const d = displayDaysLeft(o.days_left) ?? 999
+      if (!dayMap[d]) dayMap[d] = []
+      dayMap[d].push(o)
+    })
+
+    // Group days into weeks: week 0 = days ≤0..6, week 1 = 7..13, week 2 = 14..20, etc
+    const weekMap: Record<number, { days: Record<number, DBOrder[]>; orders: DBOrder[] }> = {}
+    Object.entries(dayMap).forEach(([dStr, orders]) => {
+      const d = parseInt(dStr)
+      const week = d <= 0 ? 0 : Math.floor((d - 1) / 7)
+      if (!weekMap[week]) weekMap[week] = { days: {}, orders: [] }
+      weekMap[week].days[d] = orders
+      weekMap[week].orders.push(...orders)
+    })
+
+    return Object.entries(weekMap)
+      .sort(([a], [b]) => parseInt(a) - parseInt(b))
+      .map(([weekStr, { days, orders }]) => {
+        const week = parseInt(weekStr)
+        const minDay = Math.min(...Object.keys(days).map(Number))
+        const maxDay = Math.max(...Object.keys(days).map(Number))
+        // SKU summary for the week
+        const skuMap: Record<string, { count: number; qty: number }> = {}
+        orders.forEach(o => {
+          if (!skuMap[o.sku]) skuMap[o.sku] = { count: 0, qty: 0 }
+          skuMap[o.sku].count += 1
+          skuMap[o.sku].qty += o.qty
+        })
+        const skus = Object.entries(skuMap).sort((a, b) => b[1].qty - a[1].qty)
+        // Daily breakdown
+        const dailyBreakdown = Object.entries(days)
+          .sort(([a], [b]) => parseInt(a) - parseInt(b))
+          .map(([dStr, dayOrders]) => {
+            const d = parseInt(dStr)
+            const daySkuMap: Record<string, { count: number; qty: number }> = {}
+            dayOrders.forEach(o => {
+              if (!daySkuMap[o.sku]) daySkuMap[o.sku] = { count: 0, qty: 0 }
+              daySkuMap[o.sku].count += 1
+              daySkuMap[o.sku].qty += o.qty
+            })
+            return { day: d, orders: dayOrders.length, qty: dayOrders.reduce((s, o) => s + o.qty, 0), skus: Object.entries(daySkuMap).sort((a, b) => b[1].qty - a[1].qty) }
+          })
+        return {
+          week, minDay, maxDay,
+          orderCount: orders.length,
+          qty: orders.reduce((s, o) => s + o.qty, 0),
+          skus, dailyBreakdown,
+        }
+      })
+  }, [orders, displayDaysLeft])
+
 
   const filteredActive = useMemo(() => {
     let list = [...activeOrders]
@@ -1922,6 +1983,103 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 )
               })
             )}
+          {/* ════ UPCOMING DEMAND ════ */}
+          {upcomingDemand.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>Upcoming Demand</h2>
+                <span style={{ fontSize: 13, color: 'var(--text3)' }}>
+                  {orders.filter(o => o.plan_decision === 'undecided' && !o.is_cancelled && !o.is_dispatched).length} undecided orders
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 10px' }}>
+                  Weekly · click to expand daily
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
+                {upcomingDemand.map(({ week, minDay, maxDay, orderCount, qty, skus, dailyBreakdown }) => {
+                  const isExpanded = expandedWeeks.has(String(week))
+                  const isUrgent = minDay <= 2
+                  const isThisWeek = week === 0
+                  const weekLabel = isThisWeek
+                    ? minDay <= 0 ? 'Overdue / This Week' : 'This Week'
+                    : week === 1 ? 'Next Week'
+                    : `Week ${week + 1} (${minDay}–${maxDay} days)`
+                  const accentColor = isUrgent ? '#dc2626' : isThisWeek ? 'var(--today)' : week === 1 ? 'var(--hold)' : 'var(--text3)'
+                  const bgColor = isUrgent ? '#fef2f2' : isThisWeek ? 'var(--today-bg)' : 'var(--surface)'
+                  const borderColor = isUrgent ? '#fca5a5' : isThisWeek ? '#fed7aa' : 'var(--border)'
+
+                  return (
+                    <div key={week} style={{ border: `1px solid ${borderColor}`, borderRadius: 10, overflow: 'hidden' }}>
+                      {/* Week header */}
+                      <div
+                        onClick={() => setExpandedWeeks(prev => {
+                          const n = new Set(prev)
+                          n.has(String(week)) ? n.delete(String(week)) : n.add(String(week))
+                          return n
+                        })}
+                        style={{
+                          padding: '12px 20px', background: bgColor,
+                          display: 'flex', alignItems: 'center', gap: 14,
+                          cursor: 'pointer', userSelect: 'none' as const,
+                        }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 600, color: accentColor, minWidth: 160 }}>{weekLabel}</span>
+                        <div style={{ display: 'flex', gap: 16 }}>
+                          <span style={{ fontSize: 12, color: 'var(--text2)' }}><strong style={{ fontFamily: 'DM Mono', color: accentColor }}>{orderCount}</strong> orders</span>
+                          <span style={{ fontSize: 12, color: 'var(--text2)' }}><strong style={{ fontFamily: 'DM Mono', color: accentColor }}>{qty}</strong> pcs</span>
+                        </div>
+                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                            {isExpanded ? '▲ collapse' : '▼ daily breakdown'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* SKU summary (always visible) */}
+                      <div style={{ padding: '10px 20px', borderTop: `1px solid ${borderColor}`, background: 'var(--surface)' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '6px 12px' }}>
+                          {skus.slice(0, 12).map(([sku, { count, qty }]) => (
+                            <div key={sku} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 20, fontSize: 11 }}>
+                              <span style={{ fontFamily: 'DM Mono', color: 'var(--text)', fontWeight: 500 }}>{sku}</span>
+                              <span style={{ color: accentColor, fontFamily: 'DM Mono', fontWeight: 700 }}>{qty}</span>
+                              <span style={{ color: 'var(--text3)' }}>({count} orders)</span>
+                            </div>
+                          ))}
+                          {skus.length > 12 && (
+                            <span style={{ fontSize: 11, color: 'var(--text3)', padding: '3px 8px' }}>+{skus.length - 12} more SKUs</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Daily breakdown (expandable) */}
+                      {isExpanded && (
+                        <div style={{ borderTop: `1px solid ${borderColor}` }}>
+                          {dailyBreakdown.map(({ day, orders: dayCount, qty: dayQty, skus: daySkus }) => (
+                            <div key={day} style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                              <div style={{ minWidth: 90 }}>
+                                <div style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 600, color: day <= 0 ? '#dc2626' : day <= 2 ? 'var(--today)' : 'var(--text2)' }}>
+                                  {day <= 0 ? `${Math.abs(day)}d overdue` : `${day}d left`}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{dayCount} orders · {dayQty} pcs</div>
+                              </div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '4px 8px', flex: 1 }}>
+                                {daySkus.map(([sku, { qty: sq }]) => (
+                                  <span key={sku} style={{ fontSize: 11, fontFamily: 'DM Mono', padding: '2px 8px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12 }}>
+                                    {sku} <strong style={{ color: accentColor }}>{sq}</strong>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           </div>
         )}
 
