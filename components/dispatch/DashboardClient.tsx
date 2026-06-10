@@ -10,7 +10,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil, Filter
+  Ban, History, Search, Pencil, Filter, ExternalLink
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'users'
@@ -2281,10 +2281,32 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             </span>
                           </td>
                           <td style={{ padding: '9px 12px' }}>
-                            {order.tracking_number
-                              ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 7px', borderRadius: 4, border: '1px solid #bbf7d0' }}>{order.tracking_number}</span>
-                              : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>
-                            }
+                            {order.tracking_number ? (
+                              <a
+                                href={order.courier === 'Bluedart'
+                                  ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${order.tracking_number}`
+                                  : `https://www.delhivery.com/track/package/${order.tracking_number}`
+                                }
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontFamily: 'DM Mono', fontSize: 11,
+                                  color: 'var(--dispatched)',
+                                  background: 'var(--dispatched-bg)',
+                                  padding: '2px 7px', borderRadius: 4,
+                                  border: '1px solid #bbf7d0',
+                                  textDecoration: 'none',
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                }}
+                                onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+                                onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
+                              >
+                                {order.tracking_number}
+                                <ExternalLink size={9} />
+                              </a>
+                            ) : (
+                              <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>
+                            )}
                           </td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}{order.city ? ` · ${order.city}` : ''}</td>
                           <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
