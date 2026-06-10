@@ -1982,7 +1982,19 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{daysLeftDisplay !== null ? daysLeftDisplay : '—'}</span></td>
       <td style={{ padding: '6px 12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' as const }}>
+          {/* Manual dispatch button */}
+          <button onClick={() => onManualDispatch(order)} style={{
+            padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+            fontFamily: 'DM Sans', fontWeight: 600,
+            background: 'var(--dispatched-bg)',
+            border: '1px solid #bbf7d0',
+            color: 'var(--dispatched)',
+            whiteSpace: 'nowrap' as const,
+            display: 'flex', alignItems: 'center', gap: 3,
+          }}>
+            <CheckCircle size={11} /> Dispatch
+          </button>
           {/* Date picker — sets scheduled */}
           <div style={{ position: 'relative' as const }}>
             <input
