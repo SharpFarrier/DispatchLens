@@ -10,7 +10,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search
+  Ban, History, Search, Pencil
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'users'
@@ -90,6 +90,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [historyOrder, setHistoryOrder] = useState<DBOrder | null>(null)
   // Manual dispatch
   const [manualDispatchOrder, setManualDispatchOrder] = useState<DBOrder | null>(null)
+  // AWB editing
+  const [editingAwbId, setEditingAwbId] = useState<string | null>(null)
+  const [editingAwbValue, setEditingAwbValue] = useState('')
   const [manualDispatchSku, setManualDispatchSku] = useState('')
   const [manualDispatching, setManualDispatching] = useState(false)
   // Global search
@@ -326,6 +329,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setManualDispatching(false)
   }
 
+  // ── Save AWB edit ──
+  const saveAwb = async (orderId: string) => {
+    const val = editingAwbValue.trim()
+    await supabase.from('dispatch_orders').update({ tracking_number: val || null, updated_at: new Date().toISOString() }).eq('id', orderId)
+    const order = orders.find(o => o.id === orderId)
+    if (order) logEvent(order.order_id, 'note', `Tracking number updated to: ${val || '(cleared)'}`)
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, tracking_number: val || null } : o))
+    setEditingAwbId(null)
+    setEditingAwbValue('')
+  }
+
   // ── Unfulfillable by SKU (partial or full) ──
   const handleUnfulfillableSku = async () => {
     if (!unfulfillableSku || !allocationPreview) return
@@ -485,6 +499,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const cancelledOrders = useMemo(() => orders.filter(o => o.is_cancelled), [orders])
 
   // Unique scheduled dates for dispatch date filter
+  const displayDaysLeft = (raw: number | null) => raw === null ? null : raw - 1
+
   const uniqueDispatchDates = useMemo(() => {
     const vals = new Set<string>()
     let base = [...activeOrders]
@@ -538,7 +554,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }, [activeOrders])
 
   // Display days left = raw - 1 (buffer)
-  const displayDaysLeft = (raw: number | null) => raw === null ? null : raw - 1
 
   // ── Upcoming demand (undecided orders grouped by days left) ──
   const upcomingDemand = useMemo(() => {
@@ -1589,6 +1604,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           onCancel={id => setCancelOrderId(id)}
                           onHistory={order => setHistoryOrder(order)}
                           onManualDispatch={order => setManualDispatchOrder(order)}
+                          editingAwbId={editingAwbId}
+                          editingAwbValue={editingAwbValue}
+                          onEditAwb={(id, val) => { setEditingAwbId(id); setEditingAwbValue(val) }}
+                          onSaveAwb={saveAwb}
+                          onCancelAwb={() => { setEditingAwbId(null); setEditingAwbValue('') }}
                         />
                       ))}
                     </tbody>
@@ -2362,7 +2382,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, daysLeftDisplay }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   onSelect: (id: string) => void
@@ -2372,6 +2392,11 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onCancel: (id: string) => void
   onHistory: (order: DBOrder) => void
   onManualDispatch: (order: DBOrder) => void
+  editingAwbId: string | null
+  editingAwbValue: string
+  onEditAwb: (id: string, current: string) => void
+  onSaveAwb: (id: string) => void
+  onCancelAwb: () => void
 }) {
   const uc = {
     CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
@@ -2422,11 +2447,36 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
       </td>
       <td style={{ padding: '8px 12px' }}>{order.oda === 'ODA' && <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--today)', background: 'var(--today-bg)', padding: '1px 5px', borderRadius: 3, border: '1px solid #fed7aa' }}>ODA</span>}</td>
-      <td style={{ padding: '8px 12px' }}>
-        {order.tracking_number
-          ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0' }}>{order.tracking_number}</span>
-          : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
-        }
+      <td style={{ padding: '6px 12px' }}>
+        {editingAwbId === order.id ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              autoFocus
+              value={editingAwbValue}
+              onChange={e => onEditAwb(order.id, e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') onSaveAwb(order.id); if (e.key === 'Escape') onCancelAwb() }}
+              style={{ width: 130, padding: '3px 7px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, fontFamily: 'DM Mono', outline: 'none' }}
+            />
+            <button onClick={() => onSaveAwb(order.id)} style={{ background: 'var(--dispatched)', border: 'none', borderRadius: 4, cursor: 'pointer', color: '#fff', fontSize: 10, padding: '3px 7px', fontWeight: 600 }}>✓</button>
+            <button onClick={onCancelAwb} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '3px 6px' }}>✕</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {order.tracking_number
+              ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0' }}>{order.tracking_number}</span>
+              : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
+            }
+            <button
+              onClick={() => onEditAwb(order.id, order.tracking_number || '')}
+              title="Edit tracking number"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, opacity: 0.5, display: 'flex', alignItems: 'center' }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
+            >
+              <Pencil size={10} />
+            </button>
+          </div>
+        )}
       </td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
