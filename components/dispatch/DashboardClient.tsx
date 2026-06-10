@@ -10,7 +10,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil
+  Ban, History, Search, Pencil, Filter
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'users'
@@ -557,78 +557,102 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // ── Upcoming demand matrix (undecided orders: SKU rows × day columns) ──
   const [demandView, setDemandView] = useState<'weekly' | 'daily'>('weekly')
+  const [demandSkuFilter, setDemandSkuFilter] = useState<Set<string>>(new Set())
+  const [showDemandSkuPopover, setShowDemandSkuPopover] = useState(false)
+  const [demandSkuSearch, setDemandSkuSearch] = useState('')
+
+  // ISO week number helper
+  const getISOWeek = (dateStr: string): number => {
+    const d = new Date(dateStr + 'T00:00:00')
+    const jan4 = new Date(d.getFullYear(), 0, 4)
+    return Math.ceil(((d.getTime() - jan4.getTime()) / 86400000 + jan4.getDay() + 1) / 7)
+  }
+
+  const daysLeftToDate = (daysLeft: number): string => {
+    const d = new Date()
+    d.setDate(d.getDate() + daysLeft)
+    return d.toISOString().split('T')[0]
+  }
 
   const upcomingDemand = useMemo(() => {
     const undecided = orders.filter(o => o.plan_decision === 'undecided' && !o.is_cancelled && !o.is_dispatched)
 
-    // Build day → sku → qty map
-    const daySkuQty: Record<number, Record<string, number>> = {}
-    const daySkuOrders: Record<number, Record<string, number>> = {}
+    const dateSkuQty: Record<string, Record<string, number>> = {}
+    const dateSkuOrders: Record<string, Record<string, number>> = {}
     undecided.forEach(o => {
-      const d = displayDaysLeft(o.days_left) ?? 999
-      if (!daySkuQty[d]) { daySkuQty[d] = {}; daySkuOrders[d] = {} }
-      daySkuQty[d][o.sku] = (daySkuQty[d][o.sku] || 0) + o.qty
-      daySkuOrders[d][o.sku] = (daySkuOrders[d][o.sku] || 0) + 1
+      const dl = displayDaysLeft(o.days_left) ?? 999
+      const dateKey = o.dispatch_by_date
+        ? (typeof o.dispatch_by_date === 'string' ? o.dispatch_by_date.slice(0, 10) : String(o.dispatch_by_date))
+        : daysLeftToDate(dl)
+      if (!dateSkuQty[dateKey]) { dateSkuQty[dateKey] = {}; dateSkuOrders[dateKey] = {} }
+      dateSkuQty[dateKey][o.sku] = (dateSkuQty[dateKey][o.sku] || 0) + o.qty
+      dateSkuOrders[dateKey][o.sku] = (dateSkuOrders[dateKey][o.sku] || 0) + 1
     })
 
-    // All unique days sorted
-    const allDays = Object.keys(daySkuQty).map(Number).sort((a, b) => a - b)
+    const allDates = Object.keys(dateSkuQty).sort()
 
-    // Group days into weeks for weekly view
-    const weekBuckets: Record<number, number[]> = {}
-    allDays.forEach(d => {
-      const w = d <= 0 ? 0 : Math.floor((d - 1) / 7)
-      if (!weekBuckets[w]) weekBuckets[w] = []
-      weekBuckets[w].push(d)
+    // Group into ISO weeks
+    const weekBuckets: Record<string, string[]> = {}
+    const weekMeta: Record<string, { weekNum: number; startDate: string; endDate: string }> = {}
+    allDates.forEach(date => {
+      const wNum = getISOWeek(date)
+      const d = new Date(date + 'T00:00:00')
+      const dayOfWeek = d.getDay() === 0 ? 6 : d.getDay() - 1
+      const weekStart = new Date(d); weekStart.setDate(d.getDate() - dayOfWeek)
+      const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6)
+      const wKey = `W${String(wNum).padStart(2, '0')}`
+      const startFmt = weekStart.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      const endFmt = weekEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      const wLabel = `${wKey}·${startFmt}–${endFmt}`
+      if (!weekBuckets[wLabel]) { weekBuckets[wLabel] = []; weekMeta[wLabel] = { weekNum: wNum, startDate: weekStart.toISOString().split('T')[0], endDate: weekEnd.toISOString().split('T')[0] } }
+      weekBuckets[wLabel].push(date)
     })
 
-    // Collapse daily → weekly: merge sku quantities
     const weekSkuQty: Record<string, Record<string, number>> = {}
     const weekSkuOrders: Record<string, Record<string, number>> = {}
-    Object.entries(weekBuckets).forEach(([wStr, days]) => {
-      const wLabel = parseInt(wStr) === 0 ? 'This Week' : parseInt(wStr) === 1 ? 'Next Week' : `Week ${parseInt(wStr) + 1}`
-      weekSkuQty[wLabel] = {}
-      weekSkuOrders[wLabel] = {}
-      days.forEach(d => {
-        Object.entries(daySkuQty[d] || {}).forEach(([sku, qty]) => {
+    Object.entries(weekBuckets).forEach(([wLabel, dates]) => {
+      weekSkuQty[wLabel] = {}; weekSkuOrders[wLabel] = {}
+      dates.forEach(date => {
+        Object.entries(dateSkuQty[date] || {}).forEach(([sku, qty]) => {
           weekSkuQty[wLabel][sku] = (weekSkuQty[wLabel][sku] || 0) + qty
-          weekSkuOrders[wLabel][sku] = (weekSkuOrders[wLabel][sku] || 0) + (daySkuOrders[d][sku] || 0)
+          weekSkuOrders[wLabel][sku] = (weekSkuOrders[wLabel][sku] || 0) + (dateSkuOrders[date][sku] || 0)
         })
       })
     })
 
-    // All unique SKUs sorted by total qty desc
+    const sortedWeekLabels = Object.keys(weekBuckets).sort((a, b) => weekMeta[a].weekNum - weekMeta[b].weekNum)
+
     const allSkus = Array.from(new Set(undecided.map(o => o.sku)))
     const skuTotals: Record<string, number> = {}
     undecided.forEach(o => { skuTotals[o.sku] = (skuTotals[o.sku] || 0) + o.qty })
     allSkus.sort((a, b) => (skuTotals[b] || 0) - (skuTotals[a] || 0))
 
-    // Column headers
-    const dailyCols = allDays.map(d => ({
-      key: String(d),
-      label: d <= 0 ? `${Math.abs(d)}d overdue` : `${d}d`,
-      day: d,
-      isUrgent: d <= 2,
-      isOverdue: d <= 0,
-    }))
+    const weeklyCols = sortedWeekLabels.map(wLabel => {
+      const meta = weekMeta[wLabel]
+      const parts = wLabel.split('·')
+      const isThisWeek = today >= meta.startDate && today <= meta.endDate
+      const isPast = meta.endDate < today
+      return { key: wLabel, label: parts[0].trim(), sublabel: parts[1]?.trim() || '', isUrgent: isThisWeek, isOverdue: isPast, startDate: meta.startDate }
+    })
 
-    const weeklyCols = Object.keys(weekBuckets)
-      .sort((a, b) => parseInt(a) - parseInt(b))
-      .map(wStr => {
-        const w = parseInt(wStr)
-        const days = weekBuckets[w]
-        const label = w === 0 ? 'This Week' : w === 1 ? 'Next Week' : `Week ${w + 1}`
-        const minDay = Math.min(...days)
-        const maxDay = Math.max(...days)
-        return { key: label, label, minDay, maxDay, isUrgent: minDay <= 2, isOverdue: maxDay <= 0 }
-      })
+    const todayPlus2 = new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0]
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+    const dailyCols = allDates.map(date => {
+      const isPast = date < today
+      const isToday = date === today
+      const daysDiff = Math.round((new Date(date).getTime() - new Date(today).getTime()) / 86400000)
+      const label = isPast ? `${Math.abs(daysDiff)}d late`
+        : isToday ? 'Today'
+        : date === tomorrow ? 'Tomorrow'
+        : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      return { key: date, label, isUrgent: date <= todayPlus2 && !isPast, isOverdue: isPast }
+    })
 
-    // Total orders and qty
     const totalOrders = undecided.length
     const totalQty = undecided.reduce((s, o) => s + o.qty, 0)
 
-    return { allSkus, dailyCols, weeklyCols, daySkuQty, daySkuOrders, weekSkuQty, weekSkuOrders, skuTotals, totalOrders, totalQty }
-  }, [orders, displayDaysLeft])
+    return { allSkus, dailyCols, weeklyCols, dateSkuQty, dateSkuOrders, weekSkuQty, weekSkuOrders, skuTotals, totalOrders, totalQty }
+  }, [orders, displayDaysLeft, today])
 
 
   const filteredActive = useMemo(() => {
@@ -2024,9 +2048,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           {upcomingDemand.totalOrders > 0 && (
             <div style={{ marginTop: 8 }}>
               {/* Header row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' as const }}>
                 <h2 style={{ fontSize: 16, fontWeight: 600 }}>Upcoming Demand</h2>
-                {/* KPI pills */}
                 {[
                   { label: 'Undecided', value: upcomingDemand.totalOrders, color: 'var(--text)', bg: 'var(--bg2)', border: 'var(--border)' },
                   { label: 'Total pieces', value: upcomingDemand.totalQty, color: 'var(--hold)', bg: 'var(--hold-bg)', border: '#bfdbfe' },
@@ -2037,6 +2060,51 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <span style={{ fontSize: 11, color: 'var(--text3)' }}>{k.label}</span>
                   </div>
                 ))}
+                {/* SKU filter */}
+                <div style={{ position: 'relative' as const }}>
+                  <button onClick={() => setShowDemandSkuPopover(v => !v)} style={{
+                    padding: '5px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 500,
+                    background: demandSkuFilter.size > 0 ? 'var(--accent-bg)' : 'var(--bg2)',
+                    border: `1px solid ${demandSkuFilter.size > 0 ? 'var(--accent)' : 'var(--border)'}`,
+                    color: demandSkuFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}>
+                    <Filter size={11} />
+                    {demandSkuFilter.size > 0 ? `${demandSkuFilter.size} SKUs selected` : 'Filter SKUs'}
+                  </button>
+                  {showDemandSkuPopover && (
+                    <div style={{
+                      position: 'absolute' as const, top: '100%', left: 0, zIndex: 300, marginTop: 4,
+                      background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 260, padding: 12,
+                    }} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, color: 'var(--text2)' }}>FILTER SKUs</span>
+                        <button onClick={() => setDemandSkuFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear all</button>
+                      </div>
+                      <input value={demandSkuSearch} onChange={e => setDemandSkuSearch(e.target.value)}
+                        placeholder="Search SKUs…"
+                        style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', marginBottom: 8, fontFamily: 'DM Mono' }}
+                      />
+                      <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                        {upcomingDemand.allSkus.filter(s => !demandSkuSearch || s.toLowerCase().includes(demandSkuSearch.toLowerCase())).map(sku => (
+                          <button key={sku} onClick={() => setDemandSkuFilter(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n })}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, border: 'none', background: demandSkuFilter.has(sku) ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const }}>
+                            <span style={{ width: 13, height: 13, borderRadius: 3, border: `2px solid ${demandSkuFilter.has(sku) ? 'var(--accent)' : 'var(--border2)'}`, background: demandSkuFilter.has(sku) ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              {demandSkuFilter.has(sku) && <span style={{ color: '#fff', fontSize: 8 }}>✓</span>}
+                            </span>
+                            <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{upcomingDemand.skuTotals[sku]}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={() => setShowDemandSkuPopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                    </div>
+                  )}
+                </div>
+                {demandSkuFilter.size > 0 && (
+                  <button onClick={() => setDemandSkuFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11, padding: '2px 4px' }}>✕ clear</button>
+                )}
                 {/* Toggle */}
                 <div style={{ marginLeft: 'auto', display: 'flex', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
                   {(['weekly', 'daily'] as const).map(v => (
@@ -2044,7 +2112,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       padding: '5px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500,
                       background: demandView === v ? 'var(--accent)' : 'transparent',
                       color: demandView === v ? '#fff' : 'var(--text3)',
-                      transition: 'all 0.15s',
                     }}>{v.charAt(0).toUpperCase() + v.slice(1)}</button>
                   ))}
                 </div>
@@ -2053,13 +2120,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               {/* Matrix table */}
               {(() => {
                 const cols = demandView === 'weekly' ? upcomingDemand.weeklyCols : upcomingDemand.dailyCols
+                const visibleSkus = demandSkuFilter.size > 0 ? upcomingDemand.allSkus.filter(s => demandSkuFilter.has(s)) : upcomingDemand.allSkus
                 const getQty = (sku: string, colKey: string) => demandView === 'weekly'
                   ? upcomingDemand.weekSkuQty[colKey]?.[sku] || 0
-                  : upcomingDemand.daySkuQty[parseInt(colKey)]?.[sku] || 0
+                  : upcomingDemand.dateSkuQty[colKey]?.[sku] || 0
                 const getOrders = (sku: string, colKey: string) => demandView === 'weekly'
                   ? upcomingDemand.weekSkuOrders[colKey]?.[sku] || 0
-                  : upcomingDemand.daySkuOrders[parseInt(colKey)]?.[sku] || 0
-                const colTotal = (colKey: string) => upcomingDemand.allSkus.reduce((s, sku) => s + getQty(sku, colKey), 0)
+                  : upcomingDemand.dateSkuOrders[colKey]?.[sku] || 0
+                const colTotal = (colKey: string) => visibleSkus.reduce((s, sku) => s + getQty(sku, colKey), 0)
 
                 return (
                   <div style={{ ...card, overflow: 'auto' }}>
@@ -2072,14 +2140,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             <th key={col.key} style={{
                               padding: '9px 12px', textAlign: 'center' as const,
                               fontFamily: 'DM Mono', fontSize: 11, fontWeight: 600,
-                              whiteSpace: 'nowrap' as const, minWidth: 70,
-                              color: col.isOverdue ? '#dc2626' : col.isUrgent ? 'var(--today)' : 'var(--text2)',
-                              background: col.isOverdue ? '#fef2f2' : col.isUrgent ? 'var(--today-bg)' : 'transparent',
+                              whiteSpace: 'nowrap' as const, minWidth: 80,
+                              color: col.isOverdue ? '#dc2626' : col.isUrgent ? '#059669' : 'var(--text2)',
+                              background: col.isOverdue ? '#fef2f2' : col.isUrgent ? '#ecfdf5' : 'transparent',
                             }}>
                               {col.label}
-                              {'minDay' in col && (col as {minDay: number; maxDay: number}).minDay !== (col as {minDay: number; maxDay: number}).maxDay && (
+                              {'sublabel' in col && (col as {sublabel: string}).sublabel && (
                                 <div style={{ fontSize: 9, fontWeight: 400, color: 'var(--text3)', marginTop: 1 }}>
-                                  {(col as {minDay: number; maxDay: number}).minDay}–{(col as {minDay: number; maxDay: number}).maxDay}d
+                                  {(col as {sublabel: string}).sublabel}
                                 </div>
                               )}
                             </th>
@@ -2087,7 +2155,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </tr>
                       </thead>
                       <tbody>
-                        {upcomingDemand.allSkus.map((sku, i) => {
+                        {visibleSkus.map((sku, i) => {
                           const rowTotal = upcomingDemand.skuTotals[sku] || 0
                           return (
                             <tr key={sku} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
