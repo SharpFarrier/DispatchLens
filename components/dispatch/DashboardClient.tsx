@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'users'
-type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'hold' | 'unfulfillable' | 'undecided'
+type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided'
 
 interface Props {
   user: User
@@ -499,6 +499,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
   const dispatchTodayCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
+  const slippedCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
   const holdCount = useMemo(() => orders.filter(o => o.plan_decision === 'hold' && !o.is_cancelled).length, [orders])
   const unfulfillableCount = useMemo(() => unfulfillableOrders.length, [unfulfillableOrders])
   const undecidedCount = useMemo(() => activeOrders.filter(o => o.plan_decision === 'undecided').length, [activeOrders])
@@ -517,12 +518,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     // Decision/urgency filter
     if (activeFilter === 'scheduled') list = list.filter(o => o.plan_decision === 'scheduled')
     else if (activeFilter === 'scheduled_today') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
+    else if (activeFilter === 'slipped') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today)
     else if (activeFilter === 'hold') list = list.filter(o => o.plan_decision === 'hold')
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter !== 'ALL') list = list.filter(o => o.urgency === activeFilter)
     // Days left filter (applied to display value = raw - 1)
     if (daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
+    // Undecided view: oldest imports first so stale decisions surface (unless user sorted manually)
+    if (activeFilter === 'undecided' && !sortCol) {
+      list.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    }
     if (courierFilter.size > 0) list = list.filter(o => courierFilter.has(o.courier))
     if (dispatchDateFilter.size > 0) list = list.filter(o => dispatchDateFilter.has(o.scheduled_date || 'none'))
     // Sort
@@ -1119,6 +1125,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 { key: 'undecided' as ActiveFilter, label: 'Undecided', value: undecidedCount, color: 'var(--today)', bg: 'var(--today-bg)', border: '#fed7aa' },
                 { key: 'scheduled' as ActiveFilter, label: 'Scheduled', value: scheduledCount, color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' },
                 { key: 'scheduled_today' as ActiveFilter, label: 'Going Today', value: dispatchTodayCount, color: '#059669', bg: '#ecfdf5', border: '#6ee7b7' },
+                { key: 'slipped' as ActiveFilter, label: 'Slipped', value: slippedCount, color: '#dc2626', bg: '#fef2f2', border: '#fca5a5' },
                 { key: 'hold' as ActiveFilter, label: 'On Hold', value: holdCount, color: 'var(--hold)', bg: 'var(--hold-bg)', border: '#bfdbfe' },
                 { key: 'unfulfillable' as ActiveFilter, label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
               ].map(kpi => {
@@ -1896,20 +1903,100 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {tab === 'eod' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24, maxWidth: 700 }}>
             <h1 style={{ fontSize: 18, fontWeight: 600 }}>End of Day — {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</h1>
-            {eodDone ? (
-              <div style={{ ...card, padding: 32, border: '1px solid #bbf7d0', background: 'var(--dispatched-bg)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--dispatched)', marginBottom: 20 }}>
-                  <CheckCircle size={22} /><span style={{ fontWeight: 700, fontSize: 16 }}>EOD Complete</span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-                  {[{ label: 'Dispatched', value: dispatchedOrders.length, color: 'var(--dispatched)' }, { label: 'Held', value: holdCount, color: 'var(--hold)' }, { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)' }].map(s => (
-                    <div key={s.label} style={{ textAlign: 'center' as const }}>
-                      <div style={{ fontSize: 32, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>{s.label}</div>
+
+            {/* Dispatch performance strip */}
+            {(() => {
+              const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
+              const dispatchedToday = orders.filter(o => o.is_dispatched && o.dispatched_at && o.dispatched_at.startsWith(today)).length
+              const scheduledTodayTotal = dispatchedToday + dispatchTodayCount
+              const dispatched7d = orders.filter(o => o.is_dispatched && o.dispatched_at && o.dispatched_at.slice(0, 10) >= sevenDaysAgo)
+              // Avg days late: dispatched date minus scheduled date, only when both known and positive
+              const lateDiffs = dispatched7d
+                .filter(o => o.scheduled_date)
+                .map(o => Math.round((new Date(o.dispatched_at!.slice(0, 10)).getTime() - new Date(o.scheduled_date!).getTime()) / 86400000))
+              const avgLate = lateDiffs.length > 0 ? (lateDiffs.reduce((s, d) => s + d, 0) / lateDiffs.length) : null
+              return (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
+                  {[
+                    { label: 'Dispatched today', value: scheduledTodayTotal > 0 ? `${dispatchedToday}/${scheduledTodayTotal}` : '—' },
+                    { label: 'Last 7 days', value: `${dispatched7d.length} dispatched` },
+                    { label: 'Avg delay (7d)', value: avgLate === null ? '—' : avgLate <= 0 ? 'on time' : `${avgLate.toFixed(1)}d late` },
+                  ].map(s => (
+                    <div key={s.label} style={{ display: 'flex', alignItems: 'baseline', gap: 7, padding: '7px 14px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 20 }}>
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.value}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>{s.label}</span>
                     </div>
                   ))}
                 </div>
-              </div>
+              )
+            })()}
+            {eodDone ? (
+              (() => {
+                const dispatchedToday = orders.filter(o => o.is_dispatched && o.dispatched_at && o.dispatched_at.startsWith(today))
+                const missedToday = orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched)
+                const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+                const tomorrowLabel = new Date(tomorrow + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
+                    {/* Reconciliation summary */}
+                    <div style={{ ...card, padding: 28, border: missedToday.length > 0 ? '1px solid #fed7aa' : '1px solid #bbf7d0', background: missedToday.length > 0 ? '#fffbeb' : 'var(--dispatched-bg)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: missedToday.length > 0 ? 'var(--today)' : 'var(--dispatched)', marginBottom: 20 }}>
+                        {missedToday.length > 0 ? <AlertCircle size={22} /> : <CheckCircle size={22} />}
+                        <span style={{ fontWeight: 700, fontSize: 16 }}>
+                          {missedToday.length > 0 ? `Batch confirmed — ${missedToday.length} still pending today` : 'All of today\'s orders dispatched'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
+                        {[
+                          { label: 'Scheduled Today', value: dispatchedToday.length + missedToday.length, color: 'var(--text)' },
+                          { label: 'Dispatched', value: dispatchedToday.length, color: 'var(--dispatched)' },
+                          { label: 'Missed', value: missedToday.length, color: missedToday.length > 0 ? '#dc2626' : 'var(--text3)' },
+                        ].map(s => (
+                          <div key={s.label} style={{ textAlign: 'center' as const }}>
+                            <div style={{ fontSize: 32, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>{s.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Missed orders list + reschedule */}
+                    {missedToday.length > 0 && (
+                      <div style={{ ...card, overflow: 'hidden' }}>
+                        <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Missed orders</span>
+                          <button
+                            onClick={async () => {
+                              const ids = missedToday.map(o => o.id)
+                              await supabase.from('dispatch_orders').update({ scheduled_date: tomorrow, updated_at: new Date().toISOString() }).in('id', ids)
+                              for (const o of missedToday) {
+                                logEvent(o.order_id, 'rescheduled', `Rescheduled to ${tomorrowLabel} (missed EOD)`)
+                              }
+                              setOrders(prev => prev.map(o => ids.includes(o.id) ? { ...o, scheduled_date: tomorrow } : o))
+                            }}
+                            style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+                          >
+                            <Calendar size={12} /> Reschedule all to {tomorrowLabel}
+                          </button>
+                        </div>
+                        {missedToday.map((o, i) => (
+                          <div key={o.id} style={{ padding: '9px 20px', borderBottom: i < missedToday.length - 1 ? '1px solid var(--border)' : 'none', display: 'flex', gap: 12, alignItems: 'center', fontSize: 12, fontFamily: 'DM Mono' }}>
+                            <span style={{ color: 'var(--text)', fontWeight: 500, minWidth: 140 }}>{o.customer_name}</span>
+                            <span style={{ color: 'var(--text2)' }}>{o.sku}</span>
+                            <span style={{ color: 'var(--text3)', marginLeft: 'auto' }}>{o.tracking_number || 'no AWB'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Run another batch */}
+                    <button onClick={() => { setEodDone(false); setShypassistText(''); setEodMatchResult(null) }}
+                      style={{ alignSelf: 'flex-start', padding: '9px 18px', borderRadius: 7, background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                      <RefreshCw size={14} /> Process another batch
+                    </button>
+                  </div>
+                )
+              })()
             ) : (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
@@ -2024,7 +2111,25 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       <td style={{ padding: '8px 12px' }}>
         <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, letterSpacing: '0.05em', color: uc.color, background: uc.bg, border: `1px solid ${uc.border}` }}>{order.urgency || '—'}</span>
       </td>
-      <td style={{ padding: '8px 12px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 20 ? order.order_id.slice(0, 20) + '…' : order.order_id}</span></td>
+      <td style={{ padding: '8px 12px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 20 ? order.order_id.slice(0, 20) + '…' : order.order_id}</span>
+          {order.plan_decision === 'undecided' && (() => {
+            const ageDays = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86400000)
+            if (ageDays < 1) return null
+            return (
+              <span style={{
+                fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600,
+                color: ageDays >= 3 ? '#dc2626' : ageDays >= 2 ? '#d97706' : 'var(--text3)',
+                background: ageDays >= 3 ? '#fef2f2' : ageDays >= 2 ? '#fffbeb' : 'var(--bg2)',
+                padding: '1px 5px', borderRadius: 3, alignSelf: 'flex-start',
+              }}>
+                {ageDays}d undecided
+              </span>
+            )
+          })()}
+        </div>
+      </td>
       <td style={{ padding: '8px 12px', maxWidth: 160 }}><span style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: 150 }}>{order.customer_name}</span></td>
       <td style={{ padding: '8px 12px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
       <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4, border: `1px solid ${order.courier === 'Bluedart' ? '#bfdbfe' : '#e9d5ff'}` }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span></td>
