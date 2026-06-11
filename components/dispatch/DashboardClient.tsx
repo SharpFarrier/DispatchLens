@@ -425,14 +425,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }
       }
 
-      // 2. Delhivery — batch
+      // 2. Delhivery — call directly (no auth needed for public tracking endpoint)
       if (dlOrders.length) {
         const batches = []
         for (let i = 0; i < dlOrders.length; i += 10) batches.push(dlOrders.slice(i, i + 10))
         await Promise.all(batches.map(async batch => {
           try {
             const awbs = batch.map(o => o.tracking_number!).join(',')
-            const res = await fetch(`${WORKER}/delhivery/v1/packages/json/?waybill=${awbs}`)
+            const res = await fetch(`https://track.delhivery.com/api/v1/packages/json/?waybill=${awbs}`, {
+              headers: { 'Accept': 'application/json' }
+            })
             const data = await res.json()
             ;(data?.ShipmentData || []).forEach((pkg: Record<string, unknown>) => {
               const awb = pkg.AWB as string
