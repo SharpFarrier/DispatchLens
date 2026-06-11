@@ -71,6 +71,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispatchedSortCol, setDispatchedSortCol] = useState<string | null>('dispatched_at')
   const [dispatchedSortDir, setDispatchedSortDir] = useState<'asc' | 'desc'>('desc')
   const [dispatchedSearch, setDispatchedSearch] = useState('')
+  const [dispatchedDateFilter, setDispatchedDateFilter] = useState<Set<string>>(new Set())
+  const [showDispatchedDatePopover, setShowDispatchedDatePopover] = useState(false)
+  const [dispatchedDatePopoverPos, setDispatchedDatePopoverPos] = useState({ top: 0, left: 0 })
   // Tracking
   const [trackingData, setTrackingData] = useState<Record<string, { status: string; label: string; lastUpdate: string }>>({})
   const [trackingLoading, setTrackingLoading] = useState(false)
@@ -628,6 +631,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }, [activeOrders, activeFilter, courierFilter, daysFilter, today])
   const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
 
+  const uniqueDispatchedDates = useMemo(() => {
+    const dates = new Set<string>()
+    dispatchedOrders.forEach(o => {
+      if (o.dispatched_at) dates.add(o.dispatched_at.slice(0, 10))
+    })
+    return Array.from(dates).sort().reverse() // newest first
+  }, [dispatchedOrders])
+
   const filteredDispatched = useMemo(() => {
     let list = [...dispatchedOrders]
     if (dispatchedSearch.trim().length >= 2) {
@@ -639,6 +650,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         (o.tracking_number && o.tracking_number.toLowerCase().includes(q))
       )
     }
+    if (dispatchedDateFilter.size > 0) {
+      list = list.filter(o => {
+        const dateKey = o.dispatched_at ? o.dispatched_at.slice(0, 10) : 'unknown'
+        return dispatchedDateFilter.has(dateKey)
+      })
+    }
     if (dispatchedSortCol) {
       list.sort((a, b) => {
         const av = (a as unknown as Record<string, unknown>)[dispatchedSortCol] ?? ''
@@ -648,7 +665,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir])
+  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter])
   const unfulfillableOrders = useMemo(() => activeOrders.filter(o => o.plan_decision === 'unfulfillable'), [activeOrders])
 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
@@ -899,7 +916,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false) }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -2359,7 +2376,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   <thead>
                     <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
                       {([
-                        { label: 'Dispatched', col: 'dispatched_at' },
+                        { label: 'DISPATCHED_DATE_SPECIAL', col: 'dispatched_at' },
                         { label: 'Order ID', col: 'order_id' },
                         { label: 'Customer', col: 'customer_name' },
                         { label: 'SKU', col: 'sku' },
