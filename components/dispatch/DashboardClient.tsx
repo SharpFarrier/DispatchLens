@@ -2386,7 +2386,80 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         { label: 'Promise', col: 'promise_date' },
                         { label: 'Status', col: null },
                         { label: '', col: null },
-                      ] as { label: string; col: string | null }[]).map(({ label, col }) => (
+                      ] as { label: string; col: string | null }[]).map(({ label, col }) => {
+                        if (label === 'DISPATCHED_DATE_SPECIAL') return (
+                          <th key="dispatched_at" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span
+                                onClick={() => {
+                                  if (dispatchedSortCol === 'dispatched_at') setDispatchedSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                                  else { setDispatchedSortCol('dispatched_at'); setDispatchedSortDir('desc') }
+                                }}
+                                style={{ color: dispatchedSortCol === 'dispatched_at' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
+                              >
+                                Dispatched{dispatchedSortCol === 'dispatched_at' ? <span style={{ marginLeft: 3 }}>{dispatchedSortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
+                              </span>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  setDispatchedDatePopoverPos({ top: rect.bottom + 6, left: rect.left })
+                                  setShowDispatchedDatePopover(v => !v)
+                                }}
+                                style={{
+                                  background: dispatchedDateFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                  border: dispatchedDateFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                  borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                  color: dispatchedDateFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                }}
+                              >
+                                {dispatchedDateFilter.size > 0 ? `${dispatchedDateFilter.size} ▾` : '▾'}
+                              </button>
+                              {dispatchedDateFilter.size > 0 && (
+                                <button onClick={() => setDispatchedDateFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>
+                              )}
+                            </div>
+                            {showDispatchedDatePopover && (
+                              <div
+                                style={{
+                                  position: 'fixed' as const,
+                                  top: dispatchedDatePopoverPos.top,
+                                  left: dispatchedDatePopoverPos.left,
+                                  zIndex: 500,
+                                  background: 'var(--surface)', border: '1px solid var(--border)',
+                                  borderRadius: 8, padding: 12, minWidth: 200,
+                                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                }}
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                  <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DISPATCH DATE</span>
+                                  <button onClick={() => { setDispatchedDateFilter(new Set()); setShowDispatchedDatePopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
+                                  {uniqueDispatchedDates.map(date => {
+                                    const isSelected = dispatchedDateFilter.has(date)
+                                    const label = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+                                    const count = dispatchedOrders.filter(o => o.dispatched_at?.startsWith(date)).length
+                                    return (
+                                      <button key={date} onClick={() => setDispatchedDateFilter(prev => { const n = new Set(prev); n.has(date) ? n.delete(date) : n.add(date); return n })}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
+                                        <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                          {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+                                        </span>
+                                        <span style={{ fontSize: 12, fontFamily: 'DM Mono', color: 'var(--text)', flex: 1 }}>{label}</span>
+                                        <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                                <button onClick={() => setShowDispatchedDatePopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                              </div>
+                            )}
+                          </th>
+                        )
+                        return (
                         <th key={label || 'action'}
                           onClick={() => {
                             if (!col) return
@@ -2405,7 +2478,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           {col && dispatchedSortCol === col && <span style={{ marginLeft: 4 }}>{dispatchedSortDir === 'asc' ? '↑' : '↓'}</span>}
                           {col && dispatchedSortCol !== col && <span style={{ marginLeft: 4, opacity: 0.3 }}>↕</span>}
                         </th>
-                      ))}
+                        )
+                      })}
                     </tr>
                   </thead>
                   <tbody>
