@@ -425,29 +425,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }
       }
 
-      // 2. Delhivery — call directly (no auth needed for public tracking endpoint)
+      // 2. Delhivery — via server-side API route (token kept server-side)
       if (dlOrders.length) {
-        const batches = []
-        for (let i = 0; i < dlOrders.length; i += 10) batches.push(dlOrders.slice(i, i + 10))
-        await Promise.all(batches.map(async batch => {
-          try {
-            const awbs = batch.map(o => o.tracking_number!).join(',')
-            const res = await fetch(`https://track.delhivery.com/api/v1/packages/json/?waybill=${awbs}`, {
-              headers: { 'Accept': 'application/json' }
-            })
+        try {
+          const res = await fetch('/api/tracking', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orders: dlOrders.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier }))
+            }),
+          })
+          if (res.ok) {
             const data = await res.json()
-            ;(data?.ShipmentData || []).forEach((pkg: Record<string, unknown>) => {
-              const awb = pkg.AWB as string
-              if (awb) {
-                const scans = pkg.Scans as Record<string, unknown>[] || []
-                results[awb] = {
-                  ...normalizeDL(pkg.Status as string || ''),
-                  lastUpdate: scans[0]?.ScanDateTime as string || '',
-                }
-              }
-            })
-          } catch { /* skip */ }
-        }))
+            Object.assign(results, data)
+          }
+        } catch { /* skip */ }
       }
     } catch (e) { console.error('Tracking sync failed:', e) }
 
