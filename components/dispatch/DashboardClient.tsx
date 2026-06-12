@@ -77,6 +77,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Tracking
   const [trackingData, setTrackingData] = useState<Record<string, { status: string; label: string; lastUpdate: string }>>({})
   const [trackingLoading, setTrackingLoading] = useState(false)
+  const [trackingProgress, setTrackingProgress] = useState<{ done: number; total: number } | null>(null)
   const [trackingLastSync, setTrackingLastSync] = useState<Date | null>(null)
   const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
   const [showDaysPopover, setShowDaysPopover] = useState(false)
@@ -407,9 +408,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const syncTracking = async () => {
     // Skip orders already delivered (status never changes after delivery)
-    const toTrack = dispatchedOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered')
+    const toTrack = dispatchedOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered' && o.tracking_status !== 'rto')
     if (!toTrack.length) { setTrackingLastSync(new Date()); return }
     setTrackingLoading(true)
+    setTrackingProgress({ done: 0, total: toTrack.length })
     const results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
 
     try {
@@ -431,7 +433,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         if (bdToken) {
           // Throttled: 3 concurrent, 350ms gap between batches to avoid 429
           // Endpoint format from TrackLens: query params + XML response
-          const CONCURRENCY = 3
+          const CONCURRENCY = 6
           for (let i = 0; i < bdOrders.length; i += CONCURRENCY) {
             const batch = bdOrders.slice(i, i + CONCURRENCY)
             await Promise.all(batch.map(async o => {
@@ -470,26 +472,32 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 }
               } catch { /* skip */ }
             }))
-            if (i + CONCURRENCY < bdOrders.length) await new Promise(r => setTimeout(r, 350))
+            setTrackingProgress(p => p ? { ...p, done: Math.min(p.done + batch.length, p.total) } : p)
+            if (i + CONCURRENCY < bdOrders.length) await new Promise(r => setTimeout(r, 200))
           }
         }
       }
 
-      // 2. Delhivery — via server-side API route (token kept server-side)
+      // 2. Delhivery — server route, chunked to stay under serverless timeout
       if (dlOrders.length) {
-        try {
-          const res = await fetch('/api/tracking', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              orders: dlOrders.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier }))
-            }),
-          })
-          if (res.ok) {
-            const data = await res.json()
-            Object.assign(results, data)
-          }
-        } catch { /* skip */ }
+        const CHUNK = 25
+        for (let i = 0; i < dlOrders.length; i += CHUNK) {
+          const chunk = dlOrders.slice(i, i + CHUNK)
+          try {
+            const res = await fetch('/api/tracking', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                orders: chunk.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier }))
+              }),
+            })
+            if (res.ok) {
+              const data = await res.json()
+              Object.assign(results, data)
+            }
+          } catch { /* skip chunk */ }
+          setTrackingProgress(p => p ? { ...p, done: Math.min(p.done + chunk.length, p.total) } : p)
+        }
       }
     } catch (e) { console.error('Tracking sync failed:', e) }
 
@@ -515,6 +523,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setTrackingData(results)
     setTrackingLastSync(new Date())
     setTrackingLoading(false)
+    setTrackingProgress(null)
   }
 
   // ── Unfulfillable by SKU (partial or full) ──
@@ -2472,7 +2481,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
                 }}>
                   <RefreshCw size={13} style={{ animation: trackingLoading ? 'spin 1s linear infinite' : 'none' }} />
-                  {trackingLoading ? 'Syncing…' : 'Sync Tracking'}
+                  {trackingLoading ? (trackingProgress ? `Syncing ${trackingProgress.done}/${trackingProgress.total}` : 'Syncing…') : 'Sync Tracking'}
                 </button>
               </div>
               {/* Search */}

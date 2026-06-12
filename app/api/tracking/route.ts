@@ -69,7 +69,7 @@ export async function POST(request: Request) {
   const fmt = (d: Date) => d.toISOString().slice(0, 10)
   const awbFields = ['waybill_no', 'awb', 'awb_code', 'awb_number', 'tracking_number', 'tracking_id', 'awb_no', 'waybill']
 
-  for (const order of dlOrders) {
+  const processOrder = async (order: { id: string; awb: string; courier: string }) => {
     try {
       const qs = new URLSearchParams({
         page: '1', page_size: '10',
@@ -85,39 +85,34 @@ export async function POST(request: Request) {
         },
       })
       const bodyText = await res.text()
-      if (!res.ok) { debugLog.push(`AWB ${order.awb}: HTTP ${res.status} ${bodyText.slice(0, 150)}`); continue }
+      if (!res.ok) { debugLog.push(`AWB ${order.awb}: HTTP ${res.status} ${bodyText.slice(0, 150)}`); return }
       const data = JSON.parse(bodyText)
       const list: Record<string, unknown>[] = data.data || data.results || []
-      // Verify the shipment actually matches the requested AWB
       const match = list.find(s => awbFields.some(f => String(s[f] || '').trim() === order.awb.trim()))
         || (list.length === 1 ? list[0] : null)
       if (match) {
         const status = (match.status as string) || (match.shipment_status as string) || ''
         const lastUpdate = (match.updated_at as string) || (match.last_update as string) || ''
         let final = { ...normalizeCargo(status), lastUpdate }
-        // Cargo's list status often lags at 'Pickup Scheduled' — cross-check live status
         if (final.status === 'booked' || final.status === 'unknown') {
           const pub = await trackDelhiveryPublic(order.awb, debugLog)
           if (pub && pub.status !== 'unknown') final = pub
         }
         results[order.awb] = final
         debugLog.push(`AWB ${order.awb}: cargo=${status} final=${final.label}`)
-        if (debug) {
-          // Dump all status-like fields to find the real-time one
-          const statusFields = Object.entries(match)
-            .filter(([k, v]) => typeof v === 'string' && /status|state|stage|track/i.test(k))
-            .map(([k, v]) => `${k}=${v}`)
-          debugLog.push(`AWB ${order.awb}: all status fields: ${statusFields.join(' | ')}`)
-          debugLog.push(`AWB ${order.awb}: keys=${Object.keys(match).join(',')}`)
-        }
       } else {
-        debugLog.push(`AWB ${order.awb}: no match in ${list.length} results, trying Delhivery public API`)
         const pub = await trackDelhiveryPublic(order.awb, debugLog)
         if (pub) results[order.awb] = pub
       }
     } catch (e) {
       debugLog.push(`AWB ${order.awb}: error=${String(e)}`)
     }
+  }
+
+  // Concurrency pool of 8
+  const POOL = 8
+  for (let i = 0; i < dlOrders.length; i += POOL) {
+    await Promise.all(dlOrders.slice(i, i + POOL).map(processOrder))
   }
 
   if (debug) return NextResponse.json({ results, debugLog })
