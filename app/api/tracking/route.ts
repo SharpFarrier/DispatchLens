@@ -29,9 +29,34 @@ export async function POST(request: Request) {
 
   if (!dlOrders.length) return NextResponse.json(results)
 
-  const token = process.env.CARGO_TOKEN
-  if (!token) return NextResponse.json({ error: 'CARGO_TOKEN not configured' }, { status: 500 })
-  debugLog.push(`Token present: ${token.slice(0, 20)}...`)
+  // Try env token first, auto-login if expired
+  let token = process.env.CARGO_TOKEN || ''
+  debugLog.push(`Env token present: ${token ? 'yes' : 'no'}`)
+
+  // Auto-login to get fresh token
+  const CARGO_EMAIL = process.env.CARGO_EMAIL || 'logistics@sabiwabi.in'
+  const CARGO_PASSWORD = process.env.CARGO_PASSWORD || 'Sabi#789'
+  try {
+    const loginRes = await fetch('https://api-cargo.shiprocket.in/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: CARGO_EMAIL, password: CARGO_PASSWORD }),
+    })
+    const loginBody = await loginRes.text()
+    debugLog.push(`Login HTTP ${loginRes.status}: ${loginBody.slice(0, 200)}`)
+    if (loginRes.ok) {
+      const loginData = JSON.parse(loginBody)
+      const freshToken = loginData.token || loginData.data?.token || loginData.access
+      if (freshToken) {
+        token = freshToken
+        debugLog.push(`Fresh token obtained: ${token.slice(0, 20)}...`)
+      }
+    }
+  } catch (e) {
+    debugLog.push(`Login error: ${String(e)}`)
+  }
+
+  if (!token) return NextResponse.json({ error: 'No Cargo token available' }, { status: 500 })
 
   // Track each AWB via Cargo shipment-list
   for (const order of dlOrders) {
