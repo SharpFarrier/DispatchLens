@@ -39,28 +39,40 @@ export async function POST(request: Request) {
   if (!token) return NextResponse.json({ error: 'No Cargo token available' }, { status: 500 })
 
   // Track each AWB via Cargo shipment-list
+  const today = new Date()
+  const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000)
+  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  const awbFields = ['waybill_no', 'awb', 'awb_code', 'awb_number', 'tracking_number', 'tracking_id', 'awb_no', 'waybill']
+
   for (const order of dlOrders) {
     try {
-      const res = await fetch(`https://api-cargo.shiprocket.in/api/shipment-list/?awb=${order.awb}`, {
+      const qs = new URLSearchParams({
+        page: '1', page_size: '10',
+        created_at_after: fmt(yearAgo),
+        created_at_before: fmt(today),
+        waybill_no: order.awb.trim(),
+        entity: 'shipment',
+      })
+      const res = await fetch(`https://api-cargo.shiprocket.in/api/shipment-list/?${qs}`, {
         headers: {
           'Authorization': token.startsWith('eyJ') ? `Bearer ${token}` : `token ${token}`,
           'Accept': 'application/json',
         },
       })
       const bodyText = await res.text()
-      debugLog.push(`AWB ${order.awb}: HTTP ${res.status} body=${bodyText.slice(0, 300)}`)
-      if (!res.ok) continue
+      if (!res.ok) { debugLog.push(`AWB ${order.awb}: HTTP ${res.status} ${bodyText.slice(0, 150)}`); continue }
       const data = JSON.parse(bodyText)
-      const shipments = data.data || data.results || []
-      if (Array.isArray(shipments) && shipments.length > 0) {
-        const shipment = shipments[0] as Record<string, unknown>
-        const status = (shipment.status as string) || (shipment.shipment_status as string) || ''
-        const lastUpdate = (shipment.updated_at as string) || (shipment.last_update as string) || ''
+      const list: Record<string, unknown>[] = data.data || data.results || []
+      // Verify the shipment actually matches the requested AWB
+      const match = list.find(s => awbFields.some(f => String(s[f] || '').trim() === order.awb.trim()))
+        || (list.length === 1 ? list[0] : null)
+      if (match) {
+        const status = (match.status as string) || (match.shipment_status as string) || ''
+        const lastUpdate = (match.updated_at as string) || (match.last_update as string) || ''
         results[order.awb] = { ...normalizeCargo(status), lastUpdate }
         debugLog.push(`AWB ${order.awb}: status=${status}`)
       } else {
-        debugLog.push(`AWB ${order.awb}: no shipments, keys=${Object.keys(data).join(',')}`)
-        if (debug) debugLog.push(`AWB ${order.awb}: raw=${JSON.stringify(data).slice(0, 300)}`)
+        debugLog.push(`AWB ${order.awb}: no match in ${list.length} results`)
       }
     } catch (e) {
       debugLog.push(`AWB ${order.awb}: error=${String(e)}`)
