@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     try {
       const res = await fetch(`https://api-cargo.shiprocket.in/api/shipment-list/?awb=${order.awb}`, {
         headers: {
-          'Authorization': `token ${token}`,
+          'Authorization': token.startsWith('eyJ') ? `Bearer ${token}` : `token ${token}`,
           'Accept': 'application/json',
         },
       })
