@@ -15,6 +15,31 @@ function normalizeCargo(status: string): { status: string; label: string } {
   return { status: 'unknown', label: status || 'Unknown' }
 }
 
+async function trackDelhiveryPublic(awb: string, debugLog: string[]): Promise<{ status: string; label: string; lastUpdate: string } | null> {
+  try {
+    const res = await fetch(`https://dlv-api.delhivery.com/v3/unified-tracking?wbn=${awb}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Origin': 'https://www.delhivery.com',
+        'Referer': 'https://www.delhivery.com/',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+      },
+    })
+    const text = await res.text()
+    if (!res.ok) { debugLog.push(`DL public ${awb}: HTTP ${res.status} ${text.slice(0, 150)}`); return null }
+    const data = JSON.parse(text)
+    const pkg = data?.data?.[0]
+    if (!pkg) { debugLog.push(`DL public ${awb}: no data, keys=${Object.keys(data).join(',')}`); return null }
+    const status = pkg?.status?.status || pkg?.status?.instructions || ''
+    const lastUpdate = pkg?.status?.statusDateTime || ''
+    debugLog.push(`DL public ${awb}: status=${status}`)
+    return { ...normalizeCargo(status), lastUpdate }
+  } catch (e) {
+    debugLog.push(`DL public ${awb}: error=${String(e)}`)
+    return null
+  }
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -69,8 +94,14 @@ export async function POST(request: Request) {
       if (match) {
         const status = (match.status as string) || (match.shipment_status as string) || ''
         const lastUpdate = (match.updated_at as string) || (match.last_update as string) || ''
-        results[order.awb] = { ...normalizeCargo(status), lastUpdate }
-        debugLog.push(`AWB ${order.awb}: status=${status}`)
+        let final = { ...normalizeCargo(status), lastUpdate }
+        // Cargo's list status often lags at 'Pickup Scheduled' — cross-check live status
+        if (final.status === 'booked' || final.status === 'unknown') {
+          const pub = await trackDelhiveryPublic(order.awb, debugLog)
+          if (pub && pub.status !== 'unknown') final = pub
+        }
+        results[order.awb] = final
+        debugLog.push(`AWB ${order.awb}: cargo=${status} final=${final.label}`)
         if (debug) {
           // Dump all status-like fields to find the real-time one
           const statusFields = Object.entries(match)
@@ -80,7 +111,9 @@ export async function POST(request: Request) {
           debugLog.push(`AWB ${order.awb}: keys=${Object.keys(match).join(',')}`)
         }
       } else {
-        debugLog.push(`AWB ${order.awb}: no match in ${list.length} results`)
+        debugLog.push(`AWB ${order.awb}: no match in ${list.length} results, trying Delhivery public API`)
+        const pub = await trackDelhiveryPublic(order.awb, debugLog)
+        if (pub) results[order.awb] = pub
       }
     } catch (e) {
       debugLog.push(`AWB ${order.awb}: error=${String(e)}`)
