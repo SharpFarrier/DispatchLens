@@ -18,38 +18,46 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { orders } = await request.json() as { orders: { id: string; awb: string; courier: string }[] }
+  const { orders, debug } = await request.json() as { orders: { id: string; awb: string; courier: string }[]; debug?: boolean }
   if (!orders?.length) return NextResponse.json({})
 
   const dlOrders = orders.filter(o => o.courier === 'Delhivery' && o.awb)
   const results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
+  const debugLog: string[] = []
 
   if (!dlOrders.length) return NextResponse.json(results)
 
   const token = process.env.DELHIVERY_TOKEN
   if (!token) return NextResponse.json({ error: 'DELHIVERY_TOKEN not configured' }, { status: 500 })
+  debugLog.push(`Token present: ${token.slice(0, 20)}...`)
 
-  // Batch in groups of 10
   for (let i = 0; i < dlOrders.length; i += 10) {
     const batch = dlOrders.slice(i, i + 10)
     try {
       const awbs = batch.map(o => o.awb).join(',')
-      const res = await fetch(
-        `https://track.delhivery.com/api/v1/packages/json/?waybill=${awbs}`,
-        {
-          headers: {
-            'Authorization': `Token ${token}`,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          }
+      const url = `https://track.delhivery.com/api/v1/packages/json/?waybill=${awbs}`
+      debugLog.push(`Fetching: ${url}`)
+
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Token ${token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
         }
-      )
-      if (!res.ok) {
-        console.error('Delhivery tracking failed:', res.status, await res.text())
-        continue
-      }
-      const data = await res.json()
+      })
+
+      debugLog.push(`Response status: ${res.status}`)
+      const rawText = await res.text()
+      debugLog.push(`Response body (first 500): ${rawText.slice(0, 500)}`)
+
+      if (!res.ok) continue
+
+      const data = JSON.parse(rawText)
+      debugLog.push(`Parsed keys: ${Object.keys(data).join(', ')}`)
+
       const packages = data?.ShipmentData || []
+      debugLog.push(`ShipmentData count: ${packages.length}`)
+
       packages.forEach((pkg: Record<string, unknown>) => {
         const awb = pkg.AWB as string
         if (awb) {
@@ -58,12 +66,14 @@ export async function POST(request: Request) {
             ...normalizeDelhivery(pkg.Status as string || ''),
             lastUpdate: scans[0]?.ScanDateTime as string || '',
           }
+          debugLog.push(`AWB ${awb}: status=${pkg.Status}`)
         }
       })
     } catch (e) {
-      console.error('Delhivery batch error:', e)
+      debugLog.push(`Error: ${String(e)}`)
     }
   }
 
+  if (debug) return NextResponse.json({ results, debugLog })
   return NextResponse.json(results)
 }
