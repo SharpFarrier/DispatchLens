@@ -406,8 +406,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   const syncTracking = async () => {
-    const toTrack = dispatchedOrders.filter(o => o.tracking_number)
-    if (!toTrack.length) return
+    // Skip orders already delivered (status never changes after delivery)
+    const toTrack = dispatchedOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered')
+    if (!toTrack.length) { setTrackingLastSync(new Date()); return }
     setTrackingLoading(true)
     const results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
 
@@ -428,28 +429,35 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         } catch { /* token failed */ }
 
         if (bdToken) {
-          await Promise.all(bdOrders.map(async o => {
-            try {
-              const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1/awbno`, {
-                method: 'GET',
-                headers: {
-                  'JWTToken': bdToken,
-                  'LoginID': BD_LOGIN_ID,
-                  'LicenceKey': BD_LICENCE_KEY,
-                  'AWBNo': o.tracking_number!,
-                },
-              })
-              const data = await res.json()
-              const shipment = data?.ShipmentData?.[0]?.Shipment
-              if (shipment) {
-                const scan = shipment.Scans?.[0]?.ScanDetail
-                results[o.tracking_number!] = {
-                  ...normalizeBD(scan?.ScanType || '', scan?.Scan || shipment.Status || ''),
-                  lastUpdate: scan?.ScanDate || '',
+          // Throttled: 3 concurrent, 350ms gap between batches to avoid 429
+          const CONCURRENCY = 3
+          for (let i = 0; i < bdOrders.length; i += CONCURRENCY) {
+            const batch = bdOrders.slice(i, i + CONCURRENCY)
+            await Promise.all(batch.map(async o => {
+              try {
+                const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1/awbno`, {
+                  method: 'GET',
+                  headers: {
+                    'JWTToken': bdToken,
+                    'LoginID': BD_LOGIN_ID,
+                    'LicenceKey': BD_LICENCE_KEY,
+                    'AWBNo': o.tracking_number!,
+                  },
+                })
+                if (res.status === 429) return // rate limited, will retry next sync
+                const data = await res.json()
+                const shipment = data?.ShipmentData?.[0]?.Shipment
+                if (shipment) {
+                  const scan = shipment.Scans?.[0]?.ScanDetail
+                  results[o.tracking_number!] = {
+                    ...normalizeBD(scan?.ScanType || '', scan?.Scan || shipment.Status || ''),
+                    lastUpdate: scan?.ScanDate || '',
+                  }
                 }
-              }
-            } catch { /* skip */ }
-          }))
+              } catch { /* skip */ }
+            }))
+            if (i + CONCURRENCY < bdOrders.length) await new Promise(r => setTimeout(r, 350))
+          }
         }
       }
 
@@ -471,6 +479,25 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       }
     } catch (e) { console.error('Tracking sync failed:', e) }
 
+    // Persist results to DB so status survives page reloads
+    const syncedAt = new Date().toISOString()
+    const updates = Object.entries(results)
+    if (updates.length) {
+      await Promise.all(updates.map(async ([awb, t]) => {
+        const order = dispatchedOrders.find(o => o.tracking_number === awb)
+        if (!order) return
+        await supabase.from('dispatch_orders').update({
+          tracking_status: t.status,
+          tracking_label: t.label,
+          tracking_last_update: t.lastUpdate,
+          tracking_synced_at: syncedAt,
+        }).eq('id', order.id)
+      }))
+      setOrders(prev => prev.map(o => {
+        const t = o.tracking_number ? results[o.tracking_number] : undefined
+        return t ? { ...o, tracking_status: t.status, tracking_label: t.label, tracking_last_update: t.lastUpdate, tracking_synced_at: syncedAt } : o
+      }))
+    }
     setTrackingData(results)
     setTrackingLastSync(new Date())
     setTrackingLoading(false)
@@ -2607,8 +2634,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}{order.city ? ` · ${order.city}` : ''}</td>
                           <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
                           <td style={{ padding: '9px 12px' }}>
-                            {order.tracking_number && trackingData[order.tracking_number] ? (() => {
-                              const t = trackingData[order.tracking_number]
+                            {order.tracking_number && (trackingData[order.tracking_number] || order.tracking_status) ? (() => {
+                              const t = trackingData[order.tracking_number] || { status: order.tracking_status!, label: order.tracking_label || order.tracking_status!, lastUpdate: order.tracking_last_update || '' }
                               const colors: Record<string, { color: string; bg: string; border: string }> = {
                                 delivered:   { color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' },
                                 ofd:         { color: '#059669', bg: '#ecfdf5', border: '#6ee7b7' },

@@ -54,6 +54,10 @@ export interface DBOrder {
   qty: number
   courier: Courier
   tracking_number: string | null
+  tracking_status: string | null
+  tracking_label: string | null
+  tracking_last_update: string | null
+  tracking_synced_at: string | null
   sku: string
   raw_status: string
   promise_date: string | null
