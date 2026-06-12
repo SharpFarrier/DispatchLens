@@ -71,6 +71,14 @@ export async function POST(request: Request) {
         const lastUpdate = (match.updated_at as string) || (match.last_update as string) || ''
         results[order.awb] = { ...normalizeCargo(status), lastUpdate }
         debugLog.push(`AWB ${order.awb}: status=${status}`)
+        if (debug) {
+          // Dump all status-like fields to find the real-time one
+          const statusFields = Object.entries(match)
+            .filter(([k, v]) => typeof v === 'string' && /status|state|stage|track/i.test(k))
+            .map(([k, v]) => `${k}=${v}`)
+          debugLog.push(`AWB ${order.awb}: all status fields: ${statusFields.join(' | ')}`)
+          debugLog.push(`AWB ${order.awb}: keys=${Object.keys(match).join(',')}`)
+        }
       } else {
         debugLog.push(`AWB ${order.awb}: no match in ${list.length} results`)
       }
