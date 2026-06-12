@@ -42,9 +42,10 @@ export async function POST(request: Request) {
           'Accept': 'application/json',
         },
       })
-      debugLog.push(`AWB ${order.awb}: HTTP ${res.status}`)
+      const bodyText = await res.text()
+      debugLog.push(`AWB ${order.awb}: HTTP ${res.status} body=${bodyText.slice(0, 300)}`)
       if (!res.ok) continue
-      const data = await res.json()
+      const data = JSON.parse(bodyText)
       const shipments = data.data || data.results || []
       if (Array.isArray(shipments) && shipments.length > 0) {
         const shipment = shipments[0] as Record<string, unknown>
