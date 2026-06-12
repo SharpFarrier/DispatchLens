@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   // Track each AWB via Cargo shipment-list
   for (const order of dlOrders) {
     try {
-      const res = await fetch(`${WORKER}/cargo/shipment-list/?awb=${order.awb}`, {
+      const res = await fetch(`https://api-cargo.shiprocket.in/api/shipment-list/?awb=${order.awb}`, {
         headers: {
           'Authorization': `token ${token}`,
           'Accept': 'application/json',
