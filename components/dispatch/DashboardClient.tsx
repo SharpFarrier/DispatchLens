@@ -62,7 +62,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [delhiveryText, setDelhiveryText] = useState('')
   const [bluedartText, setBluedartText] = useState('')
   const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<{ added: number; skipped: number } | null>(null)
+  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number } | null>(null)
 
   // Plan
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
@@ -84,6 +84,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [courierFilter, setCourierFilter] = useState<Set<string>>(new Set())
   const [showCourierPopover, setShowCourierPopover] = useState(false)
   const [courierPopoverPos, setCourierPopoverPos] = useState({ top: 0, left: 0 })
+  const [skuFilter, setSkuFilter] = useState<Set<string>>(new Set())
+  const [showSkuPopover, setShowSkuPopover] = useState(false)
+  const [skuPopoverPos, setSkuPopoverPos] = useState({ top: 0, left: 0 })
+  const [skuSearch, setSkuSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDecision, setBulkDecision] = useState<PlanDecision | ''>('')
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
@@ -175,8 +179,32 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const allParsed = [...parseOrders(delhiveryText, 'Delhivery'), ...parseOrders(bluedartText, 'Bluedart')]
     if (allParsed.length === 0) { setImporting(false); return }
     // Check for duplicates across all orders in the pool
-    const existingIds = new Set(orders.map(o => o.order_id))
-    const newOrders = allParsed.filter(o => !existingIds.has(o.order_id))
+    // Separate into: truly new orders, and updates to existing orders (tracking number changed)
+    const existingMap = new Map(orders.map(o => [o.order_id, o]))
+    const newOrders = allParsed.filter(o => !existingMap.has(o.order_id))
+    const updatedOrders = allParsed.filter(o => {
+      const existing = existingMap.get(o.order_id)
+      if (!existing) return false
+      // Update if new import has a tracking number that differs from stored value
+      return o.tracking_number && o.tracking_number !== existing.tracking_number
+    })
+
+    // Apply tracking number updates to existing orders
+    if (updatedOrders.length > 0) {
+      await Promise.all(updatedOrders.map(async o => {
+        const existing = existingMap.get(o.order_id)!
+        await supabase.from('dispatch_orders').update({
+          tracking_number: o.tracking_number,
+          updated_at: new Date().toISOString(),
+        }).eq('id', existing.id)
+        logEvent(o.order_id, 'note', `Tracking number updated via re-import: ${o.tracking_number}`)
+      }))
+      setOrders(prev => prev.map(o => {
+        const updated = updatedOrders.find(u => u.order_id === o.order_id)
+        return updated ? { ...o, tracking_number: updated.tracking_number } : o
+      }))
+    }
+
     if (newOrders.length > 0) {
       // Use a placeholder session_id (create a batch record for tracking)
       const batchLabel = `Import ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
@@ -196,7 +224,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }
       }
     }
-    setImportResult({ added: newOrders.length, skipped: allParsed.length - newOrders.length })
+    setImportResult({ added: newOrders.length, updated: updatedOrders.length, skipped: allParsed.length - newOrders.length - updatedOrders.length })
     setImporting(false)
     setDelhiveryText('')
     setBluedartText('')
@@ -796,6 +824,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       list.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     }
     if (courierFilter.size > 0) list = list.filter(o => courierFilter.has(o.courier))
+    if (skuFilter.size > 0) list = list.filter(o => skuFilter.has(o.sku))
     if (dispatchDateFilter.size > 0) list = list.filter(o => dispatchDateFilter.has(o.scheduled_date || 'none'))
     // Sort
     const to: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
@@ -822,7 +851,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [activeOrders, activeFilter, daysFilter, courierFilter, dispatchDateFilter, sortCol, sortDir])
+  }, [activeOrders, activeFilter, daysFilter, courierFilter, skuFilter, dispatchDateFilter, sortCol, sortDir])
 
   // Unique display days left values — based on currently filtered list (respects active KPI/urgency filter)
   const uniqueDaysLeft = useMemo(() => {
@@ -910,7 +939,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false) }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -1470,7 +1499,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           { label: 'Urgency', col: 'urgency' },
                           { label: 'Order ID', col: null },
                           { label: 'Customer', col: 'customer' },
-                          { label: 'SKU', col: 'sku' },
+                          { label: 'SKU_FILTER_SPECIAL', col: 'sku' },
                           { label: 'COURIER_SPECIAL', col: 'courier' },
                           { label: 'Pincode · City', col: 'pincode' },
                           { label: 'ODA', col: null },
@@ -1478,6 +1507,60 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           { label: 'Transit', col: 'transit' },
                           { label: 'Promise', col: 'promise' },
                         ] as { label: string; col: string | null }[]).map(({ label, col }) => {
+                          // Special SKU header with filter
+                          if (label === 'SKU_FILTER_SPECIAL') return (
+                            <th key="sku" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span onClick={() => handleColSort('sku')} style={{ color: sortCol === 'sku' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}>
+                                  SKU{sortCol === 'sku' ? <span style={{ marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
+                                </span>
+                                <button onClick={e => {
+                                  e.stopPropagation()
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  setSkuPopoverPos({ top: rect.bottom + 6, left: rect.left })
+                                  setShowSkuPopover(v => !v)
+                                  setShowDaysPopover(false); setShowCourierPopover(false)
+                                }} style={{
+                                  background: skuFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                  border: skuFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                  borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                  color: skuFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                }}>
+                                  {skuFilter.size > 0 ? `${skuFilter.size} ▾` : '▾'}
+                                </button>
+                                {skuFilter.size > 0 && <button onClick={() => setSkuFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
+                              </div>
+                              {showSkuPopover && (
+                                <div style={{ position: 'fixed' as const, top: skuPopoverPos.top, left: skuPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 220, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>SKU</span>
+                                    <button onClick={() => { setSkuFilter(new Set()); setShowSkuPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                                  </div>
+                                  <input value={skuSearch} onChange={e => setSkuSearch(e.target.value)} placeholder="Search SKUs…"
+                                    style={{ width: '100%', padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, outline: 'none', marginBottom: 6, fontFamily: 'DM Mono' }} />
+                                  <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                                    {Array.from(new Set(activeOrders.map(o => o.sku))).filter(s => !skuSearch || s.toLowerCase().includes(skuSearch.toLowerCase())).sort().map(sku => {
+                                      const isSelected = skuFilter.has(sku)
+                                      const count = activeOrders.filter(o => o.sku === sku).length
+                                      return (
+                                        <button key={sku} onClick={() => setSkuFilter(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n })}
+                                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
+                                          <span style={{ width: 13, height: 13, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                            {isSelected && <span style={{ color: '#fff', fontSize: 8 }}>✓</span>}
+                                          </span>
+                                          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
+                                          <span style={{ fontSize: 10, color: 'var(--text3)' }}>{count}</span>
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                  <button onClick={() => setShowSkuPopover(false)} style={{ marginTop: 8, width: '100%', padding: '5px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                                </div>
+                              )}
+                            </th>
+                          )
+
                           // Special courier header with filter
                           if (label === 'COURIER_SPECIAL') return (
                             <th key="courier" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
