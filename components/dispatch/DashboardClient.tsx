@@ -430,28 +430,42 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         if (bdToken) {
           // Throttled: 3 concurrent, 350ms gap between batches to avoid 429
+          // Endpoint format from TrackLens: query params + XML response
           const CONCURRENCY = 3
           for (let i = 0; i < bdOrders.length; i += CONCURRENCY) {
             const batch = bdOrders.slice(i, i + CONCURRENCY)
             await Promise.all(batch.map(async o => {
               try {
-                const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1/awbno`, {
+                const params = new URLSearchParams({
+                  handler: 'tnt',
+                  action: 'custawbquery',
+                  loginid: BD_LOGIN_ID,
+                  awb: 'awb',
+                  numbers: o.tracking_number!.trim(),
+                  format: 'xml',
+                  lickey: BD_LICENCE_KEY,
+                  verno: '1.3',
+                  scan: '1',
+                })
+                const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1?${params}`, {
                   method: 'GET',
-                  headers: {
-                    'JWTToken': bdToken,
-                    'LoginID': BD_LOGIN_ID,
-                    'LicenceKey': BD_LICENCE_KEY,
-                    'AWBNo': o.tracking_number!,
-                  },
+                  headers: { 'JWTToken': bdToken },
                 })
                 if (res.status === 429) return // rate limited, will retry next sync
-                const data = await res.json()
-                const shipment = data?.ShipmentData?.[0]?.Shipment
+                const xmlText = await res.text()
+                const doc = new DOMParser().parseFromString(xmlText, 'text/xml')
+                const shipment = doc.querySelector('Shipment')
                 if (shipment) {
-                  const scan = shipment.Scans?.[0]?.ScanDetail
-                  results[o.tracking_number!] = {
-                    ...normalizeBD(scan?.ScanType || '', scan?.Scan || shipment.Status || ''),
-                    lastUpdate: scan?.ScanDate || '',
+                  const statusEl = shipment.querySelector('Status')
+                  const firstScan = shipment.querySelector('Scans Scan, Scans > ScanDetail')
+                  const scanText = firstScan?.querySelector('Scan')?.textContent || firstScan?.textContent || ''
+                  const scanDate = firstScan?.querySelector('ScanDate')?.textContent || ''
+                  const statusText = statusEl?.textContent || scanText || ''
+                  if (statusText) {
+                    results[o.tracking_number!] = {
+                      ...normalizeBD('', statusText),
+                      lastUpdate: scanDate,
+                    }
                   }
                 }
               } catch { /* skip */ }
