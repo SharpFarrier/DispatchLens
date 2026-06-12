@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 const WORKER = 'https://tracklens-proxy.adityaramnani91581.workers.dev'
-const CARGO_EMAIL = 'logistics@sabiwabi.in'
-const CARGO_PASSWORD = 'Sabi#789'
 
 function normalizeCargo(status: string): { status: string; label: string } {
   const s = (status || '').toLowerCase()
@@ -15,49 +13,6 @@ function normalizeCargo(status: string): { status: string; label: string } {
   if (s.includes('picked_up') || s.includes('pickup_scheduled') || s.includes('picked up')) return { status: 'picked_up', label: 'Picked Up' }
   if (s.includes('ready_to_ship') || s.includes('manifested') || s.includes('booked')) return { status: 'booked', label: 'Booked' }
   return { status: 'unknown', label: status || 'Unknown' }
-}
-
-async function getCargoToken(): Promise<string | null> {
-  try {
-    const res = await fetch(`${WORKER}/cargo/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: CARGO_EMAIL, password: CARGO_PASSWORD }),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    return data.token || data.data?.token || data.access || null
-  } catch {
-    return null
-  }
-}
-
-async function trackViaCargo(awbs: string[], token: string): Promise<Record<string, { status: string; label: string; lastUpdate: string }>> {
-  const results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
-
-  // Fetch one AWB at a time — Cargo's shipment-list filters by awb param
-  for (const awb of awbs) {
-    try {
-      const res = await fetch(`${WORKER}/cargo/shipment-list/?awb=${awb}`, {
-        headers: {
-          'Authorization': `token ${token}`,
-          'Accept': 'application/json',
-        },
-      })
-      if (!res.ok) continue
-      const data = await res.json()
-      // Cargo returns { data: [...shipments] } or { results: [...] }
-      const shipments = data.data || data.results || []
-      if (Array.isArray(shipments) && shipments.length > 0) {
-        const shipment = shipments[0] as Record<string, unknown>
-        const status = (shipment.status as string) || (shipment.shipment_status as string) || ''
-        const lastUpdate = (shipment.updated_at as string) || (shipment.last_update as string) || ''
-        results[awb] = { ...normalizeCargo(status), lastUpdate }
-      }
-    } catch { /* skip */ }
-  }
-
-  return results
 }
 
 export async function POST(request: Request) {
@@ -74,29 +29,20 @@ export async function POST(request: Request) {
 
   if (!dlOrders.length) return NextResponse.json(results)
 
-  // Get Cargo token
-  debugLog.push(`Logging into Cargo as ${CARGO_EMAIL}`)
-  const token = await getCargoToken()
-  if (!token) {
-    debugLog.push('Cargo login failed')
-    if (debug) return NextResponse.json({ results, debugLog })
-    return NextResponse.json(results)
-  }
-  debugLog.push(`Cargo token obtained: ${token.slice(0, 20)}...`)
+  const token = process.env.CARGO_TOKEN
+  if (!token) return NextResponse.json({ error: 'CARGO_TOKEN not configured' }, { status: 500 })
+  debugLog.push(`Token present: ${token.slice(0, 20)}...`)
 
-  // Track AWBs via Cargo
-  const awbs = dlOrders.map(o => o.awb)
-  debugLog.push(`Tracking ${awbs.length} Delhivery AWBs via Cargo`)
-
-  for (const awb of awbs) {
+  // Track each AWB via Cargo shipment-list
+  for (const order of dlOrders) {
     try {
-      const res = await fetch(`${WORKER}/cargo/shipment-list/?awb=${awb}`, {
+      const res = await fetch(`${WORKER}/cargo/shipment-list/?awb=${order.awb}`, {
         headers: {
           'Authorization': `token ${token}`,
           'Accept': 'application/json',
         },
       })
-      debugLog.push(`AWB ${awb}: HTTP ${res.status}`)
+      debugLog.push(`AWB ${order.awb}: HTTP ${res.status}`)
       if (!res.ok) continue
       const data = await res.json()
       const shipments = data.data || data.results || []
@@ -104,14 +50,14 @@ export async function POST(request: Request) {
         const shipment = shipments[0] as Record<string, unknown>
         const status = (shipment.status as string) || (shipment.shipment_status as string) || ''
         const lastUpdate = (shipment.updated_at as string) || (shipment.last_update as string) || ''
-        results[awb] = { ...normalizeCargo(status), lastUpdate }
-        debugLog.push(`AWB ${awb}: status=${status}`)
+        results[order.awb] = { ...normalizeCargo(status), lastUpdate }
+        debugLog.push(`AWB ${order.awb}: status=${status}`)
       } else {
-        debugLog.push(`AWB ${awb}: no shipments found, keys=${Object.keys(data).join(',')}`)
-        if (debug) debugLog.push(`AWB ${awb}: raw=${JSON.stringify(data).slice(0, 300)}`)
+        debugLog.push(`AWB ${order.awb}: no shipments, keys=${Object.keys(data).join(',')}`)
+        if (debug) debugLog.push(`AWB ${order.awb}: raw=${JSON.stringify(data).slice(0, 300)}`)
       }
     } catch (e) {
-      debugLog.push(`AWB ${awb}: error=${String(e)}`)
+      debugLog.push(`AWB ${order.awb}: error=${String(e)}`)
     }
   }
 
