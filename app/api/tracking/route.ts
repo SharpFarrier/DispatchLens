@@ -10,8 +10,8 @@ function normalizeCargo(status: string): { status: string; label: string } {
   if (s.includes('ndr') || s.includes('undelivered') || s.includes('failed')) return { status: 'ndr', label: 'NDR' }
   if (s.includes('rto')) return { status: 'rto', label: 'RTO' }
   if (s.includes('in_transit') || s.includes('transit') || s.includes('shipped')) return { status: 'in_transit', label: 'In Transit' }
-  if (s.includes('picked_up') || s.includes('pickup_scheduled') || s.includes('picked up')) return { status: 'picked_up', label: 'Picked Up' }
-  if (s.includes('ready_to_ship') || s.includes('manifested') || s.includes('booked')) return { status: 'booked', label: 'Booked' }
+  if (s.includes('pickup scheduled') || s.includes('pickup_scheduled') || s.includes('ready_to_ship') || s.includes('ready to ship') || s.includes('manifested') || s.includes('booked')) return { status: 'booked', label: 'Pickup Scheduled' }
+  if (s.includes('picked_up') || s.includes('picked up') || s.includes('pickup complete')) return { status: 'picked_up', label: 'Picked Up' }
   return { status: 'unknown', label: status || 'Unknown' }
 }
 
@@ -36,35 +36,6 @@ export async function POST(request: Request) {
   // Auto-login to get fresh token
   const CARGO_EMAIL = process.env.CARGO_EMAIL || 'logistics@sabiwabi.in'
   const CARGO_PASSWORD = process.env.CARGO_PASSWORD || 'Sabi#789'
-  // Try multiple Cargo/Shiprocket login endpoints
-  const loginEndpoints = [
-    'https://apiv2.shiprocket.in/v1/external/auth/login',
-    'https://api-cargo.shiprocket.in/auth/login',
-    'https://api-cargo.shiprocket.in/api/auth/login',
-  ]
-  for (const endpoint of loginEndpoints) {
-    try {
-      const loginRes = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: CARGO_EMAIL, password: CARGO_PASSWORD }),
-      })
-      const loginBody = await loginRes.text()
-      debugLog.push(`${endpoint}: HTTP ${loginRes.status} ${loginBody.slice(0, 150)}`)
-      if (loginRes.ok) {
-        const loginData = JSON.parse(loginBody)
-        const freshToken = loginData.token || loginData.data?.token || loginData.access
-        if (freshToken) {
-          token = freshToken
-          debugLog.push(`Fresh token from ${endpoint}: ${token.slice(0, 20)}...`)
-          break
-        }
-      }
-    } catch (e) {
-      debugLog.push(`${endpoint}: error=${String(e)}`)
-    }
-  }
-
   if (!token) return NextResponse.json({ error: 'No Cargo token available' }, { status: 500 })
 
   // Track each AWB via Cargo shipment-list
