@@ -74,6 +74,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispatchedDateFilter, setDispatchedDateFilter] = useState<Set<string>>(new Set())
   const [showDispatchedDatePopover, setShowDispatchedDatePopover] = useState(false)
   const [dispatchedDatePopoverPos, setDispatchedDatePopoverPos] = useState({ top: 0, left: 0 })
+  const [dispatchedStatusFilter, setDispatchedStatusFilter] = useState<Set<string>>(new Set())
+  const [showDispatchedStatusPopover, setShowDispatchedStatusPopover] = useState(false)
+  const [dispatchedStatusPopoverPos, setDispatchedStatusPopoverPos] = useState({ top: 0, left: 0 })
   // Tracking
   const [trackingData, setTrackingData] = useState<Record<string, { status: string; label: string; lastUpdate: string }>>({})
   const [trackingLoading, setTrackingLoading] = useState(false)
@@ -366,6 +369,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   // ── Save AWB edit ──
+  const saveCourier = async (orderId: string, newCourier: Courier) => {
+    await supabase.from('dispatch_orders').update({ courier: newCourier, updated_at: new Date().toISOString() }).eq('id', orderId)
+    const order = orders.find(o => o.id === orderId)
+    if (order && order.courier !== newCourier) logEvent(order.order_id, 'note', `Courier changed from ${order.courier} to ${newCourier}`)
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, courier: newCourier } : o))
+  }
+
   const saveAwb = async (orderId: string) => {
     const val = editingAwbValue.trim()
     await supabase.from('dispatch_orders').update({ tracking_number: val || null, updated_at: new Date().toISOString() }).eq('id', orderId)
@@ -728,6 +738,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         return dispatchedDateFilter.has(dateKey)
       })
     }
+    if (dispatchedStatusFilter.size > 0) {
+      list = list.filter(o => {
+        const liveStatus = (o.tracking_number && trackingData[o.tracking_number]?.status) || o.tracking_status || 'none'
+        return dispatchedStatusFilter.has(liveStatus)
+      })
+    }
     if (dispatchedSortCol) {
       list.sort((a, b) => {
         const av = (a as unknown as Record<string, unknown>)[dispatchedSortCol] ?? ''
@@ -737,7 +753,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter])
+  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, trackingData])
   const unfulfillableOrders = useMemo(() => activeOrders.filter(o => o.plan_decision === 'unfulfillable'), [activeOrders])
 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
@@ -989,7 +1005,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false) }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -1902,6 +1918,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           onCancel={id => setCancelOrderId(id)}
                           onHistory={order => setHistoryOrder(order)}
                           onManualDispatch={order => setManualDispatchOrder(order)}
+                          onSaveCourier={saveCourier}
                           editingAwbId={editingAwbId}
                           editingAwbValue={editingAwbValue}
                           onEditAwb={(id, val) => { setEditingAwbId(id); setEditingAwbValue(val) }}
@@ -2511,9 +2528,73 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         { label: 'AWB', col: 'tracking_number' },
                         { label: 'Pincode · City', col: 'pincode' },
                         { label: 'Promise', col: 'promise_date' },
-                        { label: 'Status', col: null },
+                        { label: 'STATUS_FILTER_SPECIAL', col: null },
                         { label: '', col: null },
                       ] as { label: string; col: string | null }[]).map(({ label, col }) => {
+                        if (label === 'STATUS_FILTER_SPECIAL') {
+                          const STATUS_OPTS: { key: string; label: string }[] = [
+                            { key: 'delivered', label: 'Delivered' },
+                            { key: 'ofd', label: 'Out for Delivery' },
+                            { key: 'in_transit', label: 'In Transit' },
+                            { key: 'picked_up', label: 'Picked Up' },
+                            { key: 'booked', label: 'Pickup Scheduled' },
+                            { key: 'ndr', label: 'NDR' },
+                            { key: 'rto', label: 'RTO' },
+                            { key: 'unknown', label: 'Unknown' },
+                            { key: 'none', label: 'Not Synced' },
+                          ]
+                          const statusCount = (key: string) => dispatchedOrders.filter(o => {
+                            const ls = (o.tracking_number && trackingData[o.tracking_number]?.status) || o.tracking_status || 'none'
+                            return ls === key
+                          }).length
+                          return (
+                            <th key="status" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Status</span>
+                                <button onClick={e => {
+                                  e.stopPropagation()
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  setDispatchedStatusPopoverPos({ top: rect.bottom + 6, left: Math.max(8, rect.left - 80) })
+                                  setShowDispatchedStatusPopover(v => !v)
+                                }} style={{
+                                  background: dispatchedStatusFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                  border: dispatchedStatusFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                  borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                  color: dispatchedStatusFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                }}>
+                                  {dispatchedStatusFilter.size > 0 ? `${dispatchedStatusFilter.size} ▾` : '▾'}
+                                </button>
+                                {dispatchedStatusFilter.size > 0 && <button onClick={() => setDispatchedStatusFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
+                              </div>
+                              {showDispatchedStatusPopover && (
+                                <div style={{ position: 'fixed' as const, top: dispatchedStatusPopoverPos.top, left: dispatchedStatusPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 190, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>STATUS</span>
+                                    <button onClick={() => { setDispatchedStatusFilter(new Set()); setShowDispatchedStatusPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 280, overflowY: 'auto' }}>
+                                    {STATUS_OPTS.filter(opt => statusCount(opt.key) > 0).map(opt => {
+                                      const isSelected = dispatchedStatusFilter.has(opt.key)
+                                      return (
+                                        <button key={opt.key} onClick={() => setDispatchedStatusFilter(prev => { const n = new Set(prev); n.has(opt.key) ? n.delete(opt.key) : n.add(opt.key); return n })}
+                                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
+                                          <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                            {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+                                          </span>
+                                          <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{opt.label}</span>
+                                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{statusCount(opt.key)}</span>
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                  <button onClick={() => setShowDispatchedStatusPopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                                </div>
+                              )}
+                            </th>
+                          )
+                        }
+
                         if (label === 'DISPATCHED_DATE_SPECIAL') return (
                           <th key="dispatched_at" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2887,7 +2968,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   onSelect: (id: string) => void
@@ -2897,6 +2978,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onCancel: (id: string) => void
   onHistory: (order: DBOrder) => void
   onManualDispatch: (order: DBOrder) => void
+  onSaveCourier: (id: string, courier: Courier) => void
   editingAwbId: string | null
   editingAwbValue: string
   onEditAwb: (id: string, current: string) => void
@@ -2946,7 +3028,22 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       </td>
       <td style={{ padding: '8px 12px', maxWidth: 160 }}><span style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: 150 }}>{order.customer_name}</span></td>
       <td style={{ padding: '8px 12px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
-      <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4, border: `1px solid ${order.courier === 'Bluedart' ? '#bfdbfe' : '#e9d5ff'}` }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span></td>
+      <td style={{ padding: '8px 12px' }}>
+        <select
+          value={order.courier}
+          onChange={e => onSaveCourier(order.id, e.target.value as Courier)}
+          style={{
+            fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600,
+            color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed',
+            background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff',
+            border: `1px solid ${order.courier === 'Bluedart' ? '#bfdbfe' : '#e9d5ff'}`,
+            borderRadius: 4, padding: '2px 4px', cursor: 'pointer', outline: 'none',
+          }}
+        >
+          <option value="Bluedart">BD</option>
+          <option value="Delhivery">DL</option>
+        </select>
+      </td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
         <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{order.pincode}</span>
         {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
