@@ -2,18 +2,20 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { parseOrders } from '@/lib/parser'
-import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason } from '@/types'
+import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap } from '@/types'
 import UsersTab from './UsersTab'
+import SkuMapTab from './SkuMapTab'
 import OrderHistoryPanel from './OrderHistoryPanel'
+import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
 import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil, Filter, ExternalLink
+  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided'
 
 interface Props {
@@ -57,12 +59,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [tab, setTab] = useState<Tab>('import')
   const [orders, setOrders] = useState<DBOrder[]>(initialOrders)
   const [loadingOrders, setLoadingOrders] = useState(false)
+  const [skuMaps, setSkuMaps] = useState<SkuMap[]>([])
+
+  // Scan-out verification (EOD)
+  const [scanAwb, setScanAwb] = useState('')
+  const [scanItem, setScanItem] = useState('')
+  const [scanOrder, setScanOrder] = useState<DBOrder | null>(null)
+  const [scanResult, setScanResult] = useState<{ ok: boolean; expected: string; scanned: string } | null>(null)
+  const [scanVerifiedCount, setScanVerifiedCount] = useState(0)
+  const [scanError, setScanError] = useState<string | null>(null)
 
   // Import
   const [delhiveryText, setDelhiveryText] = useState('')
   const [bluedartText, setBluedartText] = useState('')
   const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number } | null>(null)
+  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; unmapped: number } | null>(null)
 
   // Plan
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
@@ -170,6 +181,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   useEffect(() => {
     // Always load fresh from DB to ensure all columns (incl. scheduled_date) are present
     loadOrders()
+    // Load SKU map for import-time barcode resolution + scan-out verification
+    supabase.from('dispatch_sku_map').select('*').then(({ data }) => {
+      if (data) setSkuMaps(data as SkuMap[])
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -216,10 +231,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         .insert({ created_by: user.id, session_date: new Date().toISOString().split('T')[0], label: batchLabel, total_orders: newOrders.length })
         .select().single()
       if (session) {
-        const rows = newOrders.map(o => ({
-          session_id: session.id, ...o,
-          plan_decision: o.is_dispatched ? 'scheduled' : 'undecided',
-        }))
+        // Resolve each order's platform SKU to the canonical barcode (Master) SKU
+        const lookup = buildSkuLookup(skuMaps)
+        const rows = newOrders.map(o => {
+          const barcode = resolveBarcodeSku(o.order_id, o.sku, lookup)
+          return {
+            session_id: session.id, ...o,
+            barcode_sku: barcode,
+            sku_mapped: !!barcode,
+            plan_decision: o.is_dispatched ? 'scheduled' : 'undecided',
+          }
+        })
         await supabase.from('dispatch_orders').insert(rows)
         await loadOrders()
         // Log import events
@@ -228,7 +250,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }
       }
     }
-    setImportResult({ added: newOrders.length, updated: updatedOrders.length, skipped: allParsed.length - newOrders.length - updatedOrders.length })
+    const lookupForCount = buildSkuLookup(skuMaps)
+    const unmappedCount = newOrders.filter(o => !resolveBarcodeSku(o.order_id, o.sku, lookupForCount)).length
+    setImportResult({ added: newOrders.length, updated: updatedOrders.length, skipped: allParsed.length - newOrders.length - updatedOrders.length, unmapped: unmappedCount })
     setImporting(false)
     setDelhiveryText('')
     setBluedartText('')
@@ -386,154 +410,65 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setEditingAwbValue('')
   }
 
-  // ── Sync tracking (called directly from browser) ──
-  const WORKER = 'https://tracklens-proxy.adityaramnani91581.workers.dev'
-  const BD_API_KEY = 'WxObKDF1pSM0GWYCBBjnemimMH7Ed3Gp'
-  const BD_API_SECRET = 'j2FGlGEWnGcgVYDs'
-  const BD_LOGIN_ID = 'BOM41184'
-  const BD_LICENCE_KEY = 'hkfoiszukslp0umqriqgn2bolmgovtge'
-
-  const normalizeBD = (code: string, desc: string) => {
-    const s = (code + ' ' + desc).toLowerCase()
-    if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
-    if (s.includes('out for delivery') || s.includes('ofd')) return { status: 'ofd', label: 'Out for Delivery' }
-    if (s.includes('ndr') || s.includes('delivery attempt') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
-    if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
-    if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
-    if (s.includes('transit') || s.includes('arrived') || s.includes('departed')) return { status: 'in_transit', label: 'In Transit' }
-    if (s.includes('booked') || s.includes('manifested')) return { status: 'booked', label: 'Booked' }
-    return { status: 'unknown', label: desc || code || 'Unknown' }
-  }
-
-  const normalizeDL = (status: string) => {
-    const s = (status || '').toLowerCase()
-    if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
-    if (s.includes('out for delivery')) return { status: 'ofd', label: 'Out for Delivery' }
-    if (s.includes('failed delivery') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
-    if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
-    if (s.includes('transit')) return { status: 'in_transit', label: 'In Transit' }
-    if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
-    return { status: 'booked', label: status || 'Booked' }
-  }
-
-  const syncTracking = async () => {
-    // Skip orders already delivered (status never changes after delivery)
-    const toTrack = dispatchedOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered' && o.tracking_status !== 'rto')
-    if (!toTrack.length) { setTrackingLastSync(new Date()); return }
-    setTrackingLoading(true)
-    setTrackingProgress({ done: 0, total: toTrack.length })
-    const results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
-
-    try {
-      // 1. Get Bluedart JWT
-      const bdOrders = toTrack.filter(o => o.courier === 'Bluedart')
-      const dlOrders = toTrack.filter(o => o.courier === 'Delhivery')
-
-      if (bdOrders.length) {
-        let bdToken: string | null = null
-        try {
-          const tokenRes = await fetch(`${WORKER}/bluedart/in/transportation/token/v1/login`, {
-            method: 'GET',
-            headers: { 'ClientID': BD_API_KEY, 'ClientSecret': BD_API_SECRET },
-          })
-          const tokenData = await tokenRes.json()
-          bdToken = tokenData?.JWTToken || null
-        } catch { /* token failed */ }
-
-        if (bdToken) {
-          // Throttled: 3 concurrent, 350ms gap between batches to avoid 429
-          // Endpoint format from TrackLens: query params + XML response
-          const CONCURRENCY = 6
-          for (let i = 0; i < bdOrders.length; i += CONCURRENCY) {
-            const batch = bdOrders.slice(i, i + CONCURRENCY)
-            await Promise.all(batch.map(async o => {
-              try {
-                const params = new URLSearchParams({
-                  handler: 'tnt',
-                  action: 'custawbquery',
-                  loginid: BD_LOGIN_ID,
-                  awb: 'awb',
-                  numbers: o.tracking_number!.trim(),
-                  format: 'xml',
-                  lickey: BD_LICENCE_KEY,
-                  verno: '1.3',
-                  scan: '1',
-                })
-                const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1?${params}`, {
-                  method: 'GET',
-                  headers: { 'JWTToken': bdToken },
-                })
-                if (res.status === 429) return // rate limited, will retry next sync
-                const xmlText = await res.text()
-                const doc = new DOMParser().parseFromString(xmlText, 'text/xml')
-                const shipment = doc.querySelector('Shipment')
-                if (shipment) {
-                  const statusEl = shipment.querySelector('Status')
-                  const firstScan = shipment.querySelector('Scans Scan, Scans > ScanDetail')
-                  const scanText = firstScan?.querySelector('Scan')?.textContent || firstScan?.textContent || ''
-                  const scanDate = firstScan?.querySelector('ScanDate')?.textContent || ''
-                  const statusText = statusEl?.textContent || scanText || ''
-                  if (statusText) {
-                    results[o.tracking_number!] = {
-                      ...normalizeBD('', statusText),
-                      lastUpdate: scanDate,
-                    }
-                  }
-                }
-              } catch { /* skip */ }
-            }))
-            setTrackingProgress(p => p ? { ...p, done: Math.min(p.done + batch.length, p.total) } : p)
-            if (i + CONCURRENCY < bdOrders.length) await new Promise(r => setTimeout(r, 200))
-          }
-        }
-      }
-
-      // 2. Delhivery — server route, chunked to stay under serverless timeout
-      if (dlOrders.length) {
-        const CHUNK = 25
-        for (let i = 0; i < dlOrders.length; i += CHUNK) {
-          const chunk = dlOrders.slice(i, i + CHUNK)
-          try {
-            const res = await fetch('/api/tracking', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                orders: chunk.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier }))
-              }),
-            })
-            if (res.ok) {
-              const data = await res.json()
-              Object.assign(results, data)
-            }
-          } catch { /* skip chunk */ }
-          setTrackingProgress(p => p ? { ...p, done: Math.min(p.done + chunk.length, p.total) } : p)
-        }
-      }
-    } catch (e) { console.error('Tracking sync failed:', e) }
-
-    // Persist results to DB so status survives page reloads
-    const syncedAt = new Date().toISOString()
-    const updates = Object.entries(results)
-    if (updates.length) {
-      await Promise.all(updates.map(async ([awb, t]) => {
-        const order = dispatchedOrders.find(o => o.tracking_number === awb)
-        if (!order) return
-        await supabase.from('dispatch_orders').update({
-          tracking_status: t.status,
-          tracking_label: t.label,
-          tracking_last_update: t.lastUpdate,
-          tracking_synced_at: syncedAt,
-        }).eq('id', order.id)
-      }))
-      setOrders(prev => prev.map(o => {
-        const t = o.tracking_number ? results[o.tracking_number] : undefined
-        return t ? { ...o, tracking_status: t.status, tracking_label: t.label, tracking_last_update: t.lastUpdate, tracking_synced_at: syncedAt } : o
-      }))
+  // ── Scan-out verification ──
+  const handleScanAwb = (awbRaw: string) => {
+    const awb = awbRaw.trim().replace(/\.0+$/, '')
+    if (!awb) return
+    setScanError(null)
+    setScanResult(null)
+    const match = orders.find(o =>
+      o.tracking_number?.trim().replace(/\.0+$/, '') === awb &&
+      !o.is_cancelled && !o.is_dispatched
+    )
+    if (!match) {
+      setScanError(`No pending order found for AWB ${awb}`)
+      setScanOrder(null)
+      return
     }
-    setTrackingData(results)
-    setTrackingLastSync(new Date())
-    setTrackingLoading(false)
-    setTrackingProgress(null)
+    setScanOrder(match)
+    setScanItem('')
+  }
+
+  const handleScanItem = async (itemRaw: string) => {
+    if (!scanOrder) return
+    const scanned = itemRaw.trim()
+    if (!scanned) return
+    const expected = (scanOrder.barcode_sku || '').trim()
+
+    if (!expected) {
+      setScanError(`Order ${scanOrder.order_id} has no mapped barcode SKU. Map it in the SKU Map tab, or use the paste fallback below.`)
+      return
+    }
+
+    const isMatch = scanned.toLowerCase() === expected.toLowerCase()
+    setScanResult({ ok: isMatch, expected, scanned })
+
+    if (isMatch) {
+      const now = new Date().toISOString()
+      await supabase.from('dispatch_orders').update({
+        is_dispatched: true,
+        dispatched_at: now,
+        scan_verified: true,
+        scan_verified_at: now,
+      }).eq('id', scanOrder.id)
+      logEvent(scanOrder.order_id, 'dispatched', `Scan-verified dispatch · ${expected} · AWB ${scanOrder.tracking_number}`)
+      setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now } : o))
+      setScanVerifiedCount(c => c + 1)
+      setTimeout(() => {
+        setScanOrder(null)
+        setScanAwb('')
+        setScanItem('')
+        setScanResult(null)
+      }, 1200)
+    }
+  }
+
+  const resetScan = () => {
+    setScanOrder(null)
+    setScanAwb('')
+    setScanItem('')
+    setScanResult(null)
+    setScanError(null)
   }
 
   // ── Unfulfillable by SKU (partial or full) ──
@@ -1305,6 +1240,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: access.can_picklist },
             { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_eod },
             { key: 'eod', label: 'End of Day', show: access.can_eod },
+            { key: 'skumap', label: 'SKU Map', show: access.can_import },
             { key: 'users', label: 'Users', show: access.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -1465,6 +1401,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dispatched)', fontSize: 13, fontWeight: 500 }}>
                       <CheckCircle size={15} />{importResult.added} orders imported
                       {importResult.skipped > 0 && <span style={{ color: 'var(--text3)' }}>· {importResult.skipped} skipped</span>}
+                      {importResult.unmapped > 0 && <span style={{ color: 'var(--today)', display: 'flex', alignItems: 'center', gap: 4 }}>· <AlertTriangle size={13} /> {importResult.unmapped} unmapped SKU{importResult.unmapped !== 1 ? 's' : ''}</span>}
                     </div>
                   )}
                   {orders.length > 0 && (
@@ -1473,6 +1410,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     </button>
                   )}
                 </div>
+                {importResult && importResult.unmapped > 0 && (
+                  <div style={{ padding: '12px 16px', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 8, color: 'var(--today)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <AlertTriangle size={15} />
+                    {importResult.unmapped} order{importResult.unmapped !== 1 ? 's' : ''} couldn&apos;t resolve a barcode SKU. Add the mapping in the SKU Map tab — those orders can&apos;t be scan-verified at dispatch until mapped (the paste fallback still works).
+                  </div>
+                )}
             </>
           </div>
         )}
@@ -2928,6 +2871,112 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <AlertTriangle size={15} />{undecidedCount} orders still undecided — complete Plan tab first.
                   </div>
                 )}
+
+                {/* ── Scan-out verification ── */}
+                <div style={{ ...card, padding: 20, display: 'flex', flexDirection: 'column' as const, gap: 16, border: '1px solid var(--accent)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <ScanLine size={16} style={{ color: 'var(--accent)' }} />
+                    <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: 'var(--text)', letterSpacing: '0.05em' }}>SCAN-OUT VERIFICATION</span>
+                    {scanVerifiedCount > 0 && (
+                      <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--dispatched)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <CheckCircle size={13} /> {scanVerifiedCount} verified this session
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0, lineHeight: 1.5 }}>
+                    Scan the AWB on the box, then scan the item barcode. The item&apos;s barcode SKU is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
+                  </p>
+
+                  {/* Step 1: AWB */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>1 · SCAN AWB</label>
+                    <input
+                      value={scanAwb}
+                      onChange={e => setScanAwb(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleScanAwb(scanAwb) }}
+                      placeholder="Scan or type AWB, press Enter…"
+                      disabled={!!scanOrder}
+                      style={{ width: '100%', padding: '11px 14px', borderRadius: 7, border: `1px solid ${scanOrder ? 'var(--border)' : 'var(--accent)'}`, background: scanOrder ? 'var(--bg2)' : 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
+                    />
+                  </div>
+
+                  {scanError && (
+                    <div style={{ padding: '10px 14px', background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 7, color: 'var(--critical)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <AlertCircle size={15} style={{ flexShrink: 0 }} /> {scanError}
+                    </div>
+                  )}
+
+                  {/* Step 2: order pulled + item scan */}
+                  {scanOrder && (
+                    <>
+                      <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '12px 14px', display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{scanOrder.customer_name}</span>
+                          <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: scanOrder.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: scanOrder.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>{scanOrder.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
+                        </div>
+                        <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)' }}>{scanOrder.order_id}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text3)' }}>Expected barcode SKU:</span>
+                          <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: scanOrder.barcode_sku ? 'var(--accent)' : 'var(--critical)' }}>
+                            {scanOrder.barcode_sku || 'NOT MAPPED'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>2 · SCAN ITEM BARCODE</label>
+                        <input
+                          value={scanItem}
+                          onChange={e => setScanItem(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleScanItem(scanItem) }}
+                          placeholder="Scan the item barcode, press Enter…"
+                          autoFocus
+                          disabled={scanResult?.ok}
+                          style={{ width: '100%', padding: '11px 14px', borderRadius: 7, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {/* Result block */}
+                  {scanResult && (
+                    scanResult.ok ? (
+                      <div style={{ padding: '16px 18px', background: 'var(--dispatched-bg)', border: '2px solid var(--dispatched)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <CheckCircle size={28} style={{ color: 'var(--dispatched)', flexShrink: 0 }} />
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dispatched)' }}>Match — dispatched</div>
+                          <div style={{ fontSize: 12, fontFamily: 'DM Mono', color: 'var(--text2)', marginTop: 2 }}>{scanResult.scanned}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ padding: '16px 18px', background: 'var(--critical-bg)', border: '2px solid var(--critical)', borderRadius: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                          <AlertTriangle size={28} style={{ color: 'var(--critical)', flexShrink: 0 }} />
+                          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--critical)' }}>WRONG ITEM — not dispatched</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 20, fontFamily: 'DM Mono', fontSize: 13, flexWrap: 'wrap' as const }}>
+                          <div><span style={{ color: 'var(--text3)' }}>Expected: </span><span style={{ color: 'var(--dispatched)', fontWeight: 700 }}>{scanResult.expected}</span></div>
+                          <div><span style={{ color: 'var(--text3)' }}>Scanned: </span><span style={{ color: 'var(--critical)', fontWeight: 700 }}>{scanResult.scanned}</span></div>
+                        </div>
+                        <button onClick={() => { setScanItem(''); setScanResult(null) }} style={{ marginTop: 12, padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Rescan item</button>
+                      </div>
+                    )
+                  )}
+
+                  {scanOrder && (
+                    <button onClick={resetScan} style={{ alignSelf: 'flex-start', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, cursor: 'pointer' }}>
+                      Cancel / scan a different AWB
+                    </button>
+                  )}
+                </div>
+
+                {/* Fallback divider */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                  <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono', letterSpacing: '0.05em' }}>OR USE PASTE FALLBACK</span>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                </div>
+
                 <div style={{ ...card, padding: 20, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Truck size={14} style={{ color: 'var(--text2)' }} />
@@ -2947,6 +2996,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               </>
             )}
           </div>
+        )}
+
+        {/* ════ SKU MAP ════ */}
+        {tab === 'skumap' && (
+          <SkuMapTab />
         )}
 
         {/* ════ USERS ════ */}

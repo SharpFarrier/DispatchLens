@@ -3,7 +3,7 @@ export type PlanDecision = 'scheduled' | 'hold' | 'unfulfillable' | 'undecided'
 export type UrgencyTier = 'CRITICAL' | 'TODAY' | 'PLAN' | 'HOLD'
 export type UnfulfillableReason = 'Not ready' | 'No stock available' | 'Other'
 export type AccessStatus = 'pending' | 'approved' | 'rejected'
-
+export type Platform = 'Amazon' | 'Flipkart' | 'Website'
 export interface UserAccess {
   id: string
   email: string
@@ -20,7 +20,17 @@ export interface UserAccess {
   created_at: string
   updated_at: string
 }
-
+export interface SkuMap {
+  id: string
+  master_sku: string
+  product_name: string | null
+  amazon_sku: string | null
+  amazon_asin: string | null
+  flipkart_sku: string | null
+  website_sku: string | null
+  created_at: string
+  updated_at: string
+}
 export interface ParsedOrder {
   order_id: string
   order_date: string | null
@@ -43,7 +53,6 @@ export interface ParsedOrder {
   is_dispatched: boolean
   is_priority: boolean
 }
-
 export interface DBOrder {
   id: string
   session_id: string
@@ -59,6 +68,10 @@ export interface DBOrder {
   tracking_last_update: string | null
   tracking_synced_at: string | null
   sku: string
+  barcode_sku: string | null
+  sku_mapped: boolean
+  scan_verified: boolean
+  scan_verified_at: string | null
   raw_status: string
   promise_date: string | null
   pincode: string
@@ -82,7 +95,6 @@ export interface DBOrder {
   created_at: string
   updated_at: string
 }
-
 export interface DispatchSession {
   id: string
   created_by: string
