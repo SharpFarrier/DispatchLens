@@ -5,6 +5,7 @@ import { parseOrders } from '@/lib/parser'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap } from '@/types'
 import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
+import CargoTokenPanel from './CargoTokenPanel'
 import OrderHistoryPanel from './OrderHistoryPanel'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
@@ -2706,6 +2707,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 {dispatchedSearch && <button onClick={() => setDispatchedSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0 }}><X size={12} /></button>}
               </div>
             </div>
+
+            {access.can_users && <CargoTokenPanel />}
 
             <div style={{ ...card, overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' as const }}>

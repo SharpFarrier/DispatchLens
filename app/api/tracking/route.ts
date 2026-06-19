@@ -40,6 +40,15 @@ async function trackDelhiveryPublic(awb: string, debugLog: string[]): Promise<{ 
   }
 }
 
+async function getCargoToken(supabase: Awaited<ReturnType<typeof createClient>>): Promise<string> {
+  try {
+    const { data } = await supabase.from('app_config').select('value').eq('key', 'cargo_token').maybeSingle()
+    const dbToken = (data?.value as string) || ''
+    if (dbToken) return dbToken
+  } catch { /* fall through to env */ }
+  return process.env.CARGO_TOKEN || ''
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -54,13 +63,10 @@ export async function POST(request: Request) {
 
   if (!dlOrders.length) return NextResponse.json(results)
 
-  // Try env token first, auto-login if expired
-  let token = process.env.CARGO_TOKEN || ''
-  debugLog.push(`Env token present: ${token ? 'yes' : 'no'}`)
+  // Token: DB (app_config) first, env var as fallback. Refreshed in-app, no redeploy.
+  let token = await getCargoToken(supabase)
+  debugLog.push(`Token present: ${token ? 'yes' : 'no'}`)
 
-  // Auto-login to get fresh token
-  const CARGO_EMAIL = process.env.CARGO_EMAIL || 'logistics@sabiwabi.in'
-  const CARGO_PASSWORD = process.env.CARGO_PASSWORD || 'Sabi#789'
   if (!token) return NextResponse.json({ error: 'No Cargo token available' }, { status: 500 })
 
   // Track each AWB via Cargo shipment-list
