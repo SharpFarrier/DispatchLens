@@ -1489,9 +1489,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'plan', label: activeOrders.length ? `Plan (${activeOrders.length})` : 'Plan', show: access.can_plan },
             { key: 'review', label: reviewCount > 0 ? `Review (${reviewCount})` : 'Review', show: access.can_review },
             { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: access.can_picklist },
-            { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_eod },
+            { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_dispatched },
             { key: 'eod', label: 'End of Day', show: access.can_eod },
-            { key: 'skumap', label: 'SKU Map', show: access.can_import },
+            { key: 'skumap', label: 'SKU Map', show: access.can_users },
             { key: 'users', label: 'Users', show: access.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -2674,7 +2674,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ DISPATCHED ════ */}
-        {tab === 'dispatched' && (
+        {tab === 'dispatched' && access.can_dispatched && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Dispatched Orders</h1>
@@ -3314,7 +3314,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ SKU MAP ════ */}
-        {tab === 'skumap' && (
+        {tab === 'skumap' && access.can_users && (
           <SkuMapTab />
         )}
 

@@ -14,6 +14,7 @@ export interface UserAccess {
   can_review: boolean
   can_picklist: boolean
   can_eod: boolean
+  can_dispatched: boolean
   can_users: boolean
   requested_at: string
   reviewed_at: string | null

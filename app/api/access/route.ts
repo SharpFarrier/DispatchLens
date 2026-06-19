@@ -58,7 +58,7 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json()
-  const { email, status, can_import, can_plan, can_review, can_picklist, can_eod, can_users } = body
+  const { email, status, can_import, can_plan, can_review, can_picklist, can_eod, can_dispatched, can_users } = body
 
   const { data, error } = await adminClient
     .from('dispatch_user_access')
@@ -69,6 +69,7 @@ export async function PATCH(request: Request) {
       can_review: can_review ?? false,
       can_picklist: can_picklist ?? false,
       can_eod: can_eod ?? false,
+      can_dispatched: can_dispatched ?? false,
       can_users: can_users ?? false,
       reviewed_at: new Date().toISOString(),
       reviewed_by: user.id,

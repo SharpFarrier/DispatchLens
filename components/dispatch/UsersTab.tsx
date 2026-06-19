@@ -9,6 +9,7 @@ const TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
   { key: 'can_review',   label: 'Review',   desc: 'Assign target dates, cancel orders' },
   { key: 'can_picklist', label: 'Picklist', desc: 'View picklist, mark SKU unfulfillable' },
   { key: 'can_eod',      label: 'EOD',      desc: 'Upload Shypassist, confirm dispatch' },
+  { key: 'can_dispatched', label: 'Dispatched', desc: 'View dispatched orders, sync tracking' },
   { key: 'can_users',    label: 'Users',    desc: 'Manage user access (admin only)' },
 ]
 
@@ -55,6 +56,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
         can_review: merged.can_review,
         can_picklist: merged.can_picklist,
         can_eod: merged.can_eod,
+        can_dispatched: merged.can_dispatched,
         can_users: merged.can_users,
       }),
     })
