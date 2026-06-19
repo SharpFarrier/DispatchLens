@@ -68,6 +68,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [scanResult, setScanResult] = useState<{ ok: boolean; expected: string; scanned: string } | null>(null)
   const [scanVerifiedCount, setScanVerifiedCount] = useState(0)
   const [scanError, setScanError] = useState<string | null>(null)
+  const [scanCourier, setScanCourier] = useState<Courier | null>(null)
 
   // Import
   const [delhiveryText, setDelhiveryText] = useState('')
@@ -416,12 +417,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (!awb) return
     setScanError(null)
     setScanResult(null)
-    const match = orders.find(o =>
+    const allMatches = orders.filter(o =>
       o.tracking_number?.trim().replace(/\.0+$/, '') === awb &&
       !o.is_cancelled && !o.is_dispatched
     )
-    if (!match) {
+    if (!allMatches.length) {
       setScanError(`No pending order found for AWB ${awb}`)
+      setScanOrder(null)
+      return
+    }
+    // Scope to the courier currently being loaded
+    const match = scanCourier ? allMatches.find(o => o.courier === scanCourier) : allMatches[0]
+    if (!match) {
+      const other = allMatches[0].courier
+      setScanError(`AWB ${awb} is a ${other} order, but you're loading ${scanCourier}. Switch courier or set this one aside.`)
       setScanOrder(null)
       return
     }
@@ -475,6 +484,94 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setScanItem('')
     setScanResult(null)
     setScanError(null)
+  }
+
+  // ── Courier dispatch-day stats (for scan-out selector) ──
+  const courierDayStats = (c: Courier) => {
+    const eodToday = new Date().toISOString().split('T')[0]
+    const plannedList = orders.filter(o => o.courier === c && o.plan_decision === 'scheduled' && o.scheduled_date === eodToday && !o.is_cancelled)
+    const planned = plannedList.length
+    const dispatched = plannedList.filter(o => o.is_dispatched && o.dispatched_at && o.dispatched_at.startsWith(eodToday)).length
+    return { planned, dispatched }
+  }
+
+  // Scan-verified-today orders for a courier — these go on the manifest
+  const manifestOrders = (c: Courier) => {
+    const eodToday = new Date().toISOString().split('T')[0]
+    return orders.filter(o => o.courier === c && o.scan_verified && o.scan_verified_at && o.scan_verified_at.startsWith(eodToday) && !o.is_cancelled)
+      .sort((a, b) => (a.tracking_number || '').localeCompare(b.tracking_number || ''))
+  }
+
+  // ── Generate + print dispatch manifest (printout only, no DB change) ──
+  const generateManifest = (c: Courier) => {
+    const list = manifestOrders(c)
+    if (!list.length) return
+    const now = new Date()
+    const dateStr = now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    const totalPcs = list.reduce((s, o) => s + (o.qty || 1), 0)
+    const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const rows = list.map((o, i) => `<tr>
+      <td class="num">${i + 1}</td>
+      <td class="mono">${esc(o.tracking_number)}</td>
+      <td class="mono">${esc(o.order_id)}</td>
+      <td class="mono">${esc(o.barcode_sku || o.sku)}</td>
+      <td>${esc(o.customer_name)}</td>
+      <td class="mono">${esc(o.pincode)}${o.city ? ' · ' + esc(o.city) : ''}</td>
+    </tr>`).join('')
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Dispatch Manifest — ${esc(c)} — ${dateStr}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #111; margin: 32px; font-size: 12px; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 4px; }
+  .brand { font-size: 18px; font-weight: 700; }
+  .brand small { display: block; font-size: 11px; font-weight: 400; color: #555; margin-top: 3px; line-height: 1.4; }
+  .meta { text-align: right; font-size: 12px; line-height: 1.6; }
+  .meta .courier { font-size: 16px; font-weight: 700; }
+  h1 { font-size: 14px; margin: 18px 0 10px; letter-spacing: 0.04em; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f3f3f3; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  td.num { text-align: center; width: 34px; color: #666; }
+  td.mono, th.mono { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; }
+  tfoot td { font-weight: 700; background: #fafafa; }
+  .sign { display: flex; gap: 40px; margin-top: 48px; }
+  .sign .box { flex: 1; }
+  .sign .line { border-top: 1px solid #111; margin-top: 44px; padding-top: 6px; font-size: 11px; color: #555; }
+  .sign .field { font-size: 11px; color: #555; margin-top: 10px; }
+  @media print { body { margin: 12mm; } button { display: none; } }
+  .printbtn { position: fixed; top: 12px; right: 12px; padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
+</style></head>
+<body>
+  <button class="printbtn" onclick="window.print()">Print</button>
+  <div class="head">
+    <div class="brand">Honey Touch · Sabi Wabi Innovations LLP
+      <small>Pickup: Sabi Wabi Ventures, Survey No. 72, Kalyan, 421301 · 8999198256</small>
+    </div>
+    <div class="meta">
+      <div class="courier">${esc(c)}</div>
+      <div>${dateStr}</div>
+      <div>Generated ${timeStr}</div>
+    </div>
+  </div>
+  <h1>DISPATCH MANIFEST</h1>
+  <table>
+    <thead><tr><th class="num">#</th><th>AWB</th><th>Order ID</th><th>Barcode SKU</th><th>Customer</th><th>Pincode · City</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="6">Total shipments: ${list.length} &nbsp;·&nbsp; Total pieces: ${totalPcs}</td></tr></tfoot>
+  </table>
+  <div class="sign">
+    <div class="box"><div class="line">Handed over by (Warehouse)</div><div class="field">Name &amp; Signature</div></div>
+    <div class="box"><div class="line">Received by (${esc(c)} Pickup Executive)</div><div class="field">Name · Signature · Date &amp; Time</div></div>
+  </div>
+</body></html>`
+
+    const w = window.open('', '_blank')
+    if (!w) { alert('Allow pop-ups to print the manifest.'); return }
+    w.document.write(html)
+    w.document.close()
+    w.focus()
   }
 
   // ── Sync tracking (called directly from browser) ──
@@ -3040,18 +3137,52 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     )}
                   </div>
                   <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0, lineHeight: 1.5 }}>
-                    Scan the AWB on the box, then scan the item barcode. The item&apos;s barcode (Master SKU + piece number, e.g. <span style={{ fontFamily: 'DM Mono' }}>-1</span>) is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
+                    Pick the courier you&apos;re loading, scan the AWB on the box, then scan the item barcode. The item&apos;s barcode (Master SKU + piece number, e.g. <span style={{ fontFamily: 'DM Mono' }}>-1</span>) is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
                   </p>
 
+                  {/* Courier selector with day counts */}
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    {(['Bluedart', 'Delhivery'] as const).map(c => {
+                      const stats = courierDayStats(c)
+                      const isSel = scanCourier === c
+                      const cc = c === 'Bluedart' ? '#2563eb' : '#7c3aed'
+                      return (
+                        <button key={c} onClick={() => { setScanCourier(c); resetScan(); setScanVerifiedCount(0) }} style={{
+                          flex: 1, padding: '12px 16px', borderRadius: 8, cursor: 'pointer', textAlign: 'left' as const,
+                          background: isSel ? (c === 'Bluedart' ? '#eff6ff' : '#f5f3ff') : 'var(--surface)',
+                          border: `2px solid ${isSel ? cc : 'var(--border)'}`,
+                          display: 'flex', flexDirection: 'column' as const, gap: 6,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ width: 9, height: 9, borderRadius: '50%', background: cc }} />
+                            <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: isSel ? cc : 'var(--text)' }}>{c}</span>
+                            {isSel && <span style={{ marginLeft: 'auto', fontSize: 10, color: cc, fontWeight: 600 }}>● loading</span>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                            <span style={{ fontFamily: 'DM Mono', fontSize: 22, fontWeight: 700, color: isSel ? cc : 'var(--text)' }}>{stats.dispatched}<span style={{ fontSize: 14, color: 'var(--text3)', fontWeight: 500 }}> / {stats.planned}</span></span>
+                            <span style={{ fontSize: 11, color: 'var(--text3)' }}>dispatched today</span>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {!scanCourier ? (
+                    <div style={{ padding: '14px 16px', background: 'var(--bg2)', border: '1px dashed var(--border)', borderRadius: 8, fontSize: 13, color: 'var(--text3)', textAlign: 'center' as const }}>
+                      Select a courier above to start scanning.
+                    </div>
+                  ) : (
+                  <>
                   {/* Step 1: AWB */}
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>1 · SCAN AWB</label>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>1 · SCAN AWB <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({scanCourier})</span></label>
                     <input
                       value={scanAwb}
                       onChange={e => setScanAwb(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') handleScanAwb(scanAwb) }}
                       placeholder="Scan or type AWB, press Enter…"
                       disabled={!!scanOrder}
+                      autoFocus
                       style={{ width: '100%', padding: '11px 14px', borderRadius: 7, border: `1px solid ${scanOrder ? 'var(--border)' : 'var(--accent)'}`, background: scanOrder ? 'var(--bg2)' : 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
                     />
                   </div>
@@ -3123,6 +3254,34 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <button onClick={resetScan} style={{ alignSelf: 'flex-start', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, cursor: 'pointer' }}>
                       Cancel / scan a different AWB
                     </button>
+                  )}
+
+                  {/* Complete dispatch → manifest */}
+                  {(() => {
+                    const mf = manifestOrders(scanCourier)
+                    const cc = scanCourier === 'Bluedart' ? '#2563eb' : '#7c3aed'
+                    return (
+                      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
+                        <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                          <strong style={{ color: cc, fontFamily: 'DM Mono' }}>{mf.length}</strong> scan-verified {scanCourier} shipment{mf.length !== 1 ? 's' : ''} ready for handover today
+                        </div>
+                        <button
+                          onClick={() => generateManifest(scanCourier)}
+                          disabled={mf.length === 0}
+                          style={{
+                            marginLeft: 'auto', padding: '9px 18px', borderRadius: 7, border: 'none',
+                            background: mf.length === 0 ? 'var(--bg2)' : 'var(--dispatched)',
+                            color: mf.length === 0 ? 'var(--text3)' : '#fff',
+                            fontSize: 13, fontWeight: 600, cursor: mf.length === 0 ? 'not-allowed' : 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 7,
+                          }}
+                        >
+                          <Printer size={15} /> Complete Dispatch — Generate Manifest
+                        </button>
+                      </div>
+                    )
+                  })()}
+                  </>
                   )}
                 </div>
 
