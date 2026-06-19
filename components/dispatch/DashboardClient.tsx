@@ -440,7 +440,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
 
-    const isMatch = scanned.toLowerCase() === expected.toLowerCase()
+    // Item barcode = Master SKU + "-" + sequence number (e.g. "(4)-D-B-WH-DU-1").
+    // Master SKU contains hyphens/parens, so escape it and anchor a trailing -<digits>.
+    const esc = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const seqMatch = scanned.match(new RegExp(`^${esc}-(\\d+)$`, 'i'))
+    const isExact = scanned.toLowerCase() === expected.toLowerCase()
+    const isMatch = !!seqMatch || isExact
+    const seq = seqMatch ? seqMatch[1] : null
     setScanResult({ ok: isMatch, expected, scanned })
 
     if (isMatch) {
@@ -451,7 +457,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         scan_verified: true,
         scan_verified_at: now,
       }).eq('id', scanOrder.id)
-      logEvent(scanOrder.order_id, 'dispatched', `Scan-verified dispatch · ${expected} · AWB ${scanOrder.tracking_number}`)
+      logEvent(scanOrder.order_id, 'dispatched', `Scan-verified dispatch · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
       setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now } : o))
       setScanVerifiedCount(c => c + 1)
       setTimeout(() => {
@@ -3034,7 +3040,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     )}
                   </div>
                   <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0, lineHeight: 1.5 }}>
-                    Scan the AWB on the box, then scan the item barcode. The item&apos;s barcode SKU is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
+                    Scan the AWB on the box, then scan the item barcode. The item&apos;s barcode (Master SKU + piece number, e.g. <span style={{ fontFamily: 'DM Mono' }}>-1</span>) is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
                   </p>
 
                   {/* Step 1: AWB */}
@@ -3068,7 +3074,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                           <span style={{ fontSize: 11, color: 'var(--text3)' }}>Expected barcode SKU:</span>
                           <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: scanOrder.barcode_sku ? 'var(--accent)' : 'var(--critical)' }}>
-                            {scanOrder.barcode_sku || 'NOT MAPPED'}
+                            {scanOrder.barcode_sku ? `${scanOrder.barcode_sku}-N` : 'NOT MAPPED'}
                           </span>
                         </div>
                       </div>
