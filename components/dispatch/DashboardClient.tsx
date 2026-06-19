@@ -514,10 +514,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const rows = list.map((o, i) => `<tr>
       <td class="num">${i + 1}</td>
       <td class="mono">${esc(o.tracking_number)}</td>
-      <td class="mono">${esc(o.order_id)}</td>
       <td class="mono">${esc(o.barcode_sku || o.sku)}</td>
-      <td>${esc(o.customer_name)}</td>
-      <td class="mono">${esc(o.pincode)}${o.city ? ' · ' + esc(o.city) : ''}</td>
     </tr>`).join('')
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Dispatch Manifest — ${esc(c)} — ${dateStr}</title>
@@ -557,9 +554,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   </div>
   <h1>DISPATCH MANIFEST</h1>
   <table>
-    <thead><tr><th class="num">#</th><th>AWB</th><th>Order ID</th><th>Barcode SKU</th><th>Customer</th><th>Pincode · City</th></tr></thead>
+    <thead><tr><th class="num">#</th><th>AWB / Tracking ID</th><th>Barcode SKU</th></tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="6">Total shipments: ${list.length} &nbsp;·&nbsp; Total pieces: ${totalPcs}</td></tr></tfoot>
+    <tfoot><tr><td colspan="3">Total shipments: ${list.length} &nbsp;·&nbsp; Total pieces: ${totalPcs}</td></tr></tfoot>
   </table>
   <div class="sign">
     <div class="box"><div class="line">Handed over by (Warehouse)</div><div class="field">Name &amp; Signature</div></div>
