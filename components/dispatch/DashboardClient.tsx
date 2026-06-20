@@ -91,6 +91,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispatchedStatusFilter, setDispatchedStatusFilter] = useState<Set<string>>(new Set())
   const [showDispatchedStatusPopover, setShowDispatchedStatusPopover] = useState(false)
   const [dispatchedStatusPopoverPos, setDispatchedStatusPopoverPos] = useState({ top: 0, left: 0 })
+  const [dispatchedCourierFilter, setDispatchedCourierFilter] = useState<Set<string>>(new Set())
+  const [showDispatchedCourierPopover, setShowDispatchedCourierPopover] = useState(false)
+  const [dispatchedCourierPopoverPos, setDispatchedCourierPopoverPos] = useState({ top: 0, left: 0 })
   // Tracking
   const [trackingData, setTrackingData] = useState<Record<string, { status: string; label: string; lastUpdate: string }>>({})
   const [trackingLoading, setTrackingLoading] = useState(false)
@@ -983,6 +986,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         return dispatchedStatusFilter.has(liveStatus)
       })
     }
+    if (dispatchedCourierFilter.size > 0) {
+      list = list.filter(o => dispatchedCourierFilter.has(o.courier))
+    }
     if (dispatchedSortCol) {
       list.sort((a, b) => {
         const av = (a as unknown as Record<string, unknown>)[dispatchedSortCol] ?? ''
@@ -992,7 +998,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, trackingData])
+  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, trackingData])
   const unfulfillableOrders = useMemo(() => activeOrders.filter(o => o.plan_decision === 'unfulfillable'), [activeOrders])
 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
@@ -1308,7 +1314,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false) }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false); setShowDispatchedCourierPopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -2841,13 +2847,65 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         { label: 'Order ID', col: 'order_id' },
                         { label: 'Customer', col: 'customer_name' },
                         { label: 'SKU', col: 'sku' },
-                        { label: 'Cour.', col: 'courier' },
+                        { label: 'Barcode SKU', col: 'barcode_sku' },
+                        { label: 'COURIER_FILTER_SPECIAL', col: null },
                         { label: 'AWB', col: 'tracking_number' },
                         { label: 'Pincode · City', col: 'pincode' },
                         { label: 'Promise', col: 'promise_date' },
                         { label: 'STATUS_FILTER_SPECIAL', col: null },
                         { label: '', col: null },
                       ] as { label: string; col: string | null }[]).map(({ label, col }) => {
+                        if (label === 'COURIER_FILTER_SPECIAL') {
+                          const COURIER_OPTS = ['Bluedart', 'Delhivery']
+                          const courierCount = (c: string) => dispatchedOrders.filter(o => o.courier === c).length
+                          return (
+                            <th key="courier" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Cour.</span>
+                                <button onClick={e => {
+                                  e.stopPropagation()
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  setDispatchedCourierPopoverPos({ top: rect.bottom + 6, left: Math.max(8, rect.left - 80) })
+                                  setShowDispatchedCourierPopover(v => !v)
+                                }} style={{
+                                  background: dispatchedCourierFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                  border: dispatchedCourierFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                  borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                  color: dispatchedCourierFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                }}>
+                                  {dispatchedCourierFilter.size > 0 ? `${dispatchedCourierFilter.size} ▾` : '▾'}
+                                </button>
+                                {dispatchedCourierFilter.size > 0 && <button onClick={() => setDispatchedCourierFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
+                              </div>
+                              {showDispatchedCourierPopover && (
+                                <div style={{ position: 'fixed' as const, top: dispatchedCourierPopoverPos.top, left: dispatchedCourierPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>COURIER</span>
+                                    <button onClick={() => { setDispatchedCourierFilter(new Set()); setShowDispatchedCourierPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                                    {COURIER_OPTS.map(opt => {
+                                      const isSelected = dispatchedCourierFilter.has(opt)
+                                      return (
+                                        <button key={opt} onClick={() => setDispatchedCourierFilter(prev => { const n = new Set(prev); n.has(opt) ? n.delete(opt) : n.add(opt); return n })}
+                                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
+                                          <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                            {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+                                          </span>
+                                          <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{opt}</span>
+                                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{courierCount(opt)}</span>
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                  <button onClick={() => setShowDispatchedCourierPopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                                </div>
+                              )}
+                            </th>
+                          )
+                        }
+
                         if (label === 'STATUS_FILTER_SPECIAL') {
                           const STATUS_OPTS: { key: string; label: string }[] = [
                             { key: 'delivered', label: 'Delivered' },
@@ -3009,7 +3067,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   </thead>
                   <tbody>
                     {filteredDispatched.length === 0 ? (
-                      <tr><td colSpan={9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders yet</td></tr>
+                      <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders yet</td></tr>
                     ) : filteredDispatched.map((order, i) => {
                       const cc = order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
                       const dispDate = order.dispatched_at ? new Date(order.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
@@ -3019,6 +3077,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
                           <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{order.sku}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: order.barcode_sku ? 'var(--text2)' : 'var(--text3)' }}>{order.barcode_sku || '—'}</td>
                           <td style={{ padding: '9px 12px' }}>
                             <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: cc, background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>
                               {order.courier === 'Bluedart' ? 'BD' : 'DL'}
