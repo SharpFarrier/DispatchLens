@@ -3244,15 +3244,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   {/* Step 1: AWB */}
                   <div>
                     <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>1 · SCAN AWB <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({scanCourier})</span></label>
-                    <input
-                      value={scanAwb}
-                      onChange={e => setScanAwb(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleScanAwb(scanAwb) }}
-                      placeholder="Scan or type AWB, press Enter…"
-                      disabled={!!scanOrder}
-                      autoFocus
-                      style={{ width: '100%', padding: '11px 14px', borderRadius: 7, border: `1px solid ${scanOrder ? 'var(--border)' : 'var(--accent)'}`, background: scanOrder ? 'var(--bg2)' : 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
-                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        value={scanAwb}
+                        onChange={e => setScanAwb(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleScanAwb(scanAwb) }}
+                        placeholder="Scan or type AWB, press Enter…"
+                        disabled={!!scanOrder}
+                        autoFocus
+                        style={{ flex: 1, padding: '11px 14px', borderRadius: 7, border: `1px solid ${scanOrder ? 'var(--border)' : 'var(--accent)'}`, background: scanOrder ? 'var(--bg2)' : 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
+                      />
+                      {(scanOrder || scanError) && (
+                        <button onClick={resetScan} title="Clear and scan a new piece" style={{ flexShrink: 0, padding: '0 18px', borderRadius: 7, border: '1px solid var(--critical)', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
+                          <X size={15} /> Clear / New scan
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {scanError && (
@@ -3316,12 +3323,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <button onClick={() => { setScanItem(''); setScanResult(null) }} style={{ marginTop: 12, padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Rescan item</button>
                       </div>
                     )
-                  )}
-
-                  {scanOrder && (
-                    <button onClick={resetScan} style={{ alignSelf: 'flex-start', padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, cursor: 'pointer' }}>
-                      Cancel / scan a different AWB
-                    </button>
                   )}
 
                   {/* Complete dispatch → manifest */}
