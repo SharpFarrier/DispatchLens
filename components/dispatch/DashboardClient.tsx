@@ -1089,6 +1089,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         else if (sortCol === 'sku') { av = a.sku.toLowerCase(); bv = b.sku.toLowerCase() }
         else if (sortCol === 'courier') { av = a.courier; bv = b.courier }
         else if (sortCol === 'promise') { av = a.promise_date || ''; bv = b.promise_date || '' }
+        else if (sortCol === 'dispatch_by') { av = a.dispatch_by_date || ''; bv = b.dispatch_by_date || '' }
         else if (sortCol === 'transit') { av = a.transit_days; bv = b.transit_days }
         else if (sortCol === 'pincode') { av = a.pincode; bv = b.pincode }
         else { av = 0; bv = 0 }
@@ -1766,6 +1767,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           { label: 'AWB', col: null },
                           { label: 'Transit', col: 'transit' },
                           { label: 'Promise', col: 'promise' },
+                          { label: 'Dispatch By', col: 'dispatch_by' },
                         ] as { label: string; col: string | null }[]).map(({ label, col }) => {
                           // Special SKU header with filter
                           if (label === 'SKU_FILTER_SPECIAL') return (
@@ -3451,6 +3453,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       </td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
+      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: order.dispatch_by_date ? 'var(--today)' : 'var(--text3)' }}>{order.dispatch_by_date ? new Date(order.dispatch_by_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{daysLeftDisplay !== null ? daysLeftDisplay : '—'}</span></td>
       <td style={{ padding: '6px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' as const }}>
