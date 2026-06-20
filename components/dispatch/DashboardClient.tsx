@@ -182,6 +182,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setSelectedIds(new Set())
   }, [supabase])
 
+  // Silent refresh — re-pull orders without a loading flash or clearing selections.
+  // Used to keep the End-of-Day batch/courier counts live while another device dispatches.
+  const silentRefreshOrders = useCallback(async () => {
+    const { data } = await supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false })
+    if (data) setOrders(data as DBOrder[])
+  }, [supabase])
+
   // Auto-load on mount if initialOrders is empty
 
   useEffect(() => {
@@ -440,6 +447,18 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (scanOrder) itemInputRef.current?.focus()
     else awbInputRef.current?.focus()
   }, [scanOrder, scanCourier])
+
+  // Keep End-of-Day & Dispatched live: refresh on entry + poll every 15s (so another
+  // device's dispatches show up in the counts/rows without a manual reload).
+  // Pauses polling mid-scan to avoid disrupting an in-progress AWB lookup.
+  useEffect(() => {
+    if (tab !== 'eod' && tab !== 'dispatched') return
+    silentRefreshOrders()
+    const iv = setInterval(() => {
+      if (!scanOrder) silentRefreshOrders()
+    }, 15000)
+    return () => clearInterval(iv)
+  }, [tab, scanOrder, silentRefreshOrders])
 
   const handleScanAwb = (awbRaw: string) => {
     const awb = awbRaw.trim().replace(/\.0+$/, '')
