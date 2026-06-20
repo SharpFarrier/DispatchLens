@@ -7,7 +7,7 @@ import { Search, Plus, X, Pencil, Trash2, Upload, Package, CheckCircle, AlertCir
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
 const emptyDraft = (): Partial<SkuMap> => ({
-  master_sku: '', product_name: '', amazon_sku: '', amazon_asin: '', flipkart_sku: '', website_sku: '',
+  master_sku: '', product_name: '', amazon_sku: '', amazon_asin: '', flipkart_sku: '', website_sku: '', other_sku: '',
 })
 
 export default function SkuMapTab() {
@@ -43,7 +43,8 @@ export default function SkuMapTab() {
       m.amazon_sku?.toLowerCase().includes(q) ||
       m.amazon_asin?.toLowerCase().includes(q) ||
       m.flipkart_sku?.toLowerCase().includes(q) ||
-      m.website_sku?.toLowerCase().includes(q)
+      m.website_sku?.toLowerCase().includes(q) ||
+      m.other_sku?.toLowerCase().includes(q)
     )
   }, [maps, search])
 
@@ -61,6 +62,7 @@ export default function SkuMapTab() {
       amazon_asin: draft.amazon_asin?.trim() || null,
       flipkart_sku: draft.flipkart_sku?.trim() || null,
       website_sku: draft.website_sku?.trim() || null,
+      other_sku: draft.other_sku?.trim() || null,
       updated_at: new Date().toISOString(),
     }
     if (isNew) {
@@ -108,6 +110,7 @@ export default function SkuMapTab() {
         amazon_asin: (cols[3] || '').trim() || null,
         flipkart_sku: (cols[4] || '').trim() || null,
         website_sku: (cols[5] || '').trim() || null,
+        other_sku: (cols[6] || '').trim() || null,
         updated_at: new Date().toISOString(),
       }
       const hit = existing.get(master.toLowerCase())
@@ -172,7 +175,7 @@ export default function SkuMapTab() {
             <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 900 }}>
               <thead>
                 <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
-                  {['Master SKU (Barcode)', 'Product', 'Amazon SKU', 'Amazon ASIN', 'Flipkart SKU', 'Website SKU', ''].map(h => (
+                  {['Master SKU (Barcode)', 'Product', 'Amazon SKU', 'Amazon ASIN', 'Flipkart SKU', 'Website SKU', 'Other SKU', ''].map(h => (
                     <th key={h} style={{ padding: '9px 14px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
                   ))}
                 </tr>
@@ -189,6 +192,7 @@ export default function SkuMapTab() {
                     <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{m.amazon_asin || '—'}</td>
                     <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.flipkart_sku || '—'}</td>
                     <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.website_sku || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.other_sku || '—'}</td>
                     <td style={{ padding: '9px 14px' }}>
                       <Pencil size={12} style={{ color: 'var(--text3)' }} />
                     </td>
@@ -217,6 +221,7 @@ export default function SkuMapTab() {
             {field('Amazon ASIN', 'amazon_asin', 'B0XXXXXXXX')}
             {field('Flipkart SKU', 'flipkart_sku', 'Flipkart SKU')}
             {field('Website SKU', 'website_sku', 'D2C / website SKU')}
+            {field('Other SKU', 'other_sku', 'Any other / new-platform SKU')}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
               <button onClick={save} disabled={saving || !draft.master_sku?.trim()} style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: saving || !draft.master_sku?.trim() ? 'var(--bg2)' : 'var(--accent)', color: saving || !draft.master_sku?.trim() ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 600, cursor: saving || !draft.master_sku?.trim() ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -242,7 +247,7 @@ export default function SkuMapTab() {
             </div>
             <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
               Paste rows (tab or comma separated). Columns in order:<br />
-              <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>Master SKU · Product Name · Amazon SKU · Amazon ASIN · Flipkart SKU · Website SKU</span><br />
+              <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>Master SKU · Product Name · Amazon SKU · Amazon ASIN · Flipkart SKU · Website SKU · Other SKU</span><br />
               A header row is auto-detected and skipped. Existing Master SKUs are updated; new ones added.
             </p>
             <textarea value={bulkText} onChange={e => { setBulkText(e.target.value); setBulkResult(null) }}

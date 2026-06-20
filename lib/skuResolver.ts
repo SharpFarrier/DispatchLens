@@ -17,12 +17,14 @@ export function buildSkuLookup(maps: SkuMap[]) {
   const amazon = new Map<string, string>()
   const flipkart = new Map<string, string>()
   const website = new Map<string, string>()
+  const other = new Map<string, string>()
   for (const m of maps) {
     if (m.amazon_sku) amazon.set(m.amazon_sku.trim().toLowerCase(), m.master_sku)
     if (m.flipkart_sku) flipkart.set(m.flipkart_sku.trim().toLowerCase(), m.master_sku)
     if (m.website_sku) website.set(m.website_sku.trim().toLowerCase(), m.master_sku)
+    if (m.other_sku) other.set(m.other_sku.trim().toLowerCase(), m.master_sku)
   }
-  return { amazon, flipkart, website }
+  return { amazon, flipkart, website, other }
 }
 
 export type SkuLookup = ReturnType<typeof buildSkuLookup>
@@ -38,6 +40,6 @@ export function resolveBarcodeSku(orderId: string, platformSku: string, lookup: 
   else if (platform === 'Flipkart') master = lookup.flipkart.get(key)
   else master = lookup.website.get(key)
   // Fallback: if not found in the detected platform, try all (handles platform mis-detection)
-  if (!master) master = lookup.amazon.get(key) || lookup.flipkart.get(key) || lookup.website.get(key)
+  if (!master) master = lookup.amazon.get(key) || lookup.flipkart.get(key) || lookup.website.get(key) || lookup.other.get(key)
   return master || null
 }
