@@ -75,6 +75,7 @@ export interface DBOrder {
   sku_mapped: boolean
   scan_verified: boolean
   scan_verified_at: string | null
+  manifested_at: string | null
   raw_status: string
   promise_date: string | null
   pincode: string
