@@ -2,17 +2,19 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { SkuMap } from '@/types'
+import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { Search, Plus, X, Pencil, Trash2, Upload, Package, CheckCircle, AlertCircle } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
 const emptyDraft = (): Partial<SkuMap> => ({
-  master_sku: '', product_name: '', amazon_sku: '', amazon_asin: '', flipkart_sku: '', website_sku: '', other_sku: '',
+  master_sku: '', product_name: '', amazon_sku: '', amazon_asin: '', flipkart_sku: '', website_sku: '', other_sku: '', other_sku_2: '',
 })
 
 export default function SkuMapTab() {
   const supabase = createClient()
   const [maps, setMaps] = useState<SkuMap[]>([])
+  const [backfill, setBackfill] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<SkuMap | null>(null)
@@ -44,13 +46,36 @@ export default function SkuMapTab() {
       m.amazon_asin?.toLowerCase().includes(q) ||
       m.flipkart_sku?.toLowerCase().includes(q) ||
       m.website_sku?.toLowerCase().includes(q) ||
-      m.other_sku?.toLowerCase().includes(q)
+      m.other_sku?.toLowerCase().includes(q) ||
+      m.other_sku_2?.toLowerCase().includes(q)
     )
   }, [maps, search])
 
   const openNew = () => { setDraft(emptyDraft()); setIsNew(true); setEditing({ id: 'new' } as SkuMap) }
   const openEdit = (m: SkuMap) => { setDraft({ ...m }); setIsNew(false); setEditing(m) }
   const closeDrawer = () => { setEditing(null); setDraft(emptyDraft()); setIsNew(false) }
+
+  // Back-fill: apply the current SKU map to existing orders that imported unmapped.
+  // Returns how many orders got a barcode_sku assigned.
+  const reResolveUnmapped = async (currentMaps: SkuMap[]): Promise<number> => {
+    const { data: rows } = await supabase
+      .from('dispatch_orders')
+      .select('id, order_id, sku, barcode_sku, is_cancelled')
+      .is('barcode_sku', null)
+      .eq('is_cancelled', false)
+    const orders = (rows as { id: string; order_id: string; sku: string; barcode_sku: string | null }[]) || []
+    if (!orders.length) return 0
+    const lookup = buildSkuLookup(currentMaps)
+    let mapped = 0
+    for (const o of orders) {
+      const resolved = resolveBarcodeSku(o.order_id, o.sku, lookup)
+      if (resolved) {
+        await supabase.from('dispatch_orders').update({ barcode_sku: resolved, sku_mapped: true }).eq('id', o.id)
+        mapped++
+      }
+    }
+    return mapped
+  }
 
   const save = async () => {
     if (!draft.master_sku?.trim()) return
@@ -63,17 +88,27 @@ export default function SkuMapTab() {
       flipkart_sku: draft.flipkart_sku?.trim() || null,
       website_sku: draft.website_sku?.trim() || null,
       other_sku: draft.other_sku?.trim() || null,
+      other_sku_2: draft.other_sku_2?.trim() || null,
       updated_at: new Date().toISOString(),
     }
+    let nextMaps = maps
     if (isNew) {
       const { data } = await supabase.from('dispatch_sku_map').insert(payload).select().single()
-      if (data) setMaps(prev => [...prev, data as SkuMap].sort((a, b) => a.master_sku.localeCompare(b.master_sku)))
+      if (data) {
+        nextMaps = [...maps, data as SkuMap].sort((a, b) => a.master_sku.localeCompare(b.master_sku))
+        setMaps(nextMaps)
+      }
     } else if (editing) {
       await supabase.from('dispatch_sku_map').update(payload).eq('id', editing.id)
-      setMaps(prev => prev.map(m => m.id === editing.id ? { ...m, ...payload } as SkuMap : m))
+      nextMaps = maps.map(m => m.id === editing.id ? { ...m, ...payload } as SkuMap : m)
+      setMaps(nextMaps)
     }
-    setSaving(false)
     closeDrawer()
+    // Back-fill existing unmapped orders with the updated map.
+    const mapped = await reResolveUnmapped(nextMaps)
+    setBackfill(mapped > 0 ? `Mapped ${mapped} existing order${mapped !== 1 ? 's' : ''}.` : null)
+    setSaving(false)
+    if (mapped > 0) setTimeout(() => setBackfill(null), 6000)
   }
 
   const remove = async () => {
@@ -111,6 +146,7 @@ export default function SkuMapTab() {
         flipkart_sku: (cols[4] || '').trim() || null,
         website_sku: (cols[5] || '').trim() || null,
         other_sku: (cols[6] || '').trim() || null,
+        other_sku_2: (cols[7] || '').trim() || null,
         updated_at: new Date().toISOString(),
       }
       const hit = existing.get(master.toLowerCase())
@@ -122,8 +158,13 @@ export default function SkuMapTab() {
     for (const u of toUpdate) await supabase.from('dispatch_sku_map').update(u.payload).eq('id', u.id)
 
     setBulkResult({ added, updated, errors })
-    setBulkRunning(false)
     await load()
+    // Back-fill existing unmapped orders with the updated map.
+    const { data: freshMaps } = await supabase.from('dispatch_sku_map').select('*')
+    const mapped = await reResolveUnmapped((freshMaps as SkuMap[]) || maps)
+    setBackfill(mapped > 0 ? `Mapped ${mapped} existing order${mapped !== 1 ? 's' : ''}.` : null)
+    setBulkRunning(false)
+    if (mapped > 0) setTimeout(() => setBackfill(null), 6000)
   }
 
   const field = (label: string, key: keyof SkuMap, placeholder: string, required = false) => (
@@ -163,6 +204,12 @@ export default function SkuMapTab() {
         </div>
       </div>
 
+      {backfill && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--dispatched-bg)', border: '1px solid #bbf7d0', borderRadius: 8, color: 'var(--dispatched)', fontSize: 13, fontWeight: 500 }}>
+          <CheckCircle size={15} /> {backfill}
+        </div>
+      )}
+
       {loading ? (
         <div style={{ ...card, padding: 60, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading SKU map…</div>
       ) : filtered.length === 0 ? (
@@ -175,7 +222,7 @@ export default function SkuMapTab() {
             <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 900 }}>
               <thead>
                 <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
-                  {['Master SKU (Barcode)', 'Product', 'Amazon SKU', 'Amazon ASIN', 'Flipkart SKU', 'Website SKU', 'Other SKU', ''].map(h => (
+                  {['Master SKU (Barcode)', 'Product', 'Amazon SKU', 'Amazon ASIN', 'Flipkart SKU', 'Website SKU', 'Other SKU', 'Other SKU 2', ''].map(h => (
                     <th key={h} style={{ padding: '9px 14px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
                   ))}
                 </tr>
@@ -193,6 +240,7 @@ export default function SkuMapTab() {
                     <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.flipkart_sku || '—'}</td>
                     <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.website_sku || '—'}</td>
                     <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.other_sku || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.other_sku_2 || '—'}</td>
                     <td style={{ padding: '9px 14px' }}>
                       <Pencil size={12} style={{ color: 'var(--text3)' }} />
                     </td>
@@ -222,6 +270,7 @@ export default function SkuMapTab() {
             {field('Flipkart SKU', 'flipkart_sku', 'Flipkart SKU')}
             {field('Website SKU', 'website_sku', 'D2C / website SKU')}
             {field('Other SKU', 'other_sku', 'Any other / new-platform SKU')}
+            {field('Other SKU 2', 'other_sku_2', 'A second alternate SKU')}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
               <button onClick={save} disabled={saving || !draft.master_sku?.trim()} style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: saving || !draft.master_sku?.trim() ? 'var(--bg2)' : 'var(--accent)', color: saving || !draft.master_sku?.trim() ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 600, cursor: saving || !draft.master_sku?.trim() ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -247,7 +296,7 @@ export default function SkuMapTab() {
             </div>
             <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
               Paste rows (tab or comma separated). Columns in order:<br />
-              <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>Master SKU · Product Name · Amazon SKU · Amazon ASIN · Flipkart SKU · Website SKU · Other SKU</span><br />
+              <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>Master SKU · Product Name · Amazon SKU · Amazon ASIN · Flipkart SKU · Website SKU · Other SKU · Other SKU 2</span><br />
               A header row is auto-detected and skipped. Existing Master SKUs are updated; new ones added.
             </p>
             <textarea value={bulkText} onChange={e => { setBulkText(e.target.value); setBulkResult(null) }}

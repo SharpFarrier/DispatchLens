@@ -30,6 +30,7 @@ export interface SkuMap {
   flipkart_sku: string | null
   website_sku: string | null
   other_sku: string | null
+  other_sku_2: string | null
   created_at: string
   updated_at: string
 }
