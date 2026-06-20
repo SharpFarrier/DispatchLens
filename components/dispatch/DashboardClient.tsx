@@ -506,6 +506,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       dispatched_at: now,
       scan_verified: true,
       scan_verified_at: now,
+      scanned_barcode: scanned,
     }).eq('id', scanOrder.id).eq('is_dispatched', false).select()
 
     if (error || !updated || updated.length === 0) {
@@ -517,7 +518,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }
 
     logEvent(scanOrder.order_id, 'dispatched', `Scan-verified dispatch · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
-    setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now } : o))
+    setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now, scanned_barcode: scanned } : o))
 
     // Move past instantly — clear and refocus AWB for the next box (effect handles focus).
     setScanOrder(null)
@@ -2847,7 +2848,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         { label: 'Order ID', col: 'order_id' },
                         { label: 'Customer', col: 'customer_name' },
                         { label: 'SKU', col: 'sku' },
-                        { label: 'Barcode SKU', col: 'barcode_sku' },
+                        { label: 'Dispatched Barcode', col: 'scanned_barcode' },
                         { label: 'COURIER_FILTER_SPECIAL', col: null },
                         { label: 'AWB', col: 'tracking_number' },
                         { label: 'Pincode · City', col: 'pincode' },
@@ -3077,7 +3078,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
                           <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{order.sku}</td>
-                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: order.barcode_sku ? 'var(--text2)' : 'var(--text3)' }}>{order.barcode_sku || '—'}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: order.scanned_barcode ? 'var(--text2)' : 'var(--text3)' }}>{order.scanned_barcode || '—'}</td>
                           <td style={{ padding: '9px 12px' }}>
                             <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: cc, background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>
                               {order.courier === 'Bluedart' ? 'BD' : 'DL'}
