@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { parseOrders } from '@/lib/parser'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap } from '@/types'
@@ -67,9 +67,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [scanItem, setScanItem] = useState('')
   const [scanOrder, setScanOrder] = useState<DBOrder | null>(null)
   const [scanResult, setScanResult] = useState<{ ok: boolean; expected: string; scanned: string } | null>(null)
-  const [scanVerifiedCount, setScanVerifiedCount] = useState(0)
+  const [scanSession, setScanSession] = useState<{ id: string; order_id: string; tracking_number: string; barcode_sku: string; sku: string; customer_name: string; qty: number; seq: string | null }[]>([])
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanCourier, setScanCourier] = useState<Courier | null>(null)
+  const awbInputRef = useRef<HTMLInputElement>(null)
+  const itemInputRef = useRef<HTMLInputElement>(null)
 
   // Import
   const [delhiveryText, setDelhiveryText] = useState('')
@@ -413,17 +415,53 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   // ── Scan-out verification ──
+  // Failure tone (Web Audio, no asset) — low buzz on rejected scans.
+  const beepError = () => {
+    try {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      const ctx = new Ctx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'square'
+      osc.frequency.value = 220
+      gain.gain.setValueAtTime(0.18, ctx.currentTime)
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.28)
+      osc.onended = () => ctx.close()
+    } catch { /* audio not available */ }
+  }
+
+  // Keyboard-only flow: focus item when an order is pulled, AWB when cleared.
+  useEffect(() => {
+    if (!scanCourier) return
+    if (scanOrder) itemInputRef.current?.focus()
+    else awbInputRef.current?.focus()
+  }, [scanOrder, scanCourier])
+
   const handleScanAwb = (awbRaw: string) => {
     const awb = awbRaw.trim().replace(/\.0+$/, '')
     if (!awb) return
     setScanError(null)
     setScanResult(null)
+
+    // Already scanned in THIS session → reject (prevents double-dispatch within a batch)
+    if (scanSession.some(s => (s.tracking_number || '').trim().replace(/\.0+$/, '') === awb)) {
+      beepError()
+      setScanError(`AWB ${awb} was already scanned in this session.`)
+      setScanOrder(null)
+      return
+    }
+
     const allMatches = orders.filter(o =>
       o.tracking_number?.trim().replace(/\.0+$/, '') === awb &&
       !o.is_cancelled && !o.is_dispatched
     )
     if (!allMatches.length) {
-      setScanError(`No pending order found for AWB ${awb}`)
+      // Distinguish "already dispatched" from "never existed"
+      const dispatched = orders.find(o => o.tracking_number?.trim().replace(/\.0+$/, '') === awb && o.is_dispatched && !o.is_cancelled)
+      beepError()
+      setScanError(dispatched ? `AWB ${awb} is already dispatched.` : `No pending order found for AWB ${awb}`)
       setScanOrder(null)
       return
     }
@@ -431,6 +469,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const match = scanCourier ? allMatches.find(o => o.courier === scanCourier) : allMatches[0]
     if (!match) {
       const other = allMatches[0].courier
+      beepError()
       setScanError(`AWB ${awb} is a ${other} order, but you're loading ${scanCourier}. Switch courier or set this one aside.`)
       setScanOrder(null)
       return
@@ -446,6 +485,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const expected = (scanOrder.barcode_sku || '').trim()
 
     if (!expected) {
+      beepError()
       setScanError(`Order ${scanOrder.order_id} has no mapped barcode SKU. Map it in the SKU Map tab, or use the paste fallback below.`)
       return
     }
@@ -457,26 +497,50 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const isExact = scanned.toLowerCase() === expected.toLowerCase()
     const isMatch = !!seqMatch || isExact
     const seq = seqMatch ? seqMatch[1] : null
-    setScanResult({ ok: isMatch, expected, scanned })
 
-    if (isMatch) {
-      const now = new Date().toISOString()
-      await supabase.from('dispatch_orders').update({
-        is_dispatched: true,
-        dispatched_at: now,
-        scan_verified: true,
-        scan_verified_at: now,
-      }).eq('id', scanOrder.id)
-      logEvent(scanOrder.order_id, 'dispatched', `Scan-verified dispatch · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
-      setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now } : o))
-      setScanVerifiedCount(c => c + 1)
-      setTimeout(() => {
-        setScanOrder(null)
-        setScanAwb('')
-        setScanItem('')
-        setScanResult(null)
-      }, 1200)
+    if (!isMatch) {
+      // Wrong SKU — block, beep, keep order loaded for a retry.
+      beepError()
+      setScanResult({ ok: false, expected, scanned })
+      return
     }
+
+    // Match — dispatch with a DB-level guard so an already-dispatched row can't be re-marked.
+    const now = new Date().toISOString()
+    const { data: updated, error } = await supabase.from('dispatch_orders').update({
+      is_dispatched: true,
+      dispatched_at: now,
+      scan_verified: true,
+      scan_verified_at: now,
+    }).eq('id', scanOrder.id).eq('is_dispatched', false).select()
+
+    if (error || !updated || updated.length === 0) {
+      // Someone/something already dispatched this order — refuse to double-dispatch.
+      beepError()
+      setScanResult(null)
+      setScanError(`That order was already dispatched — not counting it again.`)
+      return
+    }
+
+    logEvent(scanOrder.order_id, 'dispatched', `Scan-verified dispatch · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
+    setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now } : o))
+    setScanSession(prev => [{
+      id: scanOrder.id,
+      order_id: scanOrder.order_id,
+      tracking_number: scanOrder.tracking_number || '',
+      barcode_sku: expected,
+      sku: scanOrder.sku,
+      customer_name: scanOrder.customer_name,
+      qty: scanOrder.qty,
+      seq,
+    }, ...prev])
+
+    // Move past instantly — clear and refocus AWB for the next box (effect handles focus).
+    setScanOrder(null)
+    setScanAwb('')
+    setScanItem('')
+    setScanResult(null)
+    setScanError(null)
   }
 
   const resetScan = () => {
@@ -496,16 +560,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     return { planned, dispatched }
   }
 
-  // Scan-verified-today orders for a courier — these go on the manifest
-  const manifestOrders = (c: Courier) => {
-    const eodToday = new Date().toISOString().split('T')[0]
-    return orders.filter(o => o.courier === c && o.scan_verified && o.scan_verified_at && o.scan_verified_at.startsWith(eodToday) && !o.is_cancelled)
-      .sort((a, b) => (a.tracking_number || '').localeCompare(b.tracking_number || ''))
-  }
-
   // ── Generate + print dispatch manifest (printout only, no DB change) ──
   const generateManifest = (c: Courier) => {
-    const list = manifestOrders(c)
+    const list = [...scanSession].sort((a, b) => (a.tracking_number || '').localeCompare(b.tracking_number || ''))
     if (!list.length) return
     const now = new Date()
     const dateStr = now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -570,6 +627,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     w.document.write(html)
     w.document.close()
     w.focus()
+    // Batch handed over — clear the session so the next manifest is fresh.
+    setScanSession([])
   }
 
   // ── Sync tracking (called directly from browser) ──
@@ -3198,9 +3257,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <ScanLine size={16} style={{ color: 'var(--accent)' }} />
                     <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: 'var(--text)', letterSpacing: '0.05em' }}>SCAN-OUT VERIFICATION</span>
-                    {scanVerifiedCount > 0 && (
+                    {scanSession.length > 0 && (
                       <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--dispatched)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle size={13} /> {scanVerifiedCount} verified this session
+                        <CheckCircle size={13} /> {scanSession.length} in this batch
                       </span>
                     )}
                   </div>
@@ -3215,7 +3274,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       const isSel = scanCourier === c
                       const cc = c === 'Bluedart' ? '#2563eb' : '#7c3aed'
                       return (
-                        <button key={c} onClick={() => { setScanCourier(c); resetScan(); setScanVerifiedCount(0) }} style={{
+                        <button key={c} onClick={() => { setScanCourier(c); resetScan(); setScanSession([]) }} style={{
                           flex: 1, padding: '12px 16px', borderRadius: 8, cursor: 'pointer', textAlign: 'left' as const,
                           background: isSel ? (c === 'Bluedart' ? '#eff6ff' : '#f5f3ff') : 'var(--surface)',
                           border: `2px solid ${isSel ? cc : 'var(--border)'}`,
@@ -3246,6 +3305,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>1 · SCAN AWB <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({scanCourier})</span></label>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <input
+                        ref={awbInputRef}
                         value={scanAwb}
                         onChange={e => setScanAwb(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') handleScanAwb(scanAwb) }}
@@ -3288,60 +3348,69 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       <div>
                         <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>2 · SCAN ITEM BARCODE</label>
                         <input
+                          ref={itemInputRef}
                           value={scanItem}
                           onChange={e => setScanItem(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') handleScanItem(scanItem) }}
                           placeholder="Scan the item barcode, press Enter…"
                           autoFocus
-                          disabled={scanResult?.ok}
                           style={{ width: '100%', padding: '11px 14px', borderRadius: 7, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
                         />
                       </div>
                     </>
                   )}
 
-                  {/* Result block */}
-                  {scanResult && (
-                    scanResult.ok ? (
-                      <div style={{ padding: '16px 18px', background: 'var(--dispatched-bg)', border: '2px solid var(--dispatched)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <CheckCircle size={28} style={{ color: 'var(--dispatched)', flexShrink: 0 }} />
-                        <div>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--dispatched)' }}>Match — dispatched</div>
-                          <div style={{ fontSize: 12, fontFamily: 'DM Mono', color: 'var(--text2)', marginTop: 2 }}>{scanResult.scanned}</div>
-                        </div>
+                  {/* Result block — only shown on a wrong-item mismatch (success is instant) */}
+                  {scanResult && !scanResult.ok && (
+                    <div style={{ padding: '16px 18px', background: 'var(--critical-bg)', border: '2px solid var(--critical)', borderRadius: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                        <AlertTriangle size={28} style={{ color: 'var(--critical)', flexShrink: 0 }} />
+                        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--critical)' }}>WRONG ITEM — not dispatched</div>
                       </div>
-                    ) : (
-                      <div style={{ padding: '16px 18px', background: 'var(--critical-bg)', border: '2px solid var(--critical)', borderRadius: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-                          <AlertTriangle size={28} style={{ color: 'var(--critical)', flexShrink: 0 }} />
-                          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--critical)' }}>WRONG ITEM — not dispatched</div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 20, fontFamily: 'DM Mono', fontSize: 13, flexWrap: 'wrap' as const }}>
-                          <div><span style={{ color: 'var(--text3)' }}>Expected: </span><span style={{ color: 'var(--dispatched)', fontWeight: 700 }}>{scanResult.expected}</span></div>
-                          <div><span style={{ color: 'var(--text3)' }}>Scanned: </span><span style={{ color: 'var(--critical)', fontWeight: 700 }}>{scanResult.scanned}</span></div>
-                        </div>
-                        <button onClick={() => { setScanItem(''); setScanResult(null) }} style={{ marginTop: 12, padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Rescan item</button>
+                      <div style={{ display: 'flex', gap: 20, fontFamily: 'DM Mono', fontSize: 13, flexWrap: 'wrap' as const }}>
+                        <div><span style={{ color: 'var(--text3)' }}>Expected: </span><span style={{ color: 'var(--dispatched)', fontWeight: 700 }}>{scanResult.expected}</span></div>
+                        <div><span style={{ color: 'var(--text3)' }}>Scanned: </span><span style={{ color: 'var(--critical)', fontWeight: 700 }}>{scanResult.scanned}</span></div>
                       </div>
-                    )
+                      <button onClick={() => { setScanItem(''); setScanResult(null) }} style={{ marginTop: 12, padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Rescan item</button>
+                    </div>
                   )}
 
-                  {/* Complete dispatch → manifest */}
+                  {/* Live session list — what's been scanned in this batch */}
+                  {scanSession.length > 0 && (
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' as const }}>
+                      <div style={{ padding: '8px 14px', background: 'var(--bg2)', fontSize: 11, fontWeight: 600, fontFamily: 'DM Mono', color: 'var(--text2)', letterSpacing: '0.04em', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>THIS BATCH ({scanSession.length})</span>
+                        <span style={{ color: 'var(--text3)' }}>{scanCourier}</span>
+                      </div>
+                      <div style={{ maxHeight: 180, overflowY: 'auto' as const }}>
+                        {scanSession.slice(0, 30).map((s, i) => (
+                          <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 14px', borderTop: i === 0 ? 'none' : '1px solid var(--border)', fontSize: 12 }}>
+                            <CheckCircle size={13} style={{ color: 'var(--dispatched)', flexShrink: 0 }} />
+                            <span style={{ fontFamily: 'DM Mono', color: 'var(--text2)' }}>{s.tracking_number}</span>
+                            <span style={{ fontFamily: 'DM Mono', color: 'var(--text3)', marginLeft: 'auto' }}>{s.barcode_sku}{s.seq ? `-${s.seq}` : ''}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Complete dispatch → manifest (this batch only) */}
                   {(() => {
-                    const mf = manifestOrders(scanCourier)
                     const cc = scanCourier === 'Bluedart' ? '#2563eb' : '#7c3aed'
+                    const n = scanSession.length
                     return (
                       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
                         <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-                          <strong style={{ color: cc, fontFamily: 'DM Mono' }}>{mf.length}</strong> scan-verified {scanCourier} shipment{mf.length !== 1 ? 's' : ''} ready for handover today
+                          <strong style={{ color: cc, fontFamily: 'DM Mono' }}>{n}</strong> {scanCourier} piece{n !== 1 ? 's' : ''} in this batch
                         </div>
                         <button
                           onClick={() => generateManifest(scanCourier)}
-                          disabled={mf.length === 0}
+                          disabled={n === 0}
                           style={{
                             marginLeft: 'auto', padding: '9px 18px', borderRadius: 7, border: 'none',
-                            background: mf.length === 0 ? 'var(--bg2)' : 'var(--dispatched)',
-                            color: mf.length === 0 ? 'var(--text3)' : '#fff',
-                            fontSize: 13, fontWeight: 600, cursor: mf.length === 0 ? 'not-allowed' : 'pointer',
+                            background: n === 0 ? 'var(--bg2)' : 'var(--dispatched)',
+                            color: n === 0 ? 'var(--text3)' : '#fff',
+                            fontSize: 13, fontWeight: 600, cursor: n === 0 ? 'not-allowed' : 'pointer',
                             display: 'flex', alignItems: 'center', gap: 7,
                           }}
                         >
