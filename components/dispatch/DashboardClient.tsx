@@ -13,7 +13,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine
+  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users'
@@ -1189,6 +1189,69 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     HOLD:     { color: 'var(--hold)',     bg: 'var(--hold-bg)',     border: '#bfdbfe' },
   }[u || ''] || { color: 'var(--text3)', bg: 'var(--bg2)', border: 'var(--border)' })
 
+  // ── Export Plan orders to Excel (.xlsx via SpreadsheetML, no dependency) ──
+  const exportPlanXlsx = () => {
+    const rowsData = filteredActive
+    const decisionLabel = (o: DBOrder) =>
+      o.plan_decision === 'scheduled' ? (o.scheduled_date ? `Scheduled ${o.scheduled_date}` : 'Scheduled')
+      : o.plan_decision === 'hold' ? 'On Hold'
+      : o.plan_decision === 'unfulfillable' ? 'Unfulfillable'
+      : 'Undecided'
+    const headers = ['Urgency', 'Order ID', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'Pincode', 'City', 'ODA', 'AWB', 'Transit (d)', 'Promise', 'Dispatch By', 'Days Left', 'Decision', 'Scheduled Date']
+    const rows = rowsData.map(o => [
+      o.urgency || '',
+      o.order_id,
+      o.customer_name,
+      o.sku,
+      o.barcode_sku || '',
+      o.courier,
+      o.pincode,
+      o.city || '',
+      o.oda === 'ODA' ? 'ODA' : '',
+      o.tracking_number || '',
+      o.transit_days,
+      o.promise_date || '',
+      o.dispatch_by_date || '',
+      displayDaysLeft(o.days_left) ?? '',
+      decisionLabel(o),
+      o.scheduled_date || '',
+    ])
+
+    const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    const cell = (v: unknown) => {
+      if (typeof v === 'number') return `<Cell><Data ss:Type="Number">${v}</Data></Cell>`
+      return `<Cell><Data ss:Type="String">${esc(v)}</Data></Cell>`
+    }
+    const headerRow = `<Row>${headers.map(h => `<Cell ss:StyleID="hdr"><Data ss:Type="String">${esc(h)}</Data></Cell>`).join('')}</Row>`
+    const bodyRows = rows.map(r => `<Row>${r.map(cell).join('')}</Row>`).join('')
+
+    const xml = `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#F0F0F0" ss:Pattern="Solid"/></Style>
+ </Styles>
+ <Worksheet ss:Name="Plan">
+  <Table>${headerRow}${bodyRows}</Table>
+ </Worksheet>
+</Workbook>`
+
+    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const stamp = new Date().toISOString().slice(0, 10)
+    const scope = activeFilter === 'ALL' ? 'all' : activeFilter
+    a.href = url
+    a.download = `dispatch-plan-${scope}-${stamp}.xls`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
@@ -1716,6 +1779,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 })}
                 <button onClick={() => loadOrders()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
                   <RefreshCw size={12} />
+                </button>
+                <button onClick={exportPlanXlsx} disabled={filteredActive.length === 0} title="Download current view as Excel" style={{ background: filteredActive.length === 0 ? 'var(--bg2)' : 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: filteredActive.length === 0 ? 'var(--text3)' : 'var(--text2)', cursor: filteredActive.length === 0 ? 'not-allowed' : 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500 }}>
+                  <Download size={12} /> Export
                 </button>
               </div>
             </div>
