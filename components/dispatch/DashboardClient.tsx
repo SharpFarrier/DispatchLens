@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users'
-type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided'
+type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
   user: User
@@ -76,7 +76,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [delhiveryText, setDelhiveryText] = useState('')
   const [bluedartText, setBluedartText] = useState('')
   const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; unmapped: number } | null>(null)
+  const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; unmapped: number; unmappedSkus: { sku: string; count: number }[] } | null>(null)
 
   // Plan
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
@@ -264,8 +264,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       }
     }
     const lookupForCount = buildSkuLookup(skuMaps)
-    const unmappedCount = newOrders.filter(o => !resolveBarcodeSku(o.order_id, o.sku, lookupForCount)).length
-    setImportResult({ added: newOrders.length, updated: updatedOrders.length, skipped: allParsed.length - newOrders.length - updatedOrders.length, unmapped: unmappedCount })
+    const unmappedOrders = newOrders.filter(o => !resolveBarcodeSku(o.order_id, o.sku, lookupForCount))
+    const unmappedBySku = new Map<string, number>()
+    unmappedOrders.forEach(o => unmappedBySku.set(o.sku || '(blank)', (unmappedBySku.get(o.sku || '(blank)') || 0) + 1))
+    const unmappedSkuList = Array.from(unmappedBySku.entries()).map(([sku, count]) => ({ sku, count })).sort((a, b) => b.count - a.count)
+    setImportResult({ added: newOrders.length, updated: updatedOrders.length, skipped: allParsed.length - newOrders.length - updatedOrders.length, unmapped: unmappedOrders.length, unmappedSkus: unmappedSkuList })
     setImporting(false)
     setDelhiveryText('')
     setBluedartText('')
@@ -1025,6 +1028,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
   const dispatchTodayCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
   const slippedCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
+  const unmappedCount = useMemo(() => activeOrders.filter(o => !o.barcode_sku).length, [activeOrders])
   const holdCount = useMemo(() => orders.filter(o => o.plan_decision === 'hold' && !o.is_cancelled).length, [orders])
   const unfulfillableCount = useMemo(() => unfulfillableOrders.length, [unfulfillableOrders])
   const undecidedCount = useMemo(() => activeOrders.filter(o => o.plan_decision === 'undecided').length, [activeOrders])
@@ -1148,6 +1152,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     else if (activeFilter === 'hold') list = list.filter(o => o.plan_decision === 'hold')
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
+    else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
     else if (activeFilter !== 'ALL') list = list.filter(o => o.urgency === activeFilter)
     // Days left filter (applied to display value = raw - 1)
     if (daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
@@ -1185,6 +1190,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }
     return list
   }, [activeOrders, activeFilter, daysFilter, courierFilter, skuFilter, dispatchDateFilter, sortCol, sortDir])
+
+  // Orders matching ONLY the active KPI/urgency card (no courier/days/sku sub-filters).
+  // Used so sub-filter dropdowns (courier, days) show counts scoped to the selected card.
+  const activeFilterBase = useMemo(() => {
+    let list = [...activeOrders]
+    if (activeFilter === 'scheduled') list = list.filter(o => o.plan_decision === 'scheduled')
+    else if (activeFilter === 'scheduled_today') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
+    else if (activeFilter === 'slipped') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today)
+    else if (activeFilter === 'hold') list = list.filter(o => o.plan_decision === 'hold')
+    else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
+    else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
+    else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
+    else if (activeFilter !== 'ALL') list = list.filter(o => o.urgency === activeFilter)
+    return list
+  }, [activeOrders, activeFilter, today])
 
   // Unique display days left values — based on currently filtered list (respects active KPI/urgency filter)
   const uniqueDaysLeft = useMemo(() => {
@@ -1553,7 +1573,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       }}>
                         <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #fecaca', whiteSpace: 'nowrap' as const }}>UNFULFIL.</span>
                         <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{o.urgency}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{o.customer_name}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, fontFamily: 'DM Mono' }}>{o.tracking_number || '— no AWB —'}</span>
                         <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{o.days_left ?? '?'}</span>
                       </div>
                     )
@@ -1806,9 +1826,18 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   )}
                 </div>
                 {importResult && importResult.unmapped > 0 && (
-                  <div style={{ padding: '12px 16px', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 8, color: 'var(--today)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <AlertTriangle size={15} />
-                    {importResult.unmapped} order{importResult.unmapped !== 1 ? 's' : ''} couldn&apos;t resolve a barcode SKU. Add the mapping in the SKU Map tab — those orders can&apos;t be scan-verified at dispatch until mapped (the paste fallback still works).
+                  <div style={{ padding: '12px 16px', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 8, color: 'var(--today)', fontSize: 13, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <AlertTriangle size={15} />
+                      {importResult.unmapped} order{importResult.unmapped !== 1 ? 's' : ''} across {importResult.unmappedSkus.length} SKU{importResult.unmappedSkus.length !== 1 ? 's' : ''} couldn&apos;t resolve a barcode. Map these in the SKU Map tab — they can&apos;t be scan-verified until mapped (paste fallback still works).
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6 }}>
+                      {importResult.unmappedSkus.map(u => (
+                        <span key={u.sku} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', background: 'var(--surface)', border: '1px solid #fed7aa', borderRadius: 5, fontSize: 12, fontFamily: 'DM Mono', color: 'var(--text)' }}>
+                          {u.sku} <span style={{ color: 'var(--text3)' }}>×{u.count}</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
             </>
@@ -1828,6 +1857,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 { key: 'slipped' as ActiveFilter, label: 'Slipped', value: slippedCount, color: '#dc2626', bg: '#fef2f2', border: '#fca5a5' },
                 { key: 'hold' as ActiveFilter, label: 'On Hold', value: holdCount, color: 'var(--hold)', bg: 'var(--hold-bg)', border: '#bfdbfe' },
                 { key: 'unfulfillable' as ActiveFilter, label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
+                { key: 'unmapped' as ActiveFilter, label: 'Unmapped SKU', value: unmappedCount, color: '#9333ea', bg: '#faf5ff', border: '#e9d5ff' },
               ].map(kpi => {
                 const isActive = activeFilter === kpi.key
                 return (
@@ -1840,8 +1870,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     boxShadow: isActive ? `0 0 0 3px ${kpi.bg}` : '0 1px 3px rgba(0,0,0,0.06)',
                     transition: 'all 0.15s', outline: 'none',
                   }}>
-                    <span style={{ color: kpi.color, fontFamily: 'DM Mono', fontSize: 22, fontWeight: 500, lineHeight: 1 }}>{kpi.value}</span>
-                    <span style={{ color: 'var(--text3)', fontSize: 11, marginTop: 2 }}>{kpi.label}</span>
+                    <span style={{ color: kpi.color, fontFamily: 'DM Mono', fontSize: 22, fontWeight: 700, lineHeight: 1 }}>{kpi.value}</span>
+                    <span style={{ color: 'var(--text2)', fontSize: 11, fontWeight: 600, marginTop: 2 }}>{kpi.label}</span>
                     {isActive && <span style={{ fontSize: 10, color: kpi.color, marginTop: 1 }}>● filtered</span>}
                   </button>
                 )
@@ -1886,9 +1916,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             {/* Table */}
             {loadingOrders ? (
               <div style={{ ...card, padding: 60, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading orders…</div>
-            ) : filteredActive.length === 0 ? (
+            ) : activeOrders.length === 0 ? (
               <div style={{ ...card, padding: 60, textAlign: 'center' as const, color: 'var(--text2)' }}>
-                {activeOrders.length === 0 ? 'No orders imported yet. Go to Import tab.' : 'No orders match this filter.'}
+                No orders imported yet. Go to Import tab.
               </div>
             ) : (
               <div style={{ ...card, overflow: 'hidden' }}>
@@ -1950,7 +1980,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
                                     {Array.from(new Set(activeOrders.map(o => o.sku))).filter(s => !skuSearch || s.toLowerCase().includes(skuSearch.toLowerCase())).sort().map(sku => {
                                       const isSelected = skuFilter.has(sku)
-                                      const count = activeOrders.filter(o => o.sku === sku).length
+                                      const count = activeFilterBase.filter(o => o.sku === sku).length
                                       return (
                                         <button key={sku} onClick={() => setSkuFilter(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n })}
                                           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
@@ -2022,7 +2052,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
                                     {(['Bluedart', 'Delhivery'] as const).map(courier => {
                                       const isSelected = courierFilter.has(courier)
-                                      const count = activeOrders.filter(o => o.courier === courier).length
+                                      const count = activeFilterBase.filter(o => o.courier === courier).length
                                       const color = courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
                                       return (
                                         <button key={courier} onClick={() => {
@@ -2248,6 +2278,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       </tr>
                     </thead>
                     <tbody>
+                      {filteredActive.length === 0 && (
+                        <tr><td colSpan={16} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No orders match this filter. Adjust or clear the filters above.</td></tr>
+                      )}
                       {filteredActive.map(order => (
                         <OrderRow key={order.id} order={order}
                           selected={selectedIds.has(order.id)}
@@ -3680,7 +3713,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
             <CheckCircle size={11} /> Dispatch
           </button>
           {/* Date picker — sets scheduled */}
-          <div style={{ position: 'relative' as const }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <input
               type="date"
               value={order.scheduled_date || ''}
@@ -3699,7 +3732,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
               <button
                 onClick={() => onSchedule(order.id, '')}
                 title="Clear date"
-                style={{ position: 'absolute' as const, right: 4, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px', lineHeight: 1 }}
+                style={{ flexShrink: 0, width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--text3)', fontSize: 11, lineHeight: 1 }}
               >✕</button>
             )}
           </div>
