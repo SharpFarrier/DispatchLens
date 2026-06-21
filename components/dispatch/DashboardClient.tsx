@@ -927,6 +927,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         dispatched_at: now,
         tracking_number: m.awb,
         sku: m.sku,
+        scanned_barcode: m.sku,
       }).eq('id', m.orderId)
       logEvent(m.platformOrderId, 'dispatched', `Dispatched · AWB ${m.awb}`)
     }
