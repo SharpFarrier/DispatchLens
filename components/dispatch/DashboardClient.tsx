@@ -7,7 +7,7 @@ import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
 import CargoTokenPanel from './CargoTokenPanel'
 import OrderHistoryPanel from './OrderHistoryPanel'
-import InventoryTab from './InventoryTab'
+import WarehouseSection from './WarehouseSection'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
 import {
@@ -17,7 +17,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users' | 'inventory'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users' | 'warehouse'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -1679,7 +1679,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: access.can_picklist },
             { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_dispatched },
             { key: 'eod', label: 'End of Day', show: access.can_eod },
-            { key: 'inventory', label: 'Inventory', show: access.can_warehouse },
+            { key: 'warehouse', label: 'Warehouse', show: access.can_warehouse },
             { key: 'skumap', label: 'SKU Map', show: access.can_users },
             { key: 'users', label: 'Users', show: access.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
@@ -3594,8 +3594,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           <UsersTab ownerEmail={user.email!} />
         )}
 
-        {tab === 'inventory' && access.can_warehouse && (
-          <InventoryTab />
+        {tab === 'warehouse' && access.can_warehouse && (
+          <WarehouseSection />
         )}
       </main>
 
