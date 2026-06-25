@@ -28,6 +28,18 @@ const pillStyle = { padding: '7px 14px', borderRadius: 7, border: '1px solid var
 const swatchBtn = { display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 8, border: '2px solid var(--border)', background: 'var(--surface)', fontWeight: 600, fontSize: 13, color: 'var(--text2)', cursor: 'pointer', textAlign: 'left' as const }
 const sectionTitle = { fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }
 
+// Product images hosted in the barcode-picker repo (raw GitHub).
+// Filenames are Capitalized except base/oslo which are lowercase.
+// Products absent here (Linea Grey, Rollease, Spacio) fall back to a text tile.
+const IMG_BASE = 'https://raw.githubusercontent.com/SharpFarrier/barcode-picker/main/images'
+const LOWER_IMG = ['Base', 'Oslo']
+function productImage(product: string): string | null {
+  const known = ['Atlas', 'Aura', 'Avon', 'Base', 'Boston', 'Duke', 'Elvo', 'Eva', 'Jasper', 'Lizon', 'Luvo', 'Nesto', 'Nexon', 'Nova', 'Oslo', 'Xyra']
+  if (!known.includes(product)) return null
+  const file = LOWER_IMG.includes(product) ? product.toLowerCase() : product
+  return `${IMG_BASE}/${encodeURIComponent(file)}.png`
+}
+
 export default function PackedSkuPicker({ skus, onResolve, onReset }: {
   skus: PackedSku[]; onResolve?: (row: PackedSku) => void; onReset?: () => void
 }) {
@@ -119,12 +131,29 @@ export default function PackedSkuPicker({ skus, onResolve, onReset }: {
       <div>
         <div style={sectionTitle}>Select Product</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-          {products.map(p => (
-            <button key={p} onClick={() => pickProduct(p)}
-              style={{ borderRadius: 10, border: '2px solid var(--border)', padding: 16, fontSize: 13, fontWeight: 700, color: 'var(--text2)', background: 'var(--surface)', cursor: 'pointer' }}>
-              {p}
-            </button>
-          ))}
+          {products.map(p => {
+            const img = productImage(p)
+            return (
+              <button key={p} onClick={() => pickProduct(p)}
+                style={{
+                  position: 'relative', borderRadius: 10, overflow: 'hidden', textAlign: 'left',
+                  border: '2px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', padding: 0,
+                }}>
+                {img ? (
+                  <img src={img} alt={p} loading="lazy"
+                    style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block', background: 'var(--bg2)' }} />
+                ) : (
+                  <div style={{ width: '100%', aspectRatio: '1', background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28 }}>📦</div>
+                )}
+                <div style={{
+                  position: img ? 'absolute' : 'static', bottom: 0, left: 0, right: 0,
+                  padding: '6px 8px', textAlign: 'center', fontSize: 12, fontWeight: 700,
+                  background: img ? 'rgba(0,0,0,0.55)' : 'transparent',
+                  color: img ? '#fff' : 'var(--text2)',
+                }}>{p}</div>
+              </button>
+            )
+          })}
         </div>
       </div>
     )
