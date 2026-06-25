@@ -378,10 +378,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const skuOrders = orders
       .filter(o => o.sku === sku && o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched)
       .sort((a, b) => {
-        const ta = tierOrder[a.urgency || 'HOLD'] ?? 3
-        const tb = tierOrder[b.urgency || 'HOLD'] ?? 3
+        const ta = tierOrder[liveUrgency(a) || 'HOLD'] ?? 3
+        const tb = tierOrder[liveUrgency(b) || 'HOLD'] ?? 3
         if (ta !== tb) return ta - tb
-        return (a.days_left ?? 99) - (b.days_left ?? 99)
+        return (displayDaysLeft(a) ?? 99) - (displayDaysLeft(b) ?? 99)
       })
     return {
       dispatch: skuOrders.slice(0, available),
@@ -961,7 +961,30 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const cancelledOrders = useMemo(() => orders.filter(o => o.is_cancelled), [orders])
 
   // Unique scheduled dates for dispatch date filter
-  const displayDaysLeft = (raw: number | null) => raw === null ? null : raw - 1
+  // Live days-left to the effective dispatch deadline:
+  //   (promise_date − today) − transit_days − 1-day buffer.
+  // Computed every render from today's date, so it counts down daily.
+  // Falls back to the stored days_left column only if promise_date is missing.
+  const displayDaysLeft = (o: { promise_date?: string | null; transit_days?: number; days_left?: number | null }): number | null => {
+    if (o.promise_date) {
+      const promise = new Date(o.promise_date + 'T00:00:00')
+      const now = new Date(today + 'T00:00:00')
+      const daysToPromise = Math.round((promise.getTime() - now.getTime()) / 86400000)
+      return daysToPromise - (o.transit_days ?? 0) - 1
+    }
+    return o.days_left === null || o.days_left === undefined ? null : o.days_left - 1
+  }
+
+  // Live urgency tier, derived from live days-left (same thresholds as the importer).
+  // Falls back to the stored urgency if no promise date / days-left is available.
+  const liveUrgency = (o: { promise_date?: string | null; transit_days?: number; days_left?: number | null; urgency?: UrgencyTier | null }): UrgencyTier | null => {
+    const d = displayDaysLeft(o)
+    if (d === null) return o.urgency ?? null
+    if (d <= 0) return 'CRITICAL'
+    if (d <= 2) return 'TODAY'
+    if (d === 3) return 'PLAN'
+    return 'HOLD'
+  }
 
   const uniqueDispatchDates = useMemo(() => {
     const vals = new Set<string>()
@@ -971,9 +994,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     else if (activeFilter === 'hold') base = base.filter(o => o.plan_decision === 'hold')
     else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
-    else if (activeFilter !== 'ALL') base = base.filter(o => o.urgency === (activeFilter as string))
+    else if (activeFilter !== 'ALL') base = base.filter(o => liveUrgency(o) === (activeFilter as string))
     if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
-    if (daysFilter.size > 0) base = base.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
+    if (daysFilter.size > 0) base = base.filter(o => daysFilter.has(displayDaysLeft(o) ?? -999))
     base.forEach(o => vals.add(o.scheduled_date || 'none'))
     return Array.from(vals).sort()
   }, [activeOrders, activeFilter, courierFilter, daysFilter, today])
@@ -1035,7 +1058,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const tierCounts = useMemo(() => {
     const c: Record<string, number> = {}
-    activeOrders.forEach(o => { if (o.urgency) c[o.urgency] = (c[o.urgency] || 0) + 1 })
+    activeOrders.forEach(o => { const u = liveUrgency(o); if (u) c[u] = (c[u] || 0) + 1 })
     return c
   }, [activeOrders])
 
@@ -1067,7 +1090,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const dateSkuOrders: Record<string, Record<string, number>> = {}
     undecided.forEach(o => {
       // Always compute dispatch deadline from days_left + today
-      const dl = displayDaysLeft(o.days_left) ?? 999
+      const dl = displayDaysLeft(o) ?? 999
       const dateKey = daysLeftToDate(dl)
       if (!dateSkuQty[dateKey]) { dateSkuQty[dateKey] = {}; dateSkuOrders[dateKey] = {} }
       dateSkuQty[dateKey][o.sku] = (dateSkuQty[dateKey][o.sku] || 0) + o.qty
@@ -1153,9 +1176,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
-    else if (activeFilter !== 'ALL') list = list.filter(o => o.urgency === activeFilter)
+    else if (activeFilter !== 'ALL') list = list.filter(o => liveUrgency(o) === activeFilter)
     // Days left filter (applied to display value = raw - 1)
-    if (daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o.days_left) ?? -999))
+    if (daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o) ?? -999))
     // Undecided view: oldest imports first so stale decisions surface (unless user sorted manually)
     if (activeFilter === 'undecided' && !sortCol) {
       list.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
@@ -1168,8 +1191,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (sortCol) {
       list.sort((a, b) => {
         let av: any, bv: any
-        if (sortCol === 'urgency') { av = to[a.urgency || 'HOLD'] ?? 3; bv = to[b.urgency || 'HOLD'] ?? 3 }
-        else if (sortCol === 'days_left') { av = a.days_left ?? 999; bv = b.days_left ?? 999 }
+        if (sortCol === 'urgency') { av = to[liveUrgency(a) || 'HOLD'] ?? 3; bv = to[liveUrgency(b) || 'HOLD'] ?? 3 }
+        else if (sortCol === 'days_left') { av = displayDaysLeft(a) ?? 999; bv = displayDaysLeft(b) ?? 999 }
         else if (sortCol === 'customer') { av = a.customer_name.toLowerCase(); bv = b.customer_name.toLowerCase() }
         else if (sortCol === 'sku') { av = a.sku.toLowerCase(); bv = b.sku.toLowerCase() }
         else if (sortCol === 'courier') { av = a.courier; bv = b.courier }
@@ -1185,7 +1208,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     } else {
       list.sort((a, b) => {
         if (a.is_priority !== b.is_priority) return a.is_priority ? -1 : 1
-        return (to[a.urgency || 'HOLD'] ?? 3) - (to[b.urgency || 'HOLD'] ?? 3) || (a.days_left ?? 99) - (b.days_left ?? 99)
+        return (to[liveUrgency(a) || 'HOLD'] ?? 3) - (to[liveUrgency(b) || 'HOLD'] ?? 3) || (displayDaysLeft(a) ?? 99) - (displayDaysLeft(b) ?? 99)
       })
     }
     return list
@@ -1202,7 +1225,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
-    else if (activeFilter !== 'ALL') list = list.filter(o => o.urgency === activeFilter)
+    else if (activeFilter !== 'ALL') list = list.filter(o => liveUrgency(o) === activeFilter)
     return list
   }, [activeOrders, activeFilter, today])
 
@@ -1216,9 +1239,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     else if (activeFilter === 'hold') baseList = baseList.filter(o => o.plan_decision === 'hold')
     else if (activeFilter === 'unfulfillable') baseList = baseList.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') baseList = baseList.filter(o => o.plan_decision === 'undecided')
-    else if (activeFilter !== 'ALL') baseList = baseList.filter(o => o.urgency === activeFilter)
+    else if (activeFilter !== 'ALL') baseList = baseList.filter(o => liveUrgency(o) === activeFilter)
     if (courierFilter.size > 0) baseList = baseList.filter(o => courierFilter.has(o.courier))
-    baseList.forEach(o => { const d = displayDaysLeft(o.days_left); if (d !== null) vals.add(d) })
+    baseList.forEach(o => { const d = displayDaysLeft(o); if (d !== null) vals.add(d) })
     return Array.from(vals).sort((a, b) => a - b)
   }, [activeOrders, activeFilter, courierFilter, today])
 
@@ -1299,7 +1322,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       : 'Undecided'
     const headers = ['Urgency', 'Order ID', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'Pincode', 'City', 'ODA', 'AWB', 'Transit (d)', 'Promise', 'Dispatch By', 'Days Left', 'Decision', 'Scheduled Date']
     const rows = rowsData.map(o => [
-      o.urgency || '',
+      liveUrgency(o) || '',
       o.order_id,
       o.customer_name,
       o.sku,
@@ -1312,7 +1335,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       o.transit_days,
       o.promise_date || '',
       o.dispatch_by_date || '',
-      displayDaysLeft(o.days_left) ?? '',
+      displayDaysLeft(o) ?? '',
       decisionLabel(o),
       o.scheduled_date || '',
     ])
@@ -1543,7 +1566,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     const uc = {
                       CRITICAL: 'var(--critical)', TODAY: 'var(--today)',
                       PLAN: 'var(--plan)', HOLD: 'var(--hold)',
-                    }[o.urgency as string] || 'var(--text3)'
+                    }[liveUrgency(o) as string] || 'var(--text3)'
                     return (
                       <div key={o.id} style={{
                         padding: '8px 12px',
@@ -1552,9 +1575,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         display: 'flex', alignItems: 'center', gap: 10,
                       }}>
                         <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0', whiteSpace: 'nowrap' as const }}>DISPATCH</span>
-                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{o.urgency}</span>
+                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{liveUrgency(o)}</span>
                         <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{o.customer_name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{o.days_left ?? '?'}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{displayDaysLeft(o) ?? '?'}</span>
                       </div>
                     )
                   })}
@@ -1563,7 +1586,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     const uc = {
                       CRITICAL: 'var(--critical)', TODAY: 'var(--today)',
                       PLAN: 'var(--plan)', HOLD: 'var(--hold)',
-                    }[o.urgency as string] || 'var(--text3)'
+                    }[liveUrgency(o) as string] || 'var(--text3)'
                     return (
                       <div key={o.id} style={{
                         padding: '8px 12px',
@@ -1572,9 +1595,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         display: 'flex', alignItems: 'center', gap: 10,
                       }}>
                         <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #fecaca', whiteSpace: 'nowrap' as const }}>UNFULFIL.</span>
-                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{o.urgency}</span>
+                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{liveUrgency(o)}</span>
                         <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, fontFamily: 'DM Mono' }}>{o.tracking_number || '— no AWB —'}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{o.days_left ?? '?'}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{displayDaysLeft(o) ?? '?'}</span>
                       </div>
                     )
                   })}
@@ -1717,7 +1740,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
                 </div>
                 {searchResults.map(order => {
-                  const uc = { CRITICAL: 'var(--critical)', TODAY: 'var(--today)', PLAN: 'var(--plan)', HOLD: 'var(--hold)' }[order.urgency as string] || 'var(--text3)'
+                  const lu = liveUrgency(order); const uc = { CRITICAL: 'var(--critical)', TODAY: 'var(--today)', PLAN: 'var(--plan)', HOLD: 'var(--hold)' }[lu as string] || 'var(--text3)'
                   return (
                     <button key={order.id}
                       onMouseDown={() => { setHistoryOrder(order); setSearchQuery(''); setShowSearch(false) }}
@@ -1734,7 +1757,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                           <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.order_id}</span>
-                          {order.urgency && <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600, color: uc, flexShrink: 0 }}>{order.urgency}</span>}
+                          {lu && <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600, color: uc, flexShrink: 0 }}>{lu}</span>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                           <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>{order.customer_name}</span>
@@ -2181,9 +2204,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                         else if (activeFilter === 'hold') base = base.filter(o => o.plan_decision === 'hold')
                                         else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
                                         else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
-                                        else if (activeFilter !== 'ALL' && activeFilter !== 'scheduled_today') base = base.filter(o => o.urgency === activeFilter)
+                                        else if (activeFilter !== 'ALL' && activeFilter !== 'scheduled_today') base = base.filter(o => liveUrgency(o) === activeFilter)
                                         if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
-                                        return base.filter(o => displayDaysLeft(o.days_left) === d).length
+                                        return base.filter(o => displayDaysLeft(o) === d).length
                                       })()}
                                       </span>
                                     </button>
@@ -2285,7 +2308,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <OrderRow key={order.id} order={order}
                           selected={selectedIds.has(order.id)}
                           updating={updatingIds.has(order.id)}
-                          daysLeftDisplay={displayDaysLeft(order.days_left)}
+                          daysLeftDisplay={displayDaysLeft(order)}
+                          liveUrgencyTier={liveUrgency(order)}
                           onSelect={toggleSelect}
                           onDecision={updateDecision}
                           onSchedule={scheduleOrder}
@@ -2381,7 +2405,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </thead>
                         <tbody>
                           {group.map((order, i) => {
-                            const uc = urgencyStyle(order.urgency)
+                            const uc = urgencyStyle(liveUrgency(order))
                             const savedDate = order.target_dispatch_date
                             const inputDate = targetDates[order.id] ?? (savedDate || '')
                             return (
@@ -2404,11 +2428,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   </span>
                                 </td>
                                 <td style={{ padding: '10px 16px', textAlign: 'center' as const }}>
-                                  <span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{order.days_left ?? '—'}</span>
+                                  <span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span>
                                 </td>
                                 <td style={{ padding: '10px 16px' }}>
                                   <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: uc.color, background: uc.bg, border: `1px solid ${uc.border}` }}>
-                                    {order.urgency || '—'}
+                                    {liveUrgency(order) || '—'}
                                   </span>
                                 </td>
                                 <td style={{ padding: '10px 16px', maxWidth: 180 }}>
@@ -2479,7 +2503,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </thead>
                         <tbody>
                           {noReason.map((order, i) => {
-                            const uc = urgencyStyle(order.urgency)
+                            const uc = urgencyStyle(liveUrgency(order))
                             const savedDate = order.target_dispatch_date
                             const inputDate = targetDates[order.id] ?? (savedDate || '')
                             return (
@@ -2491,7 +2515,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed' }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span></td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
-                                <td style={{ padding: '10px 16px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{order.days_left ?? '—'}</span></td>
+                                <td style={{ padding: '10px 16px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span></td>
                                 <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <input type="date" value={inputDate} min={new Date().toISOString().split('T')[0]}
@@ -3582,9 +3606,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay, liveUrgencyTier }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
+  liveUrgencyTier: UrgencyTier | null
   onSelect: (id: string) => void
   onDecision: (id: string, d: PlanDecision) => void
   onSchedule: (id: string, date: string) => void
@@ -3604,7 +3629,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
     TODAY:    { color: 'var(--today)',    bg: 'var(--today-bg)',    border: '#fed7aa' },
     PLAN:     { color: 'var(--plan)',     bg: 'var(--plan-bg)',     border: '#fde68a' },
     HOLD:     { color: 'var(--hold)',     bg: 'var(--hold-bg)',     border: '#bfdbfe' },
-  }[order.urgency as string] || { color: 'var(--text3)', bg: 'var(--bg2)', border: 'var(--border)' }
+  }[liveUrgencyTier as string] || { color: 'var(--text3)', bg: 'var(--bg2)', border: 'var(--border)' }
 
   const rowBg: Record<PlanDecision, string> = { scheduled: '#f0fdf4', hold: '#eff6ff', unfulfillable: '#fef2f2', undecided: 'transparent' }
 
@@ -3619,7 +3644,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         </button>
       </td>
       <td style={{ padding: '8px 12px' }}>
-        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, letterSpacing: '0.05em', color: uc.color, background: uc.bg, border: `1px solid ${uc.border}` }}>{order.urgency || '—'}</span>
+        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, letterSpacing: '0.05em', color: uc.color, background: uc.bg, border: `1px solid ${uc.border}` }}>{liveUrgencyTier || '—'}</span>
       </td>
       <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
