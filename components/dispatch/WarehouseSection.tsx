@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers } from 'lucide-react'
+import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag } from 'lucide-react'
 import InventoryTab from './InventoryTab'
 import UnitsTab from './UnitsTab'
 import ScanToStockTab from './ScanToStockTab'
@@ -9,14 +9,18 @@ import GenerateTab from './GenerateTab'
 import StockTab from './StockTab'
 import CoatingTab from './CoatingTab'
 import PicksTab from './PicksTab'
+import InventoryProdTab from './InventoryProdTab'
+import BarcodesTab from './BarcodesTab'
 
-type TopTab = 'stock' | 'coating' | 'picking' | 'packing'
+type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'
 type PackingTab = 'generate' | 'scan' | 'inventory' | 'rto' | 'units'
 
 const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode }[] = [
   { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} /> },
   { key: 'coating', label: 'Coating', icon: <Paintbrush size={14} /> },
   { key: 'picking', label: 'Picking', icon: <Hand size={14} /> },
+  { key: 'inventory', label: 'Inventory', icon: <Warehouse size={14} /> },
+  { key: 'barcodes', label: 'Barcodes', icon: <Tag size={14} /> },
   { key: 'packing', label: 'Packing', icon: <Layers size={14} /> },
 ]
 
@@ -57,6 +61,8 @@ export default function WarehouseSection({ userId }: { userId: string }) {
       {topTab === 'stock' && <StockTab userId={userId} />}
       {topTab === 'coating' && <CoatingTab userId={userId} />}
       {topTab === 'picking' && <PicksTab userId={userId} />}
+      {topTab === 'inventory' && <InventoryProdTab />}
+      {topTab === 'barcodes' && <BarcodesTab />}
 
       {topTab === 'packing' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
