@@ -41,7 +41,7 @@ export default function PicksTab({ userId }: { userId: string }) {
     setIsFetching(true)
     const { data } = await supabase
       .from('pick_sessions')
-      .select('*, pick_items(*), profiles(full_name)')
+      .select('*, pick_items(*)')
       .neq('status', 'deleted')
       .order('created_at', { ascending: false })
       .limit(200)
