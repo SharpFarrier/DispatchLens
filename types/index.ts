@@ -16,6 +16,7 @@ export interface UserAccess {
   can_eod: boolean
   can_dispatched: boolean
   can_users: boolean
+  can_warehouse: boolean
   requested_at: string
   reviewed_at: string | null
   created_at: string
