@@ -3595,7 +3595,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {tab === 'warehouse' && access.can_warehouse && (
-          <WarehouseSection />
+          <WarehouseSection userId={user.id} />
         )}
       </main>
 

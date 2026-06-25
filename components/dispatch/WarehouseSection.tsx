@@ -2,6 +2,10 @@
 import { useState } from 'react'
 import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch } from 'lucide-react'
 import InventoryTab from './InventoryTab'
+import UnitsTab from './UnitsTab'
+import ScanToStockTab from './ScanToStockTab'
+import RtoTab from './RtoTab'
+import GenerateTab from './GenerateTab'
 
 type WarehouseTab = 'generate' | 'scan' | 'inventory' | 'rto' | 'units'
 
@@ -13,23 +17,13 @@ const SUB_TABS: { key: WarehouseTab; label: string; icon: React.ReactNode }[] = 
   { key: 'units',     label: 'Units',         icon: <FileSearch size={14} /> },
 ]
 
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', padding: 60, textAlign: 'center' as const, color: 'var(--text3)' }}>
-      <Package size={28} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
-      <p style={{ fontSize: 14, color: 'var(--text2)', fontWeight: 600, marginBottom: 4 }}>{title}</p>
-      <p style={{ fontSize: 13 }}>Coming soon — this page is being ported from WareLens.</p>
-    </div>
-  )
-}
-
-export default function WarehouseSection() {
+export default function WarehouseSection({ userId }: { userId: string }) {
   const [subTab, setSubTab] = useState<WarehouseTab>('inventory')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
       {/* Sub-tab navigation */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {SUB_TABS.map(({ key, label, icon }) => {
           const active = subTab === key
           return (
@@ -49,11 +43,11 @@ export default function WarehouseSection() {
       </div>
 
       {/* Sub-tab content */}
+      {subTab === 'generate'  && <GenerateTab userId={userId} />}
+      {subTab === 'scan'      && <ScanToStockTab />}
       {subTab === 'inventory' && <InventoryTab />}
-      {subTab === 'generate'  && <Placeholder title="Generate Packed Labels" />}
-      {subTab === 'scan'      && <Placeholder title="Scan to Stock" />}
-      {subTab === 'rto'       && <Placeholder title="RTO Returns" />}
-      {subTab === 'units'     && <Placeholder title="Unit Log" />}
+      {subTab === 'rto'       && <RtoTab />}
+      {subTab === 'units'     && <UnitsTab />}
     </div>
   )
 }
