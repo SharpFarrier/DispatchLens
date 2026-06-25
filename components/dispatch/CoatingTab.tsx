@@ -135,6 +135,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
       showToast(`Trolley saved ✓ ${createdPieces.length} label(s) ready`)
       setLastLabels(createdPieces.length ? createdPieces : null)
       setLineItems([]); setLabel(''); setTemp(''); setDuration(''); setNotes('')
+      void loadTrolleys()
     } catch (e) { showToast('Error: ' + (e as Error).message, 'error') }
     setSubmitting(false)
   }

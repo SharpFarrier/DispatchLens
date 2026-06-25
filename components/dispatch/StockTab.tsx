@@ -108,6 +108,7 @@ export default function StockTab({ userId }: { userId: string }) {
       if (itemsErr) throw itemsErr
       showToast('Shipment saved ✓')
       setLineItems([]); setSupplier(''); setSupplierOther(''); setVehicleNo(''); setWeight(''); setNotes('')
+      void loadShipments()
     } catch (e) { showToast('Error: ' + (e as Error).message, 'error') }
     setSubmitting(false)
   }

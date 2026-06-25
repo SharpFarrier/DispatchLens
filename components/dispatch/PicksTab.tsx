@@ -130,6 +130,7 @@ export default function PicksTab({ userId }: { userId: string }) {
       }
       showToast('Pick saved ✓')
       setLineItems([]); setLabel(''); setNotes('')
+      void loadSessions()
     } catch (e) { showToast('Error: ' + (e as Error).message, 'error') }
     setSubmitting(false)
   }
