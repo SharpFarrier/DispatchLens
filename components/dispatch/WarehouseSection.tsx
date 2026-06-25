@@ -7,6 +7,8 @@ import ScanToStockTab from './ScanToStockTab'
 import RtoTab from './RtoTab'
 import GenerateTab from './GenerateTab'
 import StockTab from './StockTab'
+import CoatingTab from './CoatingTab'
+import PicksTab from './PicksTab'
 
 type TopTab = 'stock' | 'coating' | 'picking' | 'packing'
 type PackingTab = 'generate' | 'scan' | 'inventory' | 'rto' | 'units'
@@ -37,16 +39,6 @@ function tabBtn(active: boolean): React.CSSProperties {
   }
 }
 
-function Placeholder({ label }: { label: string }) {
-  return (
-    <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--text3)' }}>
-      <div style={{ fontSize: 36, marginBottom: 12 }}>🚧</div>
-      <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{label} — coming soon</p>
-      <p style={{ fontSize: 13, marginTop: 4 }}>This section is being migrated from WareLens.</p>
-    </div>
-  )
-}
-
 export default function WarehouseSection({ userId }: { userId: string }) {
   const [topTab, setTopTab] = useState<TopTab>('packing')
   const [packingTab, setPackingTab] = useState<PackingTab>('inventory')
@@ -63,8 +55,8 @@ export default function WarehouseSection({ userId }: { userId: string }) {
       </div>
 
       {topTab === 'stock' && <StockTab userId={userId} />}
-      {topTab === 'coating' && <Placeholder label="Coating" />}
-      {topTab === 'picking' && <Placeholder label="Picking" />}
+      {topTab === 'coating' && <CoatingTab userId={userId} />}
+      {topTab === 'picking' && <PicksTab userId={userId} />}
 
       {topTab === 'packing' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
