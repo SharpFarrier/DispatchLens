@@ -238,12 +238,40 @@ export default function OpeningStockImporter({ onClose }: { onClose?: () => void
             </label>
           )}
 
+          {preview.badFormat.length > 0 && (
+            <div style={{ ...card, borderColor: 'var(--critical)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--critical)', marginBottom: 6 }}>Bad format — could not parse seq ({preview.badFormat.length})</div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {preview.badFormat.map((bc, i) => <span key={i} style={{ background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4 }}>{bc || '(empty)'}</span>)}
+              </div>
+            </div>
+          )}
+
           {preview.unknownSku.length > 0 && (
-            <div style={{ ...card }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--critical)', marginBottom: 6 }}>Unknown SKUs (first 20)</div>
-              <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {preview.unknownSku.slice(0, 20).map((r, i) => <span key={i}>{r.barcode}</span>)}
-                {preview.unknownSku.length > 20 && <span>+{preview.unknownSku.length - 20} more</span>}
+            <div style={{ ...card, borderColor: 'var(--critical)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--critical)', marginBottom: 6 }}>Unknown SKUs — not in catalogue ({preview.unknownSku.length})</div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {preview.unknownSku.map((r, i) => <span key={i} style={{ background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4 }}>{r.barcode} <span style={{ color: 'var(--text3)' }}>→ {r.sku}</span></span>)}
+              </div>
+            </div>
+          )}
+
+          {preview.fileDupes.length > 0 && (
+            <div style={{ ...card, borderColor: 'var(--today)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--today)', marginBottom: 6 }}>Duplicate barcodes within your file ({preview.fileDupes.length}) — extra copies ignored</div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {preview.fileDupes.slice(0, 50).map((bc, i) => <span key={i} style={{ background: 'var(--today-bg)', padding: '2px 6px', borderRadius: 4 }}>{bc}</span>)}
+                {preview.fileDupes.length > 50 && <span>+{preview.fileDupes.length - 50} more</span>}
+              </div>
+            </div>
+          )}
+
+          {preview.dbDupes.length > 0 && (
+            <div style={{ ...card, borderColor: 'var(--today)' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--today)', marginBottom: 6 }}>Already in database ({preview.dbDupes.length}) — skipped, won't double-import</div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {preview.dbDupes.slice(0, 50).map((bc, i) => <span key={i} style={{ background: 'var(--today-bg)', padding: '2px 6px', borderRadius: 4 }}>{bc}</span>)}
+                {preview.dbDupes.length > 50 && <span>+{preview.dbDupes.length - 50} more</span>}
               </div>
             </div>
           )}
@@ -262,6 +290,14 @@ export default function OpeningStockImporter({ onClose }: { onClose?: () => void
                   {stat('Unrecognised', preview.ceilingUnknown.length, preview.ceilingUnknown.length ? 'var(--critical)' : 'var(--text3)')}
                   {stat('Below stock ⚠', preview.ceilings.filter(c => c.belowStock).length, preview.ceilings.some(c => c.belowStock) ? 'var(--critical)' : 'var(--text3)')}
                 </div>
+                {preview.ceilingUnknown.length > 0 && (
+                  <div style={{ ...card, borderColor: 'var(--critical)', marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--critical)', marginBottom: 6 }}>Unrecognised ceiling barcodes ({preview.ceilingUnknown.length}) — bad format or unknown SKU, ignored</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {preview.ceilingUnknown.map((bc, i) => <span key={i} style={{ background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4 }}>{bc || '(empty)'}</span>)}
+                    </div>
+                  </div>
+                )}
                 {preview.ceilings.some(c => c.belowStock) && (
                   <div style={{ ...card, borderColor: 'var(--critical)', fontSize: 12, color: 'var(--critical)', fontWeight: 600 }}>
                     Some ceiling seqs are LOWER than the highest stock seq for that SKU — that's contradictory (you have stock above the ceiling). Fix before committing:
