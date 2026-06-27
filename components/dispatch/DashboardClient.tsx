@@ -7,7 +7,6 @@ import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
 import CargoTokenPanel from './CargoTokenPanel'
 import OrderHistoryPanel from './OrderHistoryPanel'
-import WarehouseSection from './WarehouseSection'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
 import {
@@ -17,7 +16,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users' | 'warehouse'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -72,6 +71,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [scanCourier, setScanCourier] = useState<Courier | null>(null)
   const awbInputRef = useRef<HTMLInputElement>(null)
   const itemInputRef = useRef<HTMLInputElement>(null)
+  const isOwner = user.email === 'adityaramnani91581@gmail.com'
+  // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
+  // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
+  const [stockGateOn, setStockGateOn] = useState(false)
+  const [stockGateSaving, setStockGateSaving] = useState(false)
+  // When a scanned piece isn't in stock, owner can force-dispatch from this prompt.
+  const [forcePrompt, setForcePrompt] = useState<{ scanned: string; seq: string | null; reason: string } | null>(null)
 
   // Import
   const [delhiveryText, setDelhiveryText] = useState('')
@@ -198,6 +204,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     // Load SKU map for import-time barcode resolution + scan-out verification
     supabase.from('dispatch_sku_map').select('*').then(({ data }) => {
       if (data) setSkuMaps(data as SkuMap[])
+    })
+    // Load the stock-gate flag (EOD scan-out). Default OFF until opening stock is live.
+    supabase.from('app_config').select('value').eq('key', 'stock_gate_enabled').maybeSingle().then(({ data }) => {
+      setStockGateOn((data?.value as string) === 'true')
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -522,7 +532,35 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
 
-    // Match — dispatch with a DB-level guard so an already-dispatched row can't be re-marked.
+    // ── Stock gate (toggleable): the exact scanned piece must be a 'stocked' warehouse unit ──
+    if (stockGateOn) {
+      const { data: unit } = await supabase.from('packed_units').select('id, status').eq('barcode', scanned).maybeSingle()
+      if (!unit) {
+        beepError()
+        const reason = `${scanned} is not in warehouse stock (no such packed unit).`
+        setScanError(reason)
+        if (isOwner) setForcePrompt({ scanned, seq, reason })
+        return
+      }
+      if (unit.status !== 'stocked') {
+        beepError()
+        const reason = `${scanned} is "${unit.status}", not stocked — can't dispatch from stock.`
+        setScanError(reason)
+        if (isOwner) setForcePrompt({ scanned, seq, reason })
+        return
+      }
+      await commitDispatch(scanned, seq, unit.id, false)
+      return
+    }
+
+    // Stock gate OFF — dispatch without the warehouse-stock check (no unit to flip).
+    await commitDispatch(scanned, seq, null, false)
+  }
+
+  // Commit the dispatch: guard against double-dispatch, flip the packed_unit to
+  // dispatched (unless forced/no unit), log, update local state, advance.
+  const commitDispatch = async (scanned: string, seq: string | null, unitId: string | null, forced: boolean) => {
+    if (!scanOrder) return
     const now = new Date().toISOString()
     const { data: updated, error } = await supabase.from('dispatch_orders').update({
       is_dispatched: true,
@@ -533,14 +571,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }).eq('id', scanOrder.id).eq('is_dispatched', false).select()
 
     if (error || !updated || updated.length === 0) {
-      // Someone/something already dispatched this order — refuse to double-dispatch.
       beepError()
       setScanResult(null)
+      setForcePrompt(null)
       setScanError(`That order was already dispatched — not counting it again.`)
       return
     }
 
-    logEvent(scanOrder.order_id, 'dispatched', `Scan-verified dispatch · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
+    // Flip the warehouse unit stocked -> dispatched (skip if forced with no unit).
+    if (unitId) {
+      await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('id', unitId).eq('status', 'stocked')
+    }
+
+    logEvent(scanOrder.order_id, 'dispatched', `${forced ? 'FORCE-dispatched (not in stock)' : 'Scan-verified dispatch'} · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
     setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now, scanned_barcode: scanned } : o))
 
     // Move past instantly — clear and refocus AWB for the next box (effect handles focus).
@@ -549,6 +592,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setScanItem('')
     setScanResult(null)
     setScanError(null)
+    setForcePrompt(null)
   }
 
   const resetScan = () => {
@@ -557,6 +601,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setScanItem('')
     setScanResult(null)
     setScanError(null)
+    setForcePrompt(null)
+  }
+
+  // Owner toggles the EOD stock gate on/off; persisted in app_config (shared, survives reload).
+  const toggleStockGate = async () => {
+    const next = !stockGateOn
+    setStockGateSaving(true)
+    setStockGateOn(next) // optimistic
+    const { error } = await supabase.from('app_config').upsert(
+      { key: 'stock_gate_enabled', value: next ? 'true' : 'false', updated_at: new Date().toISOString(), updated_by: user.email },
+      { onConflict: 'key' }
+    )
+    if (error) setStockGateOn(!next) // revert on failure
+    setStockGateSaving(false)
   }
 
   // ── Courier dispatch-day stats (for scan-out selector) ──
@@ -1679,7 +1737,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: access.can_picklist },
             { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_dispatched },
             { key: 'eod', label: 'End of Day', show: access.can_eod },
-            { key: 'warehouse', label: 'Warehouse', show: access.can_warehouse },
             { key: 'skumap', label: 'SKU Map', show: access.can_users },
             { key: 'users', label: 'Users', show: access.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
@@ -3400,6 +3457,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     Pick the courier you&apos;re loading, scan the AWB on the box, then scan the item barcode. The item&apos;s barcode (Master SKU + piece number, e.g. <span style={{ fontFamily: 'DM Mono' }}>-1</span>) is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
                   </p>
 
+                  {/* Stock-gate status + owner toggle */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 7, background: stockGateOn ? 'var(--dispatched-bg)' : 'var(--bg2)', border: `1px solid ${stockGateOn ? '#bbf7d0' : 'var(--border)'}` }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: stockGateOn ? 'var(--dispatched)' : 'var(--text3)' }}>
+                      Stock gate: {stockGateOn ? 'ON — must be in warehouse stock' : 'OFF — no stock check'}
+                    </span>
+                    {isOwner && (
+                      <button onClick={toggleStockGate} disabled={stockGateSaving} title="Owner: enable after opening stock is imported" style={{
+                        marginLeft: 'auto', width: 42, height: 24, borderRadius: 12, border: 'none', cursor: stockGateSaving ? 'default' : 'pointer',
+                        background: stockGateOn ? 'var(--dispatched)' : 'var(--border2)', position: 'relative' as const, transition: 'background 0.15s', flexShrink: 0,
+                      }}>
+                        <span style={{ position: 'absolute' as const, top: 2, left: stockGateOn ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                      </button>
+                    )}
+                  </div>
+
                   {/* Courier selector with day counts */}
                   <div style={{ display: 'flex', gap: 12 }}>
                     {(['Bluedart', 'Delhivery'] as const).map(c => {
@@ -3458,6 +3530,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   {scanError && (
                     <div style={{ padding: '10px 14px', background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 7, color: 'var(--critical)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <AlertCircle size={15} style={{ flexShrink: 0 }} /> {scanError}
+                    </div>
+                  )}
+
+                  {forcePrompt && isOwner && (
+                    <div style={{ padding: '12px 14px', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 7, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+                      <div style={{ fontSize: 13, color: 'var(--today)', fontWeight: 600 }}>Not in stock — force dispatch anyway?</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>This piece isn&apos;t a stocked warehouse unit. As owner you can override — the order will be marked dispatched but no warehouse stock will be decremented, and it&apos;ll be logged as a forced dispatch.</div>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button onClick={() => commitDispatch(forcePrompt.scanned, forcePrompt.seq, null, true)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Force dispatch</button>
+                        <button onClick={() => { setForcePrompt(null); setScanError(null); setScanItem('') }} style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+                      </div>
                     </div>
                   )}
 
@@ -3592,10 +3675,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ USERS ════ */}
         {tab === 'users' && (
           <UsersTab ownerEmail={user.email!} />
-        )}
-
-        {tab === 'warehouse' && access.can_warehouse && (
-          <WarehouseSection userId={user.id} />
         )}
       </main>
 
