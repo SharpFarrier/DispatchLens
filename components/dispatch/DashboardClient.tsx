@@ -6,6 +6,7 @@ import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, Unfulfill
 import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
 import CargoTokenPanel from './CargoTokenPanel'
+import WarehouseSection from './WarehouseSection'
 import OrderHistoryPanel from './OrderHistoryPanel'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
@@ -16,7 +17,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'warehouse' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -1738,6 +1739,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_dispatched },
             { key: 'eod', label: 'End of Day', show: access.can_eod },
             { key: 'skumap', label: 'SKU Map', show: access.can_users },
+            { key: 'warehouse', label: 'Warehouse', show: true },
             { key: 'users', label: 'Users', show: access.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -3670,6 +3672,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ SKU MAP ════ */}
         {tab === 'skumap' && access.can_users && (
           <SkuMapTab />
+        )}
+
+        {/* ════ WAREHOUSE ════ */}
+        {tab === 'warehouse' && (
+          <WarehouseSection userId={user.id} />
         )}
 
         {/* ════ USERS ════ */}
