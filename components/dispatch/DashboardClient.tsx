@@ -2,7 +2,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { parseOrders } from '@/lib/parser'
-import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap } from '@/types'
+import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
 import CargoTokenPanel from './CargoTokenPanel'
@@ -73,6 +73,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const awbInputRef = useRef<HTMLInputElement>(null)
   const itemInputRef = useRef<HTMLInputElement>(null)
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
+  // Owner is implicitly full-access — sees every tab regardless of stored toggles,
+  // so they can never lock themselves out. Everyone else uses their real permissions.
+  const effectiveAccess: UserAccess = isOwner
+    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_users: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true }
+    : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
   const [stockGateOn, setStockGateOn] = useState(false)
@@ -1732,15 +1737,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         </div>
         <nav style={{ display: 'flex', gap: 2, flex: 1 }}>
           {([
-            { key: 'import', label: 'Import', show: access.can_import },
-            { key: 'plan', label: activeOrders.length ? `Plan (${activeOrders.length})` : 'Plan', show: access.can_plan },
-            { key: 'review', label: reviewCount > 0 ? `Review (${reviewCount})` : 'Review', show: access.can_review },
-            { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: access.can_picklist },
-            { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_dispatched },
-            { key: 'eod', label: 'End of Day', show: access.can_eod },
-            { key: 'skumap', label: 'SKU Map', show: access.can_users },
-            { key: 'warehouse', label: 'Warehouse', show: access.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
-            { key: 'users', label: 'Users', show: access.can_users },
+            { key: 'import', label: 'Import', show: effectiveAccess.can_import },
+            { key: 'plan', label: activeOrders.length ? `Plan (${activeOrders.length})` : 'Plan', show: effectiveAccess.can_plan },
+            { key: 'review', label: reviewCount > 0 ? `Review (${reviewCount})` : 'Review', show: effectiveAccess.can_review },
+            { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: effectiveAccess.can_picklist },
+            { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: effectiveAccess.can_dispatched },
+            { key: 'eod', label: 'End of Day', show: effectiveAccess.can_eod },
+            { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
+            { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
+            { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
               padding: '6px 16px', border: 'none', borderRadius: 6,
@@ -2940,7 +2945,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ DISPATCHED ════ */}
-        {tab === 'dispatched' && access.can_dispatched && (
+        {tab === 'dispatched' && effectiveAccess.can_dispatched && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Dispatched Orders</h1>
@@ -3670,13 +3675,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ SKU MAP ════ */}
-        {tab === 'skumap' && access.can_users && (
+        {tab === 'skumap' && effectiveAccess.can_users && (
           <SkuMapTab />
         )}
 
         {/* ════ WAREHOUSE ════ */}
         {tab === 'warehouse' && (
-          <WarehouseSection userId={user.id} access={access} />
+          <WarehouseSection userId={user.id} access={effectiveAccess} />
         )}
 
         {/* ════ USERS ════ */}
