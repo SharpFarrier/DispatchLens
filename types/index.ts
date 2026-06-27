@@ -17,6 +17,16 @@ export interface UserAccess {
   can_dispatched: boolean
   can_users: boolean
   can_warehouse: boolean
+  can_wh_stock: boolean
+  can_wh_coating: boolean
+  can_wh_picking: boolean
+  can_wh_inventory: boolean
+  can_wh_barcodes: boolean
+  can_wh_pack_generate: boolean
+  can_wh_pack_scan: boolean
+  can_wh_pack_inventory: boolean
+  can_wh_pack_rto: boolean
+  can_wh_pack_units: boolean
   requested_at: string
   reviewed_at: string | null
   created_at: string

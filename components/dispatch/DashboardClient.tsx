@@ -1739,7 +1739,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: access.can_dispatched },
             { key: 'eod', label: 'End of Day', show: access.can_eod },
             { key: 'skumap', label: 'SKU Map', show: access.can_users },
-            { key: 'warehouse', label: 'Warehouse', show: true },
+            { key: 'warehouse', label: 'Warehouse', show: access.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'users', label: 'Users', show: access.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -3676,7 +3676,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {/* ════ WAREHOUSE ════ */}
         {tab === 'warehouse' && (
-          <WarehouseSection userId={user.id} />
+          <WarehouseSection userId={user.id} access={access} />
         )}
 
         {/* ════ USERS ════ */}

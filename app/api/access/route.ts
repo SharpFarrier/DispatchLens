@@ -58,7 +58,9 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json()
-  const { email, status, can_import, can_plan, can_review, can_picklist, can_eod, can_dispatched, can_users } = body
+  const { email, status, can_import, can_plan, can_review, can_picklist, can_eod, can_dispatched, can_users,
+    can_wh_stock, can_wh_coating, can_wh_picking, can_wh_inventory, can_wh_barcodes,
+    can_wh_pack_generate, can_wh_pack_scan, can_wh_pack_inventory, can_wh_pack_rto, can_wh_pack_units } = body
 
   const { data, error } = await adminClient
     .from('dispatch_user_access')
@@ -71,6 +73,16 @@ export async function PATCH(request: Request) {
       can_eod: can_eod ?? false,
       can_dispatched: can_dispatched ?? false,
       can_users: can_users ?? false,
+      can_wh_stock: can_wh_stock ?? false,
+      can_wh_coating: can_wh_coating ?? false,
+      can_wh_picking: can_wh_picking ?? false,
+      can_wh_inventory: can_wh_inventory ?? false,
+      can_wh_barcodes: can_wh_barcodes ?? false,
+      can_wh_pack_generate: can_wh_pack_generate ?? false,
+      can_wh_pack_scan: can_wh_pack_scan ?? false,
+      can_wh_pack_inventory: can_wh_pack_inventory ?? false,
+      can_wh_pack_rto: can_wh_pack_rto ?? false,
+      can_wh_pack_units: can_wh_pack_units ?? false,
       reviewed_at: new Date().toISOString(),
       reviewed_by: user.id,
     })

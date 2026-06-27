@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { UserAccess } from '@/types'
 import { CheckCircle, Clock, XCircle, RefreshCw } from 'lucide-react'
 
-const TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
+const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
   { key: 'can_import',   label: 'Import',   desc: 'Paste & import planning data' },
   { key: 'can_plan',     label: 'Plan',     desc: 'Mark dispatch/hold/unfulfillable' },
   { key: 'can_review',   label: 'Review',   desc: 'Assign target dates, cancel orders' },
@@ -12,6 +12,22 @@ const TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
   { key: 'can_dispatched', label: 'Dispatched', desc: 'View dispatched orders, sync tracking' },
   { key: 'can_users',    label: 'Users',    desc: 'Manage user access (admin only)' },
 ]
+
+const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
+  { key: 'can_wh_stock',         label: 'Stock',      desc: 'Warehouse: stock inward' },
+  { key: 'can_wh_coating',       label: 'Coating',    desc: 'Warehouse: powder coating' },
+  { key: 'can_wh_picking',       label: 'Picking',    desc: 'Warehouse: frame picking' },
+  { key: 'can_wh_inventory',     label: 'Inventory',  desc: 'Warehouse: production inventory' },
+  { key: 'can_wh_barcodes',      label: 'Barcodes',   desc: 'Warehouse: piece barcode registry' },
+  { key: 'can_wh_pack_generate', label: 'Pack·Gen',   desc: 'Packing: generate packed barcodes' },
+  { key: 'can_wh_pack_scan',     label: 'Pack·Scan',  desc: 'Packing: scan to stock' },
+  { key: 'can_wh_pack_inventory',label: 'Pack·Inv',   desc: 'Packing: packed inventory' },
+  { key: 'can_wh_pack_rto',      label: 'Pack·RTO',   desc: 'Packing: RTO handling' },
+  { key: 'can_wh_pack_units',    label: 'Pack·Units', desc: 'Packing: unit lookup' },
+]
+
+// All access keys, for save payloads.
+const ALL_ACCESS_KEYS: (keyof UserAccess)[] = [...DISPATCH_TOGGLES, ...WAREHOUSE_TOGGLES].map(t => t.key)
 
 export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
   const [users, setUsers] = useState<UserAccess[]>([])
@@ -45,20 +61,12 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
     const edit = edits[user.email] || {}
     const merged = { ...user, ...edit }
     setSaving(user.email)
+    const payload: Record<string, unknown> = { email: user.email, status: 'approved' }
+    for (const key of ALL_ACCESS_KEYS) payload[key] = merged[key] ?? false
     const res = await fetch('/api/access', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: user.email,
-        status: 'approved',
-        can_import: merged.can_import,
-        can_plan: merged.can_plan,
-        can_review: merged.can_review,
-        can_picklist: merged.can_picklist,
-        can_eod: merged.can_eod,
-        can_dispatched: merged.can_dispatched,
-        can_users: merged.can_users,
-      }),
+      body: JSON.stringify(payload),
     })
     if (res.ok) {
       const updated = await res.json()
@@ -70,10 +78,12 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
 
   const rejectUser = async (email: string) => {
     setSaving(email)
+    const payload: Record<string, unknown> = { email, status: 'rejected' }
+    for (const key of ALL_ACCESS_KEYS) payload[key] = false
     const res = await fetch('/api/access', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, status: 'rejected', can_import: false, can_plan: false, can_review: false, can_picklist: false, can_eod: false, can_users: false }),
+      body: JSON.stringify(payload),
     })
     if (res.ok) {
       const updated = await res.json()
@@ -112,9 +122,9 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
           </div>
         </div>
 
-        {/* Toggles */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 }}>
-          {TOGGLES.map(({ key, label, desc }) => {
+        {/* Toggles — grouped: Dispatch then Warehouse */}
+        {(() => {
+          const renderToggle = ({ key, label, desc }: { key: keyof UserAccess; label: string; desc: string }) => {
             const isOn = e[key] as boolean
             const isDisabled = isOwnerRow
             return (
@@ -138,11 +148,27 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
                     boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
                   }} />
                 </button>
-                <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: isOn ? 'var(--text)' : 'var(--text3)', fontWeight: isOn ? 500 : 400 }}>{label}</span>
+                <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: isOn ? 'var(--text)' : 'var(--text3)', fontWeight: isOn ? 500 : 400, textAlign: 'center' as const }}>{label}</span>
               </div>
             )
-          })}
-        </div>
+          }
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>DISPATCH</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
+                  {DISPATCH_TOGGLES.map(renderToggle)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>WAREHOUSE</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+                  {WAREHOUSE_TOGGLES.map(renderToggle)}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Actions */}
         {showSave && !isOwnerRow && (

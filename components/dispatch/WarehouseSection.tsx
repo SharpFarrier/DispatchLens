@@ -12,24 +12,26 @@ import PicksTab from './PicksTab'
 import InventoryProdTab from './InventoryProdTab'
 import BarcodesTab from './BarcodesTab'
 
+import { UserAccess } from '@/types'
+
 type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'
 type PackingTab = 'generate' | 'scan' | 'inventory' | 'rto' | 'units'
 
-const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode }[] = [
-  { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} /> },
-  { key: 'coating', label: 'Coating', icon: <Paintbrush size={14} /> },
-  { key: 'picking', label: 'Picking', icon: <Hand size={14} /> },
-  { key: 'inventory', label: 'Inventory', icon: <Warehouse size={14} /> },
-  { key: 'barcodes', label: 'Barcodes', icon: <Tag size={14} /> },
-  { key: 'packing', label: 'Packing', icon: <Layers size={14} /> },
+const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof UserAccess | 'packing' }[] = [
+  { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} />, perm: 'can_wh_stock' },
+  { key: 'coating', label: 'Coating', icon: <Paintbrush size={14} />, perm: 'can_wh_coating' },
+  { key: 'picking', label: 'Picking', icon: <Hand size={14} />, perm: 'can_wh_picking' },
+  { key: 'inventory', label: 'Inventory', icon: <Warehouse size={14} />, perm: 'can_wh_inventory' },
+  { key: 'barcodes', label: 'Barcodes', icon: <Tag size={14} />, perm: 'can_wh_barcodes' },
+  { key: 'packing', label: 'Packing', icon: <Layers size={14} />, perm: 'packing' },
 ]
 
-const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode }[] = [
-  { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} /> },
-  { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} /> },
-  { key: 'inventory', label: 'Inventory',     icon: <Package size={14} /> },
-  { key: 'rto',       label: 'RTO',           icon: <RotateCcw size={14} /> },
-  { key: 'units',     label: 'Units',         icon: <FileSearch size={14} /> },
+const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; perm: keyof UserAccess }[] = [
+  { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} />, perm: 'can_wh_pack_generate' },
+  { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} />, perm: 'can_wh_pack_scan' },
+  { key: 'inventory', label: 'Inventory',     icon: <Package size={14} />, perm: 'can_wh_pack_inventory' },
+  { key: 'rto',       label: 'RTO',           icon: <RotateCcw size={14} />, perm: 'can_wh_pack_rto' },
+  { key: 'units',     label: 'Units',         icon: <FileSearch size={14} />, perm: 'can_wh_pack_units' },
 ]
 
 function tabBtn(active: boolean): React.CSSProperties {
@@ -43,15 +45,23 @@ function tabBtn(active: boolean): React.CSSProperties {
   }
 }
 
-export default function WarehouseSection({ userId }: { userId: string }) {
-  const [topTab, setTopTab] = useState<TopTab>('packing')
-  const [packingTab, setPackingTab] = useState<PackingTab>('inventory')
+export default function WarehouseSection({ userId, access }: { userId: string; access: UserAccess }) {
+  // Only show sub-tabs the user is permitted to see.
+  const packingTabs = PACKING_TABS.filter(t => access[t.perm])
+  const topTabs = TOP_TABS.filter(t => t.perm === 'packing' ? packingTabs.length > 0 : access[t.perm as keyof UserAccess])
+
+  const [topTab, setTopTab] = useState<TopTab>(topTabs[0]?.key ?? 'stock')
+  const [packingTab, setPackingTab] = useState<PackingTab>(packingTabs[0]?.key ?? 'generate')
+
+  if (topTabs.length === 0) {
+    return <div style={{ padding: 48, textAlign: 'center', color: 'var(--text3)' }}>You don&apos;t have access to any warehouse sections.</div>
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Top-level: Stock . Coating . Picking . Packing */}
+      {/* Top-level tabs (only permitted ones) */}
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
-        {TOP_TABS.map(({ key, label, icon }) => (
+        {topTabs.map(({ key, label, icon }) => (
           <button key={key} onClick={() => setTopTab(key)} style={tabBtn(topTab === key)}>
             {icon}{label}
           </button>
@@ -64,11 +74,11 @@ export default function WarehouseSection({ userId }: { userId: string }) {
       {topTab === 'inventory' && <InventoryProdTab />}
       {topTab === 'barcodes' && <BarcodesTab />}
 
-      {topTab === 'packing' && (
+      {topTab === 'packing' && packingTabs.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Inner row: Generate . Scan . Inventory . RTO . Units */}
+          {/* Inner row (only permitted ones) */}
           <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
-            {PACKING_TABS.map(({ key, label, icon }) => (
+            {packingTabs.map(({ key, label, icon }) => (
               <button key={key} onClick={() => setPackingTab(key)} style={tabBtn(packingTab === key)}>
                 {icon}{label}
               </button>
