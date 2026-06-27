@@ -4,6 +4,11 @@ import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import { Spinner, Alert, ColourDot, Th } from './warehouse-ui'
 import { useSort } from './warehouse-hooks'
+import OpeningStockImporter from './OpeningStockImporter'
+import FramePicker, { type FrameItem } from './FramePicker'
+import LineItemList from './LineItemList'
+
+const OWNER_EMAIL = 'adityaramnani91581@gmail.com'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any
@@ -151,6 +156,14 @@ export default function InventoryProdTab() {
   const [data, setData] = useState<Row | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isFetching, setIsFetching] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
+  const [openingMode, setOpeningMode] = useState<null | 'import' | 'frames'>(null)
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: u }) => {
+      setIsOwner((u?.user?.email || '').toLowerCase() === OWNER_EMAIL.toLowerCase())
+    })
+  }, [supabase])
 
   const load = useCallback(async () => {
     setIsFetching(true)
@@ -427,6 +440,27 @@ export default function InventoryProdTab() {
 
       {!hasOpeningStock && <Alert type="warning" message="Opening stock not set. Numbers may be inaccurate until opening stock is added." />}
 
+      {isOwner && (
+        <div style={{ background: 'var(--surface)', borderRadius: 14, border: '1px dashed var(--border2)', padding: 16 }}>
+          {!openingMode ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 13 }}>Opening Stock <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', background: 'var(--bg2)', padding: '1px 6px', borderRadius: 4, marginLeft: 4 }}>owner only</span></div>
+                <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>One-time setup of existing warehouse stock.</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setOpeningMode('import')} style={{ padding: '8px 14px', borderRadius: 8, background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Import Packed Barcodes</button>
+                <button onClick={() => setOpeningMode('frames')} style={{ padding: '8px 14px', borderRadius: 8, background: 'var(--surface)', color: 'var(--accent)', fontSize: 12, fontWeight: 700, border: '1px solid var(--accent)', cursor: 'pointer' }}>Add Production Frames</button>
+              </div>
+            </div>
+          ) : openingMode === 'import' ? (
+            <OpeningStockImporter onClose={() => setOpeningMode(null)} />
+          ) : (
+            <ProductionOpeningStock onClose={() => { setOpeningMode(null); void load() }} />
+          )}
+        </div>
+      )}
+
       {issueRows.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--critical-bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
           <span style={{ fontSize: 18 }}>⚠️</span>
@@ -523,6 +557,88 @@ function BreakdownTable({ title, colour, rows, cols, defaultSort, onClose }: {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+// ── Production opening-stock entry form (raw/coated frames → opening_stock) ──
+function ProductionOpeningStock({ onClose }: { onClose: () => void }) {
+  const supabase = useMemo(() => createClient(), [])
+  const [entryType, setEntryType] = useState<'raw' | 'coated'>('coated')
+  const [items, setItems] = useState<FrameItem[]>([])
+  const [notes, setNotes] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [toast, setToast] = useState<{ msg: string; type: string } | null>(null)
+
+  function showToast(msg: string, type = 'success') { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
+
+  async function handleSubmit() {
+    if (!items.length) { showToast('Add at least one frame', 'error'); return }
+    setSubmitting(true)
+    try {
+      const rows = items.map(l => ({
+        entry_type: entryType,
+        category: l.category,
+        shape: l.shape,
+        size: l.size || null,
+        mattress: l.mattress || null,
+        colour: entryType === 'coated' ? (l.colour || null) : null,
+        pieces: l.pieces,
+        notes: notes || null,
+      }))
+      const { error } = await supabase.from('opening_stock').insert(rows)
+      if (error) throw error
+      showToast(`Saved ${rows.length} opening-stock entr${rows.length > 1 ? 'ies' : 'y'} ✓`)
+      setItems([]); setNotes('')
+      setTimeout(onClose, 800)
+    } catch (e) { showToast('Error: ' + (e as Error).message, 'error') }
+    setSubmitting(false)
+  }
+
+  const sectionT = { fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {toast && (
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 50, padding: '12px 20px', borderRadius: 999, fontSize: 13, fontWeight: 700, boxShadow: '0 4px 12px rgba(0,0,0,0.15)', background: toast.type === 'error' ? 'var(--critical-bg)' : 'var(--dispatched-bg)', color: toast.type === 'error' ? 'var(--critical)' : 'var(--dispatched)', border: '1px solid var(--border)' }}>{toast.msg}</div>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', margin: 0 }}>Production Opening Stock</h3>
+        <button onClick={onClose} style={{ color: 'var(--text3)', fontSize: 20, lineHeight: 1, background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+      </div>
+
+      <div>
+        <div style={sectionT}>Entry Type</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+          {(['raw', 'coated'] as const).map(t => (
+            <button key={t} onClick={() => setEntryType(t)}
+              style={{ padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 13, textTransform: 'capitalize', cursor: 'pointer', border: entryType === t ? '2px solid var(--accent)' : '2px solid var(--border)', background: entryType === t ? 'var(--accent-bg)' : 'var(--surface)', color: entryType === t ? 'var(--accent)' : 'var(--text3)' }}>
+              {t === 'raw' ? 'Raw (uncoated)' : 'Coated'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={sectionT}>Frames</div>
+        <LineItemList items={items} onRemove={i => setItems(p => p.filter((_, idx) => idx !== i))} />
+      </div>
+
+      <div style={{ background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', padding: 16 }}>
+        <div style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 13, marginBottom: 12 }}>+ Add Frame</div>
+        <FramePicker mode="coating" showColour={entryType === 'coated'} onAdd={item => setItems(p => [...p, item])} />
+      </div>
+
+      <div>
+        <div style={sectionT}>Notes <span style={{ color: 'var(--text3)', fontSize: 12, fontWeight: 400 }}>(optional)</span></div>
+        <textarea style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box', resize: 'none' }} rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
+      </div>
+
+      <button onClick={handleSubmit} disabled={submitting || !items.length}
+        style={{ width: '100%', padding: 14, background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 15, borderRadius: 10, border: 'none', cursor: 'pointer', opacity: (submitting || !items.length) ? 0.4 : 1 }}>
+        {submitting ? 'Saving…' : `Save Opening Stock${items.length ? ` (${items.reduce((s, i) => s + i.pieces, 0)} pcs)` : ''}`}
+      </button>
     </div>
   )
 }
