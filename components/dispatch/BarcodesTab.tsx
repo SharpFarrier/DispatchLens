@@ -24,6 +24,7 @@ interface Piece {
 const STATUS_ORDER = ['coated', 'picked', 'packed', 'dispatched']
 const STATUS_META: Record<string, { label: string; bg: string; fg: string }> = {
   coated:     { label: 'Coated',     bg: 'var(--accent-bg)',     fg: 'var(--accent)' },
+  error:      { label: 'Error',      bg: 'var(--critical-bg)',   fg: 'var(--critical)' },
   picked:     { label: 'Picked',     bg: 'var(--today-bg)',      fg: 'var(--today)' },
   packed:     { label: 'Packed',     bg: 'var(--plan-bg)',       fg: 'var(--plan)' },
   dispatched: { label: 'Dispatched', bg: 'var(--dispatched-bg)', fg: 'var(--dispatched)' },
@@ -76,6 +77,9 @@ export default function BarcodesTab() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [errorScan, setErrorScan] = useState('')
+  const [marking, setMarking] = useState<string | null>(null)
+  const [scanMsg, setScanMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -90,8 +94,38 @@ export default function BarcodesTab() {
 
   useEffect(() => { void load() }, [load])
 
+  // Mark a piece as error — only allowed while still 'coated'. Soft (status='error'),
+  // so it drops out of coated stock and can't be picked. Guarded by .eq('status','coated').
+  const markError = useCallback(async (piece: { id: string; barcode: string; status: string }, reason: string) => {
+    if (piece.status !== 'coated') {
+      setScanMsg({ ok: false, text: `${piece.barcode} is "${piece.status}" — only coated pieces can be marked error.` })
+      return false
+    }
+    setMarking(piece.id)
+    const { data, error } = await supabase.from('pieces')
+      .update({ status: 'error', error_at: new Date().toISOString(), error_reason: reason || null })
+      .eq('id', piece.id).eq('status', 'coated').select()
+    setMarking(null)
+    if (error || !data || data.length === 0) {
+      setScanMsg({ ok: false, text: `Couldn't mark ${piece.barcode} — it may have moved past coated.` })
+      return false
+    }
+    setPieces(prev => prev.map(p => p.id === piece.id ? { ...p, status: 'error' } : p))
+    setScanMsg({ ok: true, text: `${piece.barcode} marked as error — removed from coated stock.` })
+    return true
+  }, [supabase])
+
+  const handleErrorScan = useCallback(async () => {
+    const code = errorScan.trim()
+    if (!code) return
+    const piece = pieces.find(p => p.barcode === code)
+    if (!piece) { setScanMsg({ ok: false, text: `${code} not found.` }); setErrorScan(''); return }
+    const ok = await markError(piece, 'Scanned at Barcodes tab')
+    if (ok) setErrorScan('')
+  }, [errorScan, pieces, markError])
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: pieces.length, coated: 0, picked: 0, packed: 0, dispatched: 0 }
+    const c: Record<string, number> = { all: pieces.length, coated: 0, picked: 0, packed: 0, dispatched: 0, error: 0 }
     pieces.forEach(p => { c[p.status] = (c[p.status] || 0) + 1 })
     return c
   }, [pieces])
@@ -121,7 +155,7 @@ export default function BarcodesTab() {
 
       {/* Status filter pills */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {['all', ...STATUS_ORDER].map(s => {
+        {['all', ...STATUS_ORDER, 'error'].map(s => {
           const active = statusFilter === s
           const label = s === 'all' ? 'All' : (STATUS_META[s]?.label || s)
           return (
@@ -139,6 +173,25 @@ export default function BarcodesTab() {
       </div>
 
       {/* Search */}
+      {/* Scan a mis-coated piece to flag it (removes from coated stock) */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 14, marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', marginBottom: 8 }}>⚠ Mark a coating error</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            style={{ ...inputField, flex: 1 }}
+            placeholder="Scan or type the bad piece's barcode…"
+            value={errorScan}
+            onChange={e => setErrorScan(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void handleErrorScan() }}
+          />
+          <button onClick={() => void handleErrorScan()} disabled={!errorScan.trim() || !!marking} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>Mark error</button>
+        </div>
+        {scanMsg && (
+          <div style={{ marginTop: 8, fontSize: 13, color: scanMsg.ok ? 'var(--dispatched)' : 'var(--critical)' }}>{scanMsg.text}</div>
+        )}
+        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)' }}>Only pieces still in <b>coated</b> state can be flagged. Picked/packed pieces are blocked.</div>
+      </div>
+
       <input style={{ ...inputField, marginBottom: 16 }} placeholder="Search barcode, shape, size, colour…" value={search} onChange={e => setSearch(e.target.value)} />
 
       {loading ? (
@@ -150,7 +203,7 @@ export default function BarcodesTab() {
           <table style={{ width: '100%', fontSize: 14, minWidth: 640, borderCollapse: 'collapse' }}>
             <thead style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
               <tr>
-                {['Barcode', 'Frame', 'Status', 'Lifecycle', 'Created'].map(h => (
+                {['Barcode', 'Frame', 'Status', 'Lifecycle', 'Created', ''].map(h => (
                   <th key={h} style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text3)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -169,12 +222,19 @@ export default function BarcodesTab() {
                   <td style={{ padding: '8px 12px' }}><StatusBadge status={p.status} /></td>
                   <td style={{ padding: '8px 12px' }}><Lifecycle piece={p} /></td>
                   <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap' }}>{p.created_at ? format(new Date(p.created_at), 'dd MMM yy') : '—'}</td>
+                  <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                    {p.status === 'coated' ? (
+                      <button onClick={() => void markError(p, 'Flagged in Barcodes tab')} disabled={marking === p.id} style={{ padding: '4px 10px', borderRadius: 7, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                        {marking === p.id ? '…' : 'Mark error'}
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
             <tfoot style={{ background: 'var(--bg2)', borderTop: '2px solid var(--border)' }}>
               <tr>
-                <td colSpan={5} style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: 'var(--text3)' }}>
+                <td colSpan={6} style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, color: 'var(--text3)' }}>
                   Showing {filtered.length} of {counts.all}
                 </td>
               </tr>

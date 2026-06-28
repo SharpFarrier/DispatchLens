@@ -69,6 +69,26 @@ export default function CoatingTab({ userId }: { userId: string }) {
 
   function showToast(msg: string, type = 'success') { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
+  // Scan a mis-coated piece to flag it as error (only while still 'coated').
+  const [errScan, setErrScan] = useState('')
+  const [errMarking, setErrMarking] = useState(false)
+  async function markErrorByScan() {
+    const code = errScan.trim()
+    if (!code) return
+    setErrMarking(true)
+    try {
+      const { data: piece } = await supabase.from('pieces').select('id, barcode, status').eq('barcode', code).maybeSingle()
+      if (!piece) { showToast(`${code} not found`, 'error'); return }
+      if (piece.status !== 'coated') { showToast(`${code} is "${piece.status}" — only coated can be flagged`, 'error'); return }
+      const { data, error } = await supabase.from('pieces')
+        .update({ status: 'error', error_at: new Date().toISOString(), error_reason: 'Scanned at Coating' })
+        .eq('id', piece.id).eq('status', 'coated').select()
+      if (error || !data || data.length === 0) { showToast(`Couldn't flag ${code}`, 'error'); return }
+      showToast(`${code} marked error — removed from coated stock`)
+      setErrScan('')
+    } finally { setErrMarking(false) }
+  }
+
   async function handleShareLabels() {
     if (!lastLabels || !lastLabels.length) return
     try {
@@ -255,6 +275,22 @@ export default function CoatingTab({ userId }: { userId: string }) {
             style={{ width: '100%', padding: 14, background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 15, borderRadius: 10, border: 'none', cursor: 'pointer', opacity: (submitting || !lineItems.length) ? 0.4 : 1 }}>
             {submitting ? 'Saving...' : 'Submit Trolley'}
           </button>
+
+          {/* Made a mistake? Scan the bad piece to remove it from coated stock. */}
+          <div style={{ marginTop: 18, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', marginBottom: 8 }}>⚠ Mis-coated a piece? Flag it</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={errScan}
+                onChange={e => setErrScan(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') void markErrorByScan() }}
+                placeholder="Scan the bad piece's barcode…"
+                style={{ flex: 1, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' as const }}
+              />
+              <button onClick={() => void markErrorByScan()} disabled={!errScan.trim() || errMarking} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>{errMarking ? '…' : 'Mark error'}</button>
+            </div>
+            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)' }}>Only works while the piece is still <b>coated</b>. It stays recorded for audit but stops counting as coated stock.</div>
+          </div>
         </div>
       )}
 
