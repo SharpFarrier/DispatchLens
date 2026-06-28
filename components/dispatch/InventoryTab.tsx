@@ -29,11 +29,21 @@ export default function InventoryTab() {
   useEffect(() => {
     (async () => {
       setLoading(true)
-      const [u, s] = await Promise.all([
-        supabase.from('packed_units').select('sku, status'),
-        supabase.from('packed_skus').select('sku, descr, product'),
-      ])
-      setUnits((u.data as PackedUnitRow[]) || [])
+      // packed_units can exceed Supabase's 1000-row default cap — page through all rows.
+      const allUnits: PackedUnitRow[] = []
+      const PAGE = 1000
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('packed_units')
+          .select('sku, status')
+          .range(from, from + PAGE - 1)
+        if (error) break
+        const batch = (data as PackedUnitRow[]) || []
+        allUnits.push(...batch)
+        if (batch.length < PAGE) break
+      }
+      const s = await supabase.from('packed_skus').select('sku, descr, product')
+      setUnits(allUnits)
       setSkus((s.data as PackedSkuRow[]) || [])
       setLoading(false)
     })()
