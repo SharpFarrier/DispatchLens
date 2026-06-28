@@ -14,12 +14,12 @@ const LABEL = {
   height: 25,
   marginTop: 2.0,
   barcodeH: 12,
-  barcodeW: 46,
+  barcodeW: 44,
   idFontPt: 8,
   descFontPt: 7,
   lineGap1: 3.3,
   lineGap2: 3.6,
-  barModuleW: 1.6,
+  barModuleW: 2,
   barCanvasH: 80,
 }
 
