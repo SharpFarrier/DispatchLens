@@ -559,8 +559,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
 
-    // Stock gate OFF — dispatch without the warehouse-stock check (no unit to flip).
-    await commitDispatch(scanned, seq, null, false)
+    // Stock gate OFF — don't block, but still deduct stock if this piece happens to
+    // be a stocked warehouse unit (soft sync). If it's missing or not stocked, dispatch anyway.
+    const { data: softUnit } = await supabase.from('packed_units').select('id, status').eq('barcode', scanned).maybeSingle()
+    await commitDispatch(scanned, seq, softUnit && softUnit.status === 'stocked' ? softUnit.id : null, false)
   }
 
   // Commit the dispatch: guard against double-dispatch, flip the packed_unit to
