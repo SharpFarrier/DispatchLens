@@ -1,6 +1,7 @@
 'use client'
 import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
 import { format } from 'date-fns'
 import { Spinner, EmptyState, Th } from './warehouse-ui'
 import { useSort, useDayGroups } from './warehouse-hooks'
@@ -46,13 +47,9 @@ export default function StockTab({ userId }: { userId: string }) {
 
   const loadShipments = useCallback(async () => {
     setIsLoading(true)
-    const { data } = await supabase
-      .from('shipments')
-      .select('*, shipment_items(*)')
-      .neq('status', 'deleted')
-      .order('created_at', { ascending: false })
-      .limit(200)
-    setShipments(data || [])
+    const data = await fetchAllRows((from, to) =>
+      supabase.from('shipments').select('*, shipment_items(*)').neq('status', 'deleted').order('created_at', { ascending: false }).range(from, to))
+    setShipments((data as typeof shipments) || [])
     setIsLoading(false)
   }, [supabase])
 

@@ -1,6 +1,7 @@
 'use client'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
 import { format } from 'date-fns'
 import { Spinner, EmptyState, ColourDot } from './warehouse-ui'
 
@@ -83,12 +84,9 @@ export default function BarcodesTab() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase
-      .from('pieces')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(2000)
-    setPieces((data as Piece[]) || [])
+    const data = await fetchAllRows<Piece>((from, to) =>
+      supabase.from('pieces').select('*').order('created_at', { ascending: false }).range(from, to))
+    setPieces(data)
     setLoading(false)
   }, [supabase])
 

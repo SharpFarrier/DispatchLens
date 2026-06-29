@@ -1,6 +1,7 @@
 'use client'
 import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
 import { format } from 'date-fns'
 import { Spinner, EmptyState, ColourDot, Th } from './warehouse-ui'
 import { useSort, useDayGroups } from './warehouse-hooks'
@@ -41,13 +42,9 @@ export default function CoatingTab({ userId }: { userId: string }) {
 
   const loadTrolleys = useCallback(async () => {
     setIsFetching(true)
-    const { data } = await supabase
-      .from('coating_trolleys')
-      .select('*, coating_items(*)')
-      .neq('status', 'deleted')
-      .order('created_at', { ascending: false })
-      .limit(200)
-    setTrolleys(data || [])
+    const data = await fetchAllRows((from, to) =>
+      supabase.from('coating_trolleys').select('*, coating_items(*)').neq('status', 'deleted').order('created_at', { ascending: false }).range(from, to))
+    setTrolleys((data as typeof trolleys) || [])
     setIsFetching(false)
   }, [supabase])
 

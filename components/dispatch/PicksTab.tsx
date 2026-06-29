@@ -1,6 +1,7 @@
 'use client'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
 import { format } from 'date-fns'
 import { ColourDot, Th } from './warehouse-ui'
 import { useSort, useDayGroups } from './warehouse-hooks'
@@ -39,13 +40,9 @@ export default function PicksTab({ userId }: { userId: string }) {
 
   const loadSessions = useCallback(async () => {
     setIsFetching(true)
-    const { data } = await supabase
-      .from('pick_sessions')
-      .select('*, pick_items(*)')
-      .neq('status', 'deleted')
-      .order('created_at', { ascending: false })
-      .limit(200)
-    setSessions(data || [])
+    const data = await fetchAllRows((from, to) =>
+      supabase.from('pick_sessions').select('*, pick_items(*)').neq('status', 'deleted').order('created_at', { ascending: false }).range(from, to))
+    setSessions((data as typeof sessions) || [])
     setIsFetching(false)
   }, [supabase])
 

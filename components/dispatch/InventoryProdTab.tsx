@@ -1,6 +1,7 @@
 'use client'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
 import { format } from 'date-fns'
 import { Spinner, Alert, ColourDot, Th } from './warehouse-ui'
 import { useSort } from './warehouse-hooks'
@@ -167,19 +168,21 @@ export default function InventoryProdTab() {
 
   const load = useCallback(async () => {
     setIsFetching(true)
-    const [sl, cl, pk, os, bom, ap, prods] = await Promise.all([
-      supabase.from('shipment_items').select('*, shipments!inner(status,supplier)').neq('shipments.status', 'deleted'),
-      supabase.from('coating_items').select('*, coating_trolleys!inner(status)').neq('coating_trolleys.status', 'deleted'),
-      supabase.from('pick_items').select('*, pick_sessions!inner(status)').neq('pick_sessions.status', 'deleted'),
-      supabase.from('opening_stock').select('*'),
+    // Growable transactional tables are paged past the 1000-row cap; small
+    // reference tables (bom_items, products_with_flags) stay single-shot.
+    const [sl, cl, pk, os, ap, bom, prods] = await Promise.all([
+      fetchAllRows((from, to) => supabase.from('shipment_items').select('*, shipments!inner(status,supplier)').neq('shipments.status', 'deleted').range(from, to)),
+      fetchAllRows((from, to) => supabase.from('coating_items').select('*, coating_trolleys!inner(status)').neq('coating_trolleys.status', 'deleted').range(from, to)),
+      fetchAllRows((from, to) => supabase.from('pick_items').select('*, pick_sessions!inner(status)').neq('pick_sessions.status', 'deleted').range(from, to)),
+      fetchAllRows((from, to) => supabase.from('opening_stock').select('*').range(from, to)),
+      fetchAllRows((from, to) => supabase.from('assembly_picks').select('*').range(from, to)),
       supabase.from('bom_items').select('*, parts(name)'),
-      supabase.from('assembly_picks').select('*'),
       supabase.from('products_with_flags').select('*, product_shapes(name)').eq('is_assembly', true).eq('is_active', true),
     ])
     setData({
-      shipmentItems: sl.data || [], coatingItems: cl.data || [], pickItems: pk.data || [],
+      shipmentItems: sl || [], coatingItems: cl || [], pickItems: pk || [],
       packPieces: [], // STUB: pack_pieces not in DispatchLens (old packing system)
-      openingStock: os.data || [], bomItems: bom.data || [], assemblyPicks: ap.data || [], assemblyProducts: prods.data || [],
+      openingStock: os || [], bomItems: bom.data || [], assemblyPicks: ap || [], assemblyProducts: prods.data || [],
     })
     setIsLoading(false)
     setIsFetching(false)
