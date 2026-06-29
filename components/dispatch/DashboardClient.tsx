@@ -991,6 +991,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const confirmEOD = async () => {
     if (!eodMatchResult) return
     const now = new Date().toISOString()
+    // Tally how many pieces per barcode_sku are being dispatched in this batch,
+    // so we can deduct that quantity from stock (paste flow has no per-piece scan).
+    const dispatchBySku: Record<string, number> = {}
     for (const m of eodMatchResult.matched) {
       await supabase.from('dispatch_orders').update({
         is_dispatched: true,
@@ -1000,7 +1003,31 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         scanned_barcode: m.sku,
       }).eq('id', m.orderId)
       logEvent(m.platformOrderId, 'dispatched', `Dispatched · AWB ${m.awb}`)
+      // Resolve the packed SKU (master) from the order for stock deduction.
+      const ord = orders.find(o => o.id === m.orderId)
+      const psku = (ord?.barcode_sku || '').trim()
+      if (psku) dispatchBySku[psku] = (dispatchBySku[psku] || 0) + 1
     }
+
+    // Soft FIFO deduction: for each SKU, flip up to N oldest 'stocked' units to dispatched.
+    // Quantity-based (paste flow doesn't know which exact piece) — keeps counts accurate.
+    for (const [psku, qty] of Object.entries(dispatchBySku)) {
+      const { data: avail } = await supabase
+        .from('packed_units')
+        .select('id')
+        .eq('sku', psku)
+        .eq('status', 'stocked')
+        .order('stocked_at', { ascending: true, nullsFirst: true })
+        .limit(qty)
+      const ids = (avail || []).map(u => u.id)
+      if (ids.length > 0) {
+        await supabase.from('packed_units')
+          .update({ status: 'dispatched', dispatched_at: now })
+          .in('id', ids)
+          .eq('status', 'stocked')
+      }
+    }
+
     await loadOrders()
     setShowEodConfirm(false)
     setEodDone(true)
