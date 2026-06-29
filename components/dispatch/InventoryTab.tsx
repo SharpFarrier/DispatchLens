@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
 import { Package, Search, AlertTriangle } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
@@ -25,23 +26,29 @@ export default function InventoryTab() {
   const [lowOnly, setLowOnly] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('stocked')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // Expandable barcode drilldown — fetched lazily per SKU on first expand.
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [skuBarcodes, setSkuBarcodes] = useState<Record<string, { barcode: string; status: string }[]>>({})
+  const [loadingSku, setLoadingSku] = useState<string | null>(null)
+
+  const toggleExpand = async (sku: string) => {
+    if (expanded === sku) { setExpanded(null); return }
+    setExpanded(sku)
+    if (!skuBarcodes[sku]) {
+      setLoadingSku(sku)
+      const rows = await fetchAllRows<{ barcode: string; status: string }>((from, to) =>
+        supabase.from('packed_units').select('barcode, status').eq('sku', sku).order('seq').range(from, to))
+      setSkuBarcodes(prev => ({ ...prev, [sku]: rows }))
+      setLoadingSku(null)
+    }
+  }
 
   useEffect(() => {
     (async () => {
       setLoading(true)
-      // packed_units can exceed Supabase's 1000-row default cap — page through all rows.
-      const allUnits: PackedUnitRow[] = []
-      const PAGE = 1000
-      for (let from = 0; ; from += PAGE) {
-        const { data, error } = await supabase
-          .from('packed_units')
-          .select('sku, status')
-          .range(from, from + PAGE - 1)
-        if (error) break
-        const batch = (data as PackedUnitRow[]) || []
-        allUnits.push(...batch)
-        if (batch.length < PAGE) break
-      }
+      // packed_units can exceed Supabase's 1000-row cap — page through all rows.
+      const allUnits = await fetchAllRows<PackedUnitRow>((from, to) =>
+        supabase.from('packed_units').select('sku, status').range(from, to))
       const s = await supabase.from('packed_skus').select('sku, descr, product')
       setUnits(allUnits)
       setSkus((s.data as PackedSkuRow[]) || [])
@@ -157,13 +164,15 @@ export default function InventoryTab() {
               </thead>
               <tbody>
                 {filtered.map((r, i) => (
-                  <tr key={r.sku} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
+                  <Fragment key={r.sku}>
+                  <tr onClick={() => toggleExpand(r.sku)} style={{ borderBottom: expanded === r.sku ? 'none' : '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)', cursor: 'pointer' }}>
                     <td style={{ padding: '9px 12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', transform: expanded === r.sku ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
                         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.descr}</span>
                         {r.low && (r.stocked + r.packed) > 0 && <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '1px 5px', borderRadius: 3 }}>LOW</span>}
                       </div>
-                      <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', marginTop: 2 }}>{r.sku}</div>
+                      <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', marginTop: 2, marginLeft: 19 }}>{r.sku}</div>
                     </td>
                     <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: r.stocked > 0 ? 'var(--dispatched)' : 'var(--text3)' }}>{r.stocked}</td>
                     <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--accent)' }}>{r.packed}</td>
@@ -171,6 +180,38 @@ export default function InventoryTab() {
                     <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{r.dispatched}</td>
                     <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{r.rto}</td>
                   </tr>
+                  {expanded === r.sku && (
+                    <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg2)' }}>
+                      <td colSpan={6} style={{ padding: '4px 12px 14px 31px' }}>
+                        {loadingSku === r.sku ? (
+                          <div style={{ fontSize: 12, color: 'var(--text3)', padding: '8px 0' }}>Loading barcodes…</div>
+                        ) : (() => {
+                          const list = skuBarcodes[r.sku] || []
+                          if (!list.length) return <div style={{ fontSize: 12, color: 'var(--text3)', padding: '8px 0' }}>No barcodes.</div>
+                          const groups: Record<string, string[]> = {}
+                          list.forEach(u => { (groups[u.status] ||= []).push(u.barcode) })
+                          const order = ['stocked', 'packed', 'in_dispatch', 'dispatched', 'rto', 'error']
+                          const statusColor: Record<string, string> = { stocked: 'var(--dispatched)', packed: 'var(--accent)', in_dispatch: 'var(--text2)', dispatched: 'var(--text2)', rto: 'var(--today)', error: 'var(--critical)' }
+                          const keys = Object.keys(groups).sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99))
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 10, paddingTop: 6 }}>
+                              {keys.map(st => (
+                                <div key={st}>
+                                  <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.05em', color: statusColor[st] || 'var(--text3)', marginBottom: 4 }}>{st.replace('_', '-')} · {groups[st].length}</div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 5 }}>
+                                    {groups[st].map(bc => (
+                                      <span key={bc} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 7px' }}>{bc}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )
+                        })()}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
               <tfoot>
