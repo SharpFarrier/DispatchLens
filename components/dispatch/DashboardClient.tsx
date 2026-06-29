@@ -555,19 +555,18 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         if (isOwner) setForcePrompt({ scanned, seq, reason })
         return
       }
-      await commitDispatch(scanned, seq, unit.id, false)
+      await commitDispatch(scanned, seq, scanned, false)
       return
     }
 
-    // Stock gate OFF — don't block, but still deduct stock if this piece happens to
-    // be a stocked warehouse unit (soft sync). If it's missing or not stocked, dispatch anyway.
-    const { data: softUnit } = await supabase.from('packed_units').select('id, status').eq('barcode', scanned).maybeSingle()
-    await commitDispatch(scanned, seq, softUnit && softUnit.status === 'stocked' ? softUnit.id : null, false)
+    // Stock gate OFF — don't block, but still deduct stock by flipping the matching
+    // stocked unit directly (mirrors the reconciliation SQL; robust to duplicates).
+    await commitDispatch(scanned, seq, scanned, false)
   }
 
   // Commit the dispatch: guard against double-dispatch, flip the packed_unit to
   // dispatched (unless forced/no unit), log, update local state, advance.
-  const commitDispatch = async (scanned: string, seq: string | null, unitId: string | null, forced: boolean) => {
+  const commitDispatch = async (scanned: string, seq: string | null, deductBarcode: string | null, forced: boolean) => {
     if (!scanOrder) return
     const now = new Date().toISOString()
     const { data: updated, error } = await supabase.from('dispatch_orders').update({
@@ -586,9 +585,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
 
-    // Flip the warehouse unit stocked -> dispatched (skip if forced with no unit).
-    if (unitId) {
-      await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('id', unitId).eq('status', 'stocked')
+    // Flip the warehouse unit stocked -> dispatched by barcode (skip on forced/no barcode).
+    // Direct keyed update — robust to lookup quirks/duplicates, mirrors the reconcile SQL.
+    if (deductBarcode) {
+      await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('barcode', deductBarcode).eq('status', 'stocked')
     }
 
     logEvent(scanOrder.order_id, 'dispatched', `${forced ? 'FORCE-dispatched (not in stock)' : 'Scan-verified dispatch'} · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
