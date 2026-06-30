@@ -720,16 +720,38 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // ── Current open batch for a courier (derived from DB-backed orders) ──
   // Batch = scan-verified, dispatched, NOT-yet-manifested pieces for the courier.
   // Survives reload (rebuilt from orders) and courier-switching (per-courier).
-  const currentBatch = (c: Courier | null) => {
+  // Start of "today" in IST (Asia/Kolkata, UTC+5:30) as an ISO instant, for date scoping.
+  const istTodayStartISO = () => {
+    const now = new Date()
+    // shift to IST, zero the clock, shift back to UTC instant
+    const ist = new Date(now.getTime() + 5.5 * 3600 * 1000)
+    ist.setUTCHours(0, 0, 0, 0)
+    return new Date(ist.getTime() - 5.5 * 3600 * 1000).toISOString()
+  }
+  const openPieces = (c: Courier | null) => {
     if (!c) return []
-    return orders
-      .filter(o => o.courier === c && o.is_dispatched && o.scan_verified && !o.manifested_at && !o.is_cancelled)
+    return orders.filter(o => o.courier === c && o.is_dispatched && o.scan_verified && !o.manifested_at && !o.is_cancelled)
+  }
+  // Today's batch: dispatched today (IST). Older stragglers handled separately.
+  // Compare as Date instants — Supabase returns "...  +00" (space) vs ISO "...T...Z",
+  // which breaks raw string comparison at index 10 (space < 'T').
+  const currentBatch = (c: Courier | null) => {
+    const start = new Date(istTodayStartISO()).getTime()
+    return openPieces(c)
+      .filter(o => o.dispatched_at != null && new Date(o.dispatched_at).getTime() >= start)
       .sort((a, b) => (b.scan_verified_at || '').localeCompare(a.scan_verified_at || ''))
+  }
+  // Older un-manifested pieces: dispatched before today (IST), still open.
+  const olderBatch = (c: Courier | null) => {
+    const start = new Date(istTodayStartISO()).getTime()
+    return openPieces(c)
+      .filter(o => o.dispatched_at != null && new Date(o.dispatched_at).getTime() < start)
+      .sort((a, b) => (a.dispatched_at || '').localeCompare(b.dispatched_at || ''))
   }
 
   // ── Generate + print dispatch manifest, then stamp manifested_at to close the batch ──
-  const generateManifest = async (c: Courier) => {
-    const list = [...currentBatch(c)].sort((a, b) => (a.tracking_number || '').localeCompare(b.tracking_number || ''))
+  const generateManifest = async (c: Courier, pieces?: DBOrder[]) => {
+    const list = [...(pieces ?? currentBatch(c))].sort((a, b) => (a.tracking_number || '').localeCompare(b.tracking_number || ''))
     if (!list.length) return
     const now = new Date()
     const dateStr = now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -3902,6 +3924,36 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       </div>
                     </div>
                   )}
+
+                  {/* Older un-manifested stragglers — dispatched before today, still open */}
+                  {olderBatch(scanCourier).length > 0 && (() => {
+                    const older = olderBatch(scanCourier)
+                    const n = older.length
+                    return (
+                      <div style={{ border: '1px solid var(--today)', background: 'var(--today-bg)', borderRadius: 8, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
+                        <span style={{ fontSize: 13, color: 'var(--today)', fontWeight: 600 }}>
+                          ⚠ {n} older un-manifested {scanCourier} piece{n !== 1 ? 's' : ''} from before today
+                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                          {older.slice(0, 3).map(o => o.tracking_number).join(', ')}{n > 3 ? ` +${n - 3} more` : ''}
+                        </span>
+                        <button
+                          onClick={() => {
+                            if (confirm(`Manifest ${n} older ${scanCourier} piece${n !== 1 ? 's' : ''} from before today? This generates the manifest and closes them out of the batch.`)) {
+                              generateManifest(scanCourier!, older)
+                            }
+                          }}
+                          style={{
+                            marginLeft: 'auto', padding: '8px 16px', borderRadius: 7, border: '1px solid var(--today)',
+                            background: 'var(--surface)', color: 'var(--today)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                          }}
+                        >
+                          Manifest older
+                        </button>
+                      </div>
+                    )
+                  })()}
 
                   {/* Complete dispatch → manifest (this batch only) */}
                   {(() => {
