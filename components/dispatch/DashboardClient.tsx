@@ -57,6 +57,12 @@ function ModalActions({ onCancel, onConfirm, confirmLabel, confirmColor = 'var(-
   )
 }
 
+const pagerBtn = (disabled: boolean) => ({
+  padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)',
+  background: disabled ? 'var(--bg2)' : 'var(--surface)', color: disabled ? 'var(--text3)' : 'var(--text)',
+  fontSize: 12, fontWeight: 600, cursor: disabled ? 'default' : 'pointer',
+} as const)
+
 export default function DashboardClient({ user, access, initialOrders }: Props) {
   const supabase = createClient()
   const [tab, setTab] = useState<Tab>('import')
@@ -112,6 +118,18 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispatchedCourierFilter, setDispatchedCourierFilter] = useState<Set<string>>(new Set())
   const [showDispatchedCourierPopover, setShowDispatchedCourierPopover] = useState(false)
   const [dispatchedCourierPopoverPos, setDispatchedCourierPopoverPos] = useState({ top: 0, left: 0 })
+  // ── Scalable Dispatched view: load only a date window from the DB, paged 100/row ──
+  // Default last 7 days; switch to 30d / this month / custom. Keeps the tab light at any history size.
+  const [dispWindow, setDispWindow] = useState<'7d' | '30d' | 'month' | 'custom'>('7d')
+  const [dispCustomFrom, setDispCustomFrom] = useState('')
+  const [dispCustomTo, setDispCustomTo] = useState('')
+  const [dispWindowOrders, setDispWindowOrders] = useState<DBOrder[]>([])
+  const [dispWindowLoading, setDispWindowLoading] = useState(false)
+  const [dispPage, setDispPage] = useState(0)
+  const DISP_PAGE_SIZE = 100
+  const [dispExporting, setDispExporting] = useState(false)
+  // Tracking source — decoupled from the view window: everything not delivered/RTO, any age.
+  const [trackOrders, setTrackOrders] = useState<DBOrder[]>([])
   // Tracking
   const [trackingData, setTrackingData] = useState<Record<string, { status: string; label: string; lastUpdate: string }>>({})
   const [trackingLoading, setTrackingLoading] = useState(false)
@@ -812,7 +830,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const syncTracking = async () => {
     // Skip orders already delivered (status never changes after delivery)
-    const toTrack = dispatchedOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered' && o.tracking_status !== 'rto')
+    const toTrack = trackOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered' && o.tracking_status !== 'rto')
     if (!toTrack.length) { setTrackingLastSync(new Date()); return }
     setTrackingLoading(true)
     setTrackingProgress({ done: 0, total: toTrack.length })
@@ -910,7 +928,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const updates = Object.entries(results)
     if (updates.length) {
       await Promise.all(updates.map(async ([awb, t]) => {
-        const order = dispatchedOrders.find(o => o.tracking_number === awb)
+        const order = trackOrders.find(o => o.tracking_number === awb)
         if (!order) return
         await supabase.from('dispatch_orders').update({
           tracking_status: t.status,
@@ -1158,16 +1176,66 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }, [activeOrders, activeFilter, courierFilter, daysFilter, today])
   const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
 
+  // ── Resolve the active date window into [fromISO, toISO] (null = no bound) ──
+  const dispWindowRange = useMemo<{ from: string | null; to: string | null }>(() => {
+    const now = new Date()
+    const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
+    if (dispWindow === '7d') { const f = startOfDay(new Date(now.getTime() - 6 * 86400000)); return { from: f.toISOString(), to: null } }
+    if (dispWindow === '30d') { const f = startOfDay(new Date(now.getTime() - 29 * 86400000)); return { from: f.toISOString(), to: null } }
+    if (dispWindow === 'month') { const f = new Date(now.getFullYear(), now.getMonth(), 1); return { from: f.toISOString(), to: null } }
+    // custom
+    return {
+      from: dispCustomFrom ? new Date(dispCustomFrom + 'T00:00:00').toISOString() : null,
+      to: dispCustomTo ? new Date(dispCustomTo + 'T23:59:59').toISOString() : null,
+    }
+  }, [dispWindow, dispCustomFrom, dispCustomTo])
+
+  // Build the windowed dispatch query (shared by the view fetch + the export).
+  const buildDispWindowQuery = useCallback((from: number, to: number) => {
+    let q = supabase.from('dispatch_orders').select('*')
+      .eq('is_dispatched', true).eq('is_cancelled', false)
+      .order('dispatched_at', { ascending: false })
+    if (dispWindowRange.from) q = q.gte('dispatched_at', dispWindowRange.from)
+    if (dispWindowRange.to) q = q.lte('dispatched_at', dispWindowRange.to)
+    return q.range(from, to)
+  }, [supabase, dispWindowRange])
+
+  // Load the window (custom needs both dates before it fetches).
+  const loadDispWindow = useCallback(async () => {
+    if (dispWindow === 'custom' && (!dispCustomFrom || !dispCustomTo)) { setDispWindowOrders([]); return }
+    setDispWindowLoading(true)
+    setDispPage(0)
+    const rows = await fetchAllRows<DBOrder>((from, to) => buildDispWindowQuery(from, to))
+    setDispWindowOrders(rows)
+    setDispWindowLoading(false)
+  }, [dispWindow, dispCustomFrom, dispCustomTo, buildDispWindowQuery])
+
+  // Refetch whenever the window changes (and once when the dispatched tab is first opened).
+  useEffect(() => {
+    if (tab === 'dispatched') { loadDispWindow(); loadTrackOrders() }
+  }, [tab, loadDispWindow, loadTrackOrders])
+
+  // Tracking source — independent of the view window: not delivered/RTO, any age.
+  const loadTrackOrders = useCallback(async () => {
+    const rows = await fetchAllRows<DBOrder>((from, to) =>
+      supabase.from('dispatch_orders').select('*')
+        .eq('is_dispatched', true).eq('is_cancelled', false)
+        .not('tracking_status', 'in', '("delivered","rto")')
+        .not('tracking_number', 'is', null)
+        .order('dispatched_at', { ascending: false }).range(from, to))
+    setTrackOrders(rows)
+  }, [supabase])
+
   const uniqueDispatchedDates = useMemo(() => {
     const dates = new Set<string>()
-    dispatchedOrders.forEach(o => {
+    dispWindowOrders.forEach(o => {
       if (o.dispatched_at) dates.add(o.dispatched_at.slice(0, 10))
     })
     return Array.from(dates).sort().reverse() // newest first
-  }, [dispatchedOrders])
+  }, [dispWindowOrders])
 
   const filteredDispatched = useMemo(() => {
-    let list = [...dispatchedOrders]
+    let list = [...dispWindowOrders]
     if (dispatchedSearch.trim().length >= 2) {
       const q = dispatchedSearch.toLowerCase()
       list = list.filter(o =>
@@ -1201,8 +1269,51 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [dispatchedOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, trackingData])
+  }, [dispWindowOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, trackingData])
+  // Reset to first page whenever the filtered set changes (search/filters/window).
+  useEffect(() => { setDispPage(0) }, [dispatchedSearch, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, dispWindowOrders])
+
   const unfulfillableOrders = useMemo(() => activeOrders.filter(o => o.plan_decision === 'unfulfillable'), [activeOrders])
+
+  // Page the filtered window at 100/page.
+  const dispPageCount = Math.max(1, Math.ceil(filteredDispatched.length / DISP_PAGE_SIZE))
+  const dispPageSafe = Math.min(dispPage, dispPageCount - 1)
+  const pagedDispatched = useMemo(
+    () => filteredDispatched.slice(dispPageSafe * DISP_PAGE_SIZE, (dispPageSafe + 1) * DISP_PAGE_SIZE),
+    [filteredDispatched, dispPageSafe])
+
+  // Export the ENTIRE current filtered window to CSV (not just the visible page).
+  const exportDispatchedCSV = useCallback(() => {
+    setDispExporting(true)
+    try {
+      const cols: { key: string; label: string }[] = [
+        { key: 'dispatched_at', label: 'Dispatched At' },
+        { key: 'order_id', label: 'Order ID' },
+        { key: 'platform_order_id', label: 'Platform Order ID' },
+        { key: 'customer_name', label: 'Customer' },
+        { key: 'sku', label: 'SKU' },
+        { key: 'scanned_barcode', label: 'Dispatched Barcode' },
+        { key: 'courier', label: 'Courier' },
+        { key: 'tracking_number', label: 'AWB' },
+        { key: 'tracking_status', label: 'Tracking Status' },
+        { key: 'pincode', label: 'Pincode' },
+        { key: 'city', label: 'City' },
+        { key: 'promise_date', label: 'Promise Date' },
+      ]
+      const esc = (v: unknown) => {
+        const s = v == null ? '' : String(v)
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+      }
+      const rows = filteredDispatched.map(o => cols.map(c => esc((o as unknown as Record<string, unknown>)[c.key])).join(','))
+      const csv = [cols.map(c => c.label).join(','), ...rows].join('\n')
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      const stamp = new Date().toISOString().slice(0, 10)
+      a.href = url; a.download = `dispatched-${dispWindow}-${stamp}.csv`
+      a.click(); URL.revokeObjectURL(url)
+    } finally { setDispExporting(false) }
+  }, [filteredDispatched, dispWindow])
 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
   const dispatchTodayCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
@@ -3038,9 +3149,31 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ DISPATCHED ════ */}
         {tab === 'dispatched' && effectiveAccess.can_dispatched && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' as const }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Dispatched Orders</h1>
-              <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filteredDispatched.length} of {dispatchedOrders.length}</span>
+              <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filteredDispatched.length} in window</span>
+              {/* Window switcher */}
+              <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+                {([['7d', '7 days'], ['30d', '30 days'], ['month', 'This month'], ['custom', 'Custom']] as [typeof dispWindow, string][]).map(([key, label]) => (
+                  <button key={key} onClick={() => setDispWindow(key)} style={{
+                    padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                    background: dispWindow === key ? 'var(--accent)' : 'transparent', color: dispWindow === key ? '#fff' : 'var(--text2)',
+                  }}>{label}</button>
+                ))}
+              </div>
+              {dispWindow === 'custom' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="date" value={dispCustomFrom} onChange={e => setDispCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+                  <span style={{ color: 'var(--text3)', fontSize: 12 }}>→</span>
+                  <input type="date" value={dispCustomTo} onChange={e => setDispCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+                  <button onClick={loadDispWindow} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Load</button>
+                </div>
+              )}
+              {/* Export the full filtered window */}
+              <button onClick={exportDispatchedCSV} disabled={dispExporting || filteredDispatched.length === 0} style={{
+                padding: '6px 13px', borderRadius: 7, border: '1px solid var(--border)', cursor: filteredDispatched.length === 0 ? 'default' : 'pointer',
+                background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
+              }}><Download size={13} /> Export CSV ({filteredDispatched.length})</button>
               {/* Sync tracking */}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
                 {trackingLastSync && (
@@ -3092,7 +3225,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       ] as { label: string; col: string | null }[]).map(({ label, col }) => {
                         if (label === 'COURIER_FILTER_SPECIAL') {
                           const COURIER_OPTS = ['Bluedart', 'Delhivery']
-                          const courierCount = (c: string) => dispatchedOrders.filter(o => o.courier === c).length
+                          const courierCount = (c: string) => dispWindowOrders.filter(o => o.courier === c).length
                           return (
                             <th key="courier" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -3153,7 +3286,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             { key: 'unknown', label: 'Unknown' },
                             { key: 'none', label: 'Not Synced' },
                           ]
-                          const statusCount = (key: string) => dispatchedOrders.filter(o => {
+                          const statusCount = (key: string) => dispWindowOrders.filter(o => {
                             const ls = (o.tracking_number && trackingData[o.tracking_number]?.status) || o.tracking_status || 'none'
                             return ls === key
                           }).length
@@ -3259,7 +3392,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   {uniqueDispatchedDates.map(date => {
                                     const isSelected = dispatchedDateFilter.has(date)
                                     const label = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
-                                    const count = dispatchedOrders.filter(o => o.dispatched_at?.startsWith(date)).length
+                                    const count = dispWindowOrders.filter(o => o.dispatched_at?.startsWith(date)).length
                                     return (
                                       <button key={date} onClick={() => setDispatchedDateFilter(prev => { const n = new Set(prev); n.has(date) ? n.delete(date) : n.add(date); return n })}
                                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
@@ -3301,13 +3434,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredDispatched.length === 0 ? (
-                      <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders yet</td></tr>
-                    ) : filteredDispatched.map((order, i) => {
+                    {dispWindowLoading ? (
+                      <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading window…</td></tr>
+                    ) : filteredDispatched.length === 0 ? (
+                      <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders in this window</td></tr>
+                    ) : pagedDispatched.map((order, i) => {
                       const cc = order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
                       const dispDate = order.dispatched_at ? new Date(order.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
                       return (
-                        <tr key={order.id} style={{ borderBottom: i < filteredDispatched.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
+                        <tr key={order.id} style={{ borderBottom: i < pagedDispatched.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', whiteSpace: 'nowrap' as const }}>{dispDate}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
                           <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}</td>
@@ -3396,6 +3531,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   </tbody>
                 </table>
               </div>
+              {/* Pager — 100 per page */}
+              {!dispWindowLoading && filteredDispatched.length > DISP_PAGE_SIZE && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                    {dispPageSafe * DISP_PAGE_SIZE + 1}–{Math.min((dispPageSafe + 1) * DISP_PAGE_SIZE, filteredDispatched.length)} of {filteredDispatched.length}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button onClick={() => setDispPage(p => Math.max(0, p - 1))} disabled={dispPageSafe === 0} style={pagerBtn(dispPageSafe === 0)}>← Prev</button>
+                    <span style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono' }}>Page {dispPageSafe + 1} / {dispPageCount}</span>
+                    <button onClick={() => setDispPage(p => Math.min(dispPageCount - 1, p + 1))} disabled={dispPageSafe >= dispPageCount - 1} style={pagerBtn(dispPageSafe >= dispPageCount - 1)}>Next →</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
