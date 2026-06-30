@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { createClient as adminClient } from '@supabase/supabase-js'
 import DashboardClient from '@/components/dispatch/DashboardClient'
+import type { DBOrder } from '@/types'
 import AccessGate from '@/components/dispatch/AccessGate'
 
 const admin = adminClient(
@@ -40,7 +41,7 @@ export default async function Home() {
 
   // Load ALL active orders across all sessions — no date boundary.
   // Page past Supabase's 1000-row cap so initialOrders is complete (master DB).
-  const orders: Record<string, unknown>[] = []
+  const orders: DBOrder[] = []
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('dispatch_orders')
@@ -48,7 +49,7 @@ export default async function Home() {
       .order('created_at', { ascending: false })
       .range(from, from + 999)
     if (error) break
-    const batch = data || []
+    const batch = (data as DBOrder[]) || []
     orders.push(...batch)
     if (batch.length < 1000) break
   }
