@@ -956,6 +956,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setTrackingLastSync(new Date())
     setTrackingLoading(false)
     setTrackingProgress(null)
+    // The Dispatched table renders from dispWindowOrders (a separate fetch), so re-pull it
+    // now that statuses are written — otherwise the visible Status column stays stale.
+    if (tab === 'dispatched') { loadDispWindow(); loadTrackOrders() }
   }
 
   // ── Unfulfillable by SKU (partial or full) ──
