@@ -1,7 +1,18 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { DBOrder } from '@/types'
-import { X, Clock, Send, Package, Calendar, Ban, AlertTriangle, CheckCircle, Upload, RotateCcw, MessageSquare } from 'lucide-react'
+import { X, Clock, Send, Package, Calendar, Ban, AlertTriangle, CheckCircle, Upload, RotateCcw, MessageSquare, Truck } from 'lucide-react'
+
+const RETURN_REASONS = [
+  'In-transit Damage',
+  'Manufacturing Defect',
+  'Customer not Satisfied with Quality',
+  'A-Z Claim Received',
+  'Customer Refused Delivery',
+  'Delay in Delivery',
+  'Other',
+] as const
 
 interface OrderEvent {
   id: string
@@ -17,6 +28,9 @@ interface Props {
   order: DBOrder
   currentUserEmail: string
   onClose: () => void
+  // Optional: when provided, enables the "Mark as Return" action and notifies the parent
+  // so the Returns tab can refresh. Omit to render the panel read-only (e.g. from Plan/search).
+  onReturnCreated?: () => void
 }
 
 const EVENT_ICONS: Record<string, React.ReactNode> = {
@@ -29,6 +43,8 @@ const EVENT_ICONS: Record<string, React.ReactNode> = {
   dispatched:    <CheckCircle size={13} />,
   target_set:    <Calendar size={13} />,
   note:          <MessageSquare size={13} />,
+  tracking:      <Truck size={13} />,
+  return:        <RotateCcw size={13} />,
 }
 
 const EVENT_COLORS: Record<string, { dot: string; bg: string; text: string }> = {
@@ -41,6 +57,8 @@ const EVENT_COLORS: Record<string, { dot: string; bg: string; text: string }> = 
   dispatched:    { dot: 'var(--dispatched)', bg: 'var(--dispatched-bg)', text: 'var(--dispatched)' },
   target_set:    { dot: 'var(--accent)', bg: 'transparent', text: 'var(--text2)' },
   note:          { dot: 'var(--accent)', bg: 'var(--surface)', text: 'var(--text)' },
+  tracking:      { dot: 'var(--hold)', bg: 'transparent', text: 'var(--text2)' },
+  return:        { dot: 'var(--today)', bg: 'transparent', text: 'var(--today)' },
 }
 
 function formatTime(iso: string) {
@@ -53,15 +71,29 @@ function initials(email: string | null) {
   return email.split('@')[0].slice(0, 2).toUpperCase()
 }
 
-export default function OrderHistoryPanel({ order, currentUserEmail, onClose }: Props) {
+export default function OrderHistoryPanel({ order, currentUserEmail, onClose, onReturnCreated }: Props) {
+  const supabase = createClient()
   const [events, setEvents] = useState<OrderEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [noteText, setNoteText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  // ── Return creation state ──
+  const [alreadyReturn, setAlreadyReturn] = useState<boolean | null>(null)
+  const [showReturnForm, setShowReturnForm] = useState(false)
+  const [returnReason, setReturnReason] = useState<string>(RETURN_REASONS[0])
+  const [returnNote, setReturnNote] = useState('')
+  const [creatingReturn, setCreatingReturn] = useState(false)
+
   useEffect(() => {
     fetchEvents()
+    // Check if this order is already in returns (so we don't offer to add twice).
+    if (onReturnCreated) {
+      supabase.from('returns').select('id').eq('order_id', order.order_id).maybeSingle()
+        .then(({ data }) => setAlreadyReturn(!!data))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order.id])
 
   const fetchEvents = async () => {
@@ -93,11 +125,51 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose }: 
     setSubmitting(false)
   }
 
+  // ── Create a return for this order + log a 'return' event to the timeline ──
+  const createReturn = async () => {
+    if (creatingReturn) return
+    setCreatingReturn(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('returns').upsert({
+      order_id: order.order_id,
+      source: 'manual',
+      reason: returnReason,
+      barcode: order.scanned_barcode || null,
+      notes: returnNote.trim() || null,
+      created_by: user?.id ?? null,
+      created_by_email: user?.email ?? null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'order_id' })
+    if (!error) {
+      // Log to the order timeline so the return shows in history.
+      await fetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: order.order_id,
+          event_type: 'return',
+          title: `Marked as return · ${returnReason}`,
+          note: returnNote.trim() || null,
+        }),
+      })
+      setAlreadyReturn(true)
+      setShowReturnForm(false)
+      setReturnNote('')
+      fetchEvents()
+      onReturnCreated?.()
+    }
+    setCreatingReturn(false)
+  }
+
   const urgencyColors: Record<string, string> = {
     CRITICAL: 'var(--critical)', TODAY: 'var(--today)',
     PLAN: 'var(--plan)', HOLD: 'var(--hold)',
   }
   const uc = urgencyColors[order.urgency || ''] || 'var(--text3)'
+
+  // Show the Mark-as-Return control only when the parent enabled it, the order is
+  // dispatched, and it isn't already tracked as a return.
+  const canMarkReturn = !!onReturnCreated && order.is_dispatched && alreadyReturn === false
 
   return (
     <>
@@ -134,7 +206,7 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose }: 
           display: 'flex', alignItems: 'flex-start', gap: 12,
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
               <span style={{
                 fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600,
                 color: uc, background: order.urgency ? `${uc}18` : 'var(--bg2)',
@@ -148,6 +220,9 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose }: 
               }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
               {order.is_dispatched && (
                 <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 7px', borderRadius: 4 }}>DISPATCHED</span>
+              )}
+              {alreadyReturn && (
+                <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--today)', background: 'var(--today-bg)', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: 4 }}>RETURN</span>
               )}
             </div>
             <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 2 }}>{order.customer_name}</div>
@@ -166,6 +241,35 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose }: 
                 </div>
               ))}
             </div>
+
+            {/* Mark as Return */}
+            {canMarkReturn && !showReturnForm && (
+              <button onClick={() => setShowReturnForm(true)}
+                style={{ marginTop: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #fed7aa', background: 'var(--today-bg)', color: 'var(--today)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <RotateCcw size={12} /> Mark as Return
+              </button>
+            )}
+            {showReturnForm && (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid #fed7aa', background: 'var(--today-bg)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--today)' }}>NEW RETURN</span>
+                <select value={returnReason} onChange={e => setReturnReason(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
+                  {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <textarea value={returnNote} onChange={e => setReturnNote(e.target.value)} placeholder="Optional note…" rows={2}
+                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Sans', resize: 'none', outline: 'none' }} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={createReturn} disabled={creatingReturn}
+                    style={{ flex: 1, padding: '7px 12px', borderRadius: 6, border: 'none', background: 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    {creatingReturn ? 'Adding…' : 'Confirm Return'}
+                  </button>
+                  <button onClick={() => setShowReturnForm(false)}
+                    style={{ padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, cursor: 'pointer' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 4, flexShrink: 0 }}>
             <X size={16} />

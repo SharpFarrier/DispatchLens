@@ -6,6 +6,7 @@ import { parseOrders } from '@/lib/parser'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
+import ReturnsTab from './ReturnsTab'
 import CargoTokenPanel from './CargoTokenPanel'
 import WarehouseSection from './WarehouseSection'
 import OrderHistoryPanel from './OrderHistoryPanel'
@@ -18,7 +19,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'skumap' | 'warehouse' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'returns' | 'skumap' | 'warehouse' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -69,6 +70,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [orders, setOrders] = useState<DBOrder[]>(initialOrders)
   const [loadingOrders, setLoadingOrders] = useState(false)
   const [skuMaps, setSkuMaps] = useState<SkuMap[]>([])
+  // Bumped after a return is created in the history overlay, so the Returns tab reloads.
+  const [returnsReload, setReturnsReload] = useState(0)
 
   // Scan-out verification (EOD)
   const [scanAwb, setScanAwb] = useState('')
@@ -83,7 +86,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_users: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true }
+    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_returns: true, can_users: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true }
     : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
@@ -936,6 +939,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           tracking_last_update: t.lastUpdate,
           tracking_synced_at: syncedAt,
         }).eq('id', order.id)
+        // Log a timeline event only when the status genuinely changed (avoids spam on every sync).
+        if (order.tracking_status !== t.status) {
+          logEvent(order.order_id, 'tracking', t.label, `${order.courier} · ${t.lastUpdate || 'updated'}`)
+        }
       }))
       setOrders(prev => prev.map(o => {
         const t = o.tracking_number ? results[o.tracking_number] : undefined
@@ -1944,6 +1951,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'review', label: reviewCount > 0 ? `Review (${reviewCount})` : 'Review', show: effectiveAccess.can_review },
             { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: effectiveAccess.can_picklist },
             { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: effectiveAccess.can_dispatched },
+            { key: 'returns', label: 'Returns', show: effectiveAccess.can_returns },
             { key: 'eod', label: 'End of Day', show: effectiveAccess.can_eod },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
@@ -3220,6 +3228,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         { label: 'AWB', col: 'tracking_number' },
                         { label: 'Pincode · City', col: 'pincode' },
                         { label: 'Promise', col: 'promise_date' },
+                        { label: 'Delivery', col: null },
                         { label: 'STATUS_FILTER_SPECIAL', col: null },
                         { label: '', col: null },
                       ] as { label: string; col: string | null }[]).map(({ label, col }) => {
@@ -3435,9 +3444,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   </thead>
                   <tbody>
                     {dispWindowLoading ? (
-                      <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading window…</td></tr>
+                      <tr><td colSpan={11} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading window…</td></tr>
                     ) : filteredDispatched.length === 0 ? (
-                      <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders in this window</td></tr>
+                      <tr><td colSpan={11} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders in this window</td></tr>
                     ) : pagedDispatched.map((order, i) => {
                       const cc = order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
                       const dispDate = order.dispatched_at ? new Date(order.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
@@ -3483,6 +3492,24 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           </td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}{order.city ? ` · ${order.city}` : ''}</td>
                           <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
+                          <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>{(() => {
+                            const liveStatus = (order.tracking_number && trackingData[order.tracking_number]?.status) || order.tracking_status || null
+                            if (!order.promise_date) return <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>
+                            const promise = new Date(order.promise_date + 'T00:00:00').getTime()
+                            if (liveStatus === 'delivered') {
+                              const delivered = order.tracking_last_update ? new Date(order.tracking_last_update).getTime() : null
+                              if (!delivered) return <span style={{ fontSize: 11, color: 'var(--dispatched)' }}>Delivered</span>
+                              const lateDays = Math.round((delivered - promise) / 86400000)
+                              return lateDays <= 0
+                                ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--dispatched)' }}>On time</span>
+                                : <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--today)' }}>{lateDays}d late</span>
+                            }
+                            if (liveStatus === 'rto') return <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--critical)' }}>RTO</span>
+                            const daysLeft = Math.round((promise - new Date(today + 'T00:00:00').getTime()) / 86400000)
+                            return daysLeft < 0
+                              ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--critical)' }}>{Math.abs(daysLeft)}d over</span>
+                              : <span style={{ fontSize: 11, fontWeight: 600, color: daysLeft <= 1 ? 'var(--today)' : 'var(--text2)' }}>{daysLeft}d left</span>
+                          })()}</td>
                           <td style={{ padding: '9px 12px' }}>
                             {order.tracking_number && (trackingData[order.tracking_number] || order.tracking_status) ? (() => {
                               const t = trackingData[order.tracking_number] || { status: order.tracking_status!, label: order.tracking_label || order.tracking_status!, lastUpdate: order.tracking_last_update || '' }
@@ -3921,6 +3948,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           </div>
         )}
 
+        {/* ════ RETURNS ════ */}
+        {tab === 'returns' && effectiveAccess.can_returns && (
+          <ReturnsTab
+            canSeeAmount={effectiveAccess.can_users}
+            onOpenOrder={order => setHistoryOrder(order)}
+            reloadSignal={returnsReload}
+          />
+        )}
+
         {/* ════ SKU MAP ════ */}
         {tab === 'skumap' && effectiveAccess.can_users && (
           <SkuMapTab />
@@ -3943,6 +3979,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           order={historyOrder}
           currentUserEmail={user.email || ''}
           onClose={() => setHistoryOrder(null)}
+          onReturnCreated={() => setReturnsReload(n => n + 1)}
         />
       )}
     </div>

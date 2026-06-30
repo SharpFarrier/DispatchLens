@@ -10,6 +10,7 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
   { key: 'can_picklist', label: 'Picklist', desc: 'View picklist, mark SKU unfulfillable' },
   { key: 'can_eod',      label: 'EOD',      desc: 'Upload Shypassist, confirm dispatch' },
   { key: 'can_dispatched', label: 'Dispatched', desc: 'View dispatched orders, sync tracking' },
+  { key: 'can_returns',  label: 'Returns',  desc: 'Returns tracker & refunds' },
   { key: 'can_users',    label: 'Users',    desc: 'Manage user access (admin only)' },
 ]
 
@@ -156,7 +157,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
             <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
               <div>
                 <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>DISPATCH</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 8 }}>
                   {DISPATCH_TOGGLES.map(renderToggle)}
                 </div>
               </div>

@@ -50,8 +50,15 @@ export default function RtoTab() {
       }).eq('id', unit.id)
       if (upErr) throw upErr
 
+      // Bridge to the commercial Returns tracker: if a return row exists for this
+      // barcode, mark the physical parcel received so the refund loop can close.
+      const { data: matchedReturns } = await supabase.from('returns')
+        .update({ warehouse_received: true, warehouse_received_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('barcode', barcode).eq('warehouse_received', false).select('id')
+      const linkedReturn = !!(matchedReturns && matchedReturns.length)
+
       setScanned(prev => [{ barcode, prevStatus: unit.status, unitId: unit.id }, ...prev])
-      flash('success', `RTO marked: ${barcode}${unit.status !== 'dispatched' ? ` (was ${unit.status})` : ''}`)
+      flash('success', `RTO marked: ${barcode}${unit.status !== 'dispatched' ? ` (was ${unit.status})` : ''}${linkedReturn ? ' · return received' : ''}`)
     } catch (e) {
       flash('error', 'Error: ' + (e as Error).message)
     } finally {
@@ -74,6 +81,10 @@ export default function RtoTab() {
         status: item.prevStatus, rto_at: null,
       }).eq('id', item.unitId).eq('status', 'rto')
       if (error) throw error
+      // Reverse the Returns bridge too, so warehouse_received doesn't stay stuck on.
+      await supabase.from('returns')
+        .update({ warehouse_received: false, warehouse_received_at: null, updated_at: new Date().toISOString() })
+        .eq('barcode', item.barcode).eq('warehouse_received', true)
       setScanned(prev => prev.filter(s => s.unitId !== item.unitId))
       flash('warn', `Undone: ${item.barcode} back to ${item.prevStatus}`)
     } catch (e) {
