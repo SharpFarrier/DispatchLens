@@ -951,14 +951,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         const t = key ? results[key] : undefined
         return t ? { ...o, tracking_status: t.status, tracking_label: t.label, tracking_last_update: t.lastUpdate, tracking_synced_at: syncedAt } : o
       }))
+      // The Dispatched table renders from dispWindowOrders (and tracking from trackOrders),
+      // not from `orders`. Patch those same arrays directly so the Status column updates now.
+      const patch = (list: DBOrder[]) => list.map(o => {
+        const key = o.tracking_number ? Object.keys(results).find(k => normAwb(k) === normAwb(o.tracking_number)) : undefined
+        const t = key ? results[key] : undefined
+        return t ? { ...o, tracking_status: t.status, tracking_label: t.label, tracking_last_update: t.lastUpdate, tracking_synced_at: syncedAt } : o
+      })
+      setDispWindowOrders(prev => patch(prev))
+      setTrackOrders(prev => patch(prev))
     }
     setTrackingData(results)
     setTrackingLastSync(new Date())
     setTrackingLoading(false)
     setTrackingProgress(null)
-    // The Dispatched table renders from dispWindowOrders (a separate fetch), so re-pull it
-    // now that statuses are written — otherwise the visible Status column stays stale.
-    if (tab === 'dispatched') { loadDispWindow(); loadTrackOrders() }
   }
 
   // ── Unfulfillable by SKU (partial or full) ──
