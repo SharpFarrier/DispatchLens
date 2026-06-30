@@ -930,8 +930,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const syncedAt = new Date().toISOString()
     const updates = Object.entries(results)
     if (updates.length) {
+      const normAwb = (v: string | null | undefined) => (v || '').trim().replace(/\.0+$/, '')
       await Promise.all(updates.map(async ([awb, t]) => {
-        const order = trackOrders.find(o => o.tracking_number === awb)
+        const order = trackOrders.find(o => normAwb(o.tracking_number) === normAwb(awb))
         if (!order) return
         await supabase.from('dispatch_orders').update({
           tracking_status: t.status,
@@ -945,7 +946,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }
       }))
       setOrders(prev => prev.map(o => {
-        const t = o.tracking_number ? results[o.tracking_number] : undefined
+        // Match the normalized key so rows whose stored AWB has a trailing .0/space still update.
+        const key = o.tracking_number ? Object.keys(results).find(k => normAwb(k) === normAwb(o.tracking_number)) : undefined
+        const t = key ? results[key] : undefined
         return t ? { ...o, tracking_status: t.status, tracking_label: t.label, tracking_last_update: t.lastUpdate, tracking_synced_at: syncedAt } : o
       }))
     }
