@@ -1234,7 +1234,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const rows = await fetchAllRows<DBOrder>((from, to) =>
       supabase.from('dispatch_orders').select('*')
         .eq('is_dispatched', true).eq('is_cancelled', false)
-        .not('tracking_status', 'in', '("delivered","rto")')
+        .or('tracking_status.is.null,tracking_status.not.in.("delivered","rto")')
         .not('tracking_number', 'is', null)
         .order('dispatched_at', { ascending: false }).range(from, to))
     setTrackOrders(rows)
