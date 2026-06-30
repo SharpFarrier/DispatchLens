@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag } from 'lucide-react'
+import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag, Activity } from 'lucide-react'
 import InventoryTab from './InventoryTab'
 import UnitsTab from './UnitsTab'
 import ScanToStockTab from './ScanToStockTab'
@@ -11,11 +11,12 @@ import CoatingTab from './CoatingTab'
 import PicksTab from './PicksTab'
 import InventoryProdTab from './InventoryProdTab'
 import BarcodesTab from './BarcodesTab'
+import LifecycleTab from './LifecycleTab'
 
 import { UserAccess } from '@/types'
 
 type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'
-type PackingTab = 'generate' | 'scan' | 'inventory' | 'rto' | 'units'
+type PackingTab = 'generate' | 'scan' | 'inventory' | 'lifecycle' | 'rto' | 'units'
 
 const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof UserAccess | 'packing' }[] = [
   { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} />, perm: 'can_wh_stock' },
@@ -30,6 +31,7 @@ const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; per
   { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} />, perm: 'can_wh_pack_generate' },
   { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} />, perm: 'can_wh_pack_scan' },
   { key: 'inventory', label: 'Inventory',     icon: <Package size={14} />, perm: 'can_wh_pack_inventory' },
+  { key: 'lifecycle', label: 'Lifecycle',     icon: <Activity size={14} />, perm: 'can_wh_pack_units' },
   { key: 'rto',       label: 'RTO',           icon: <RotateCcw size={14} />, perm: 'can_wh_pack_rto' },
   { key: 'units',     label: 'Units',         icon: <FileSearch size={14} />, perm: 'can_wh_pack_units' },
 ]
@@ -88,6 +90,7 @@ export default function WarehouseSection({ userId, access }: { userId: string; a
           {packingTab === 'generate' && <GenerateTab userId={userId} />}
           {packingTab === 'scan' && <ScanToStockTab />}
           {packingTab === 'inventory' && <InventoryTab />}
+          {packingTab === 'lifecycle' && <LifecycleTab userId={userId} />}
           {packingTab === 'rto' && <RtoTab />}
           {packingTab === 'units' && <UnitsTab />}
         </div>
