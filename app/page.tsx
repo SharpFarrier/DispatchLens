@@ -38,17 +38,26 @@ export default async function Home() {
     return <AccessGate status={access?.status || 'pending'} email={email} user={user} />
   }
 
-  // Load ALL active orders across all sessions — no date boundary
-  const { data: orders } = await supabase
-    .from('dispatch_orders')
-    .select('*')
-    .order('created_at', { ascending: false })
+  // Load ALL active orders across all sessions — no date boundary.
+  // Page past Supabase's 1000-row cap so initialOrders is complete (master DB).
+  const orders: Record<string, unknown>[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('dispatch_orders')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(from, from + 999)
+    if (error) break
+    const batch = data || []
+    orders.push(...batch)
+    if (batch.length < 1000) break
+  }
 
   return (
     <DashboardClient
       user={user}
       access={access}
-      initialOrders={orders || []}
+      initialOrders={orders}
     />
   )
 }

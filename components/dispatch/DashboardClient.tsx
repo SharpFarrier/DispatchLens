@@ -1,6 +1,7 @@
 'use client'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
@@ -193,8 +194,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const loadOrders = useCallback(async () => {
     setLoadingOrders(true)
-    const { data } = await supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false })
-    setOrders((data as DBOrder[]) || [])
+    const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).range(from, to))
+    setOrders(data)
     setLoadingOrders(false)
     setSelectedIds(new Set())
   }, [supabase])
@@ -202,8 +203,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Silent refresh — re-pull orders without a loading flash or clearing selections.
   // Used to keep the End-of-Day batch/courier counts live while another device dispatches.
   const silentRefreshOrders = useCallback(async () => {
-    const { data } = await supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false })
-    if (data) setOrders(data as DBOrder[])
+    const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).range(from, to))
+    if (data.length) setOrders(data)
   }, [supabase])
 
   // Auto-load on mount if initialOrders is empty
