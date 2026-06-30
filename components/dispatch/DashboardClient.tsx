@@ -1210,11 +1210,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setDispWindowLoading(false)
   }, [dispWindow, dispCustomFrom, dispCustomTo, buildDispWindowQuery])
 
-  // Refetch whenever the window changes (and once when the dispatched tab is first opened).
-  useEffect(() => {
-    if (tab === 'dispatched') { loadDispWindow(); loadTrackOrders() }
-  }, [tab, loadDispWindow, loadTrackOrders])
-
   // Tracking source — independent of the view window: not delivered/RTO, any age.
   const loadTrackOrders = useCallback(async () => {
     const rows = await fetchAllRows<DBOrder>((from, to) =>
@@ -1225,6 +1220,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         .order('dispatched_at', { ascending: false }).range(from, to))
     setTrackOrders(rows)
   }, [supabase])
+
+  // Refetch whenever the window changes (and once when the dispatched tab is first opened).
+  useEffect(() => {
+    if (tab === 'dispatched') { loadDispWindow(); loadTrackOrders() }
+  }, [tab, loadDispWindow, loadTrackOrders])
 
   const uniqueDispatchedDates = useMemo(() => {
     const dates = new Set<string>()
