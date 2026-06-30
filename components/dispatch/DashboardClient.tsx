@@ -84,6 +84,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [stockGateSaving, setStockGateSaving] = useState(false)
   // When a scanned piece isn't in stock, owner can force-dispatch from this prompt.
   const [forcePrompt, setForcePrompt] = useState<{ scanned: string; seq: string | null; reason: string } | null>(null)
+  // Gate-ON: piece is real but not in stock — offer move-to-stock or force (any scanning user).
+  const [stockPrompt, setStockPrompt] = useState<{ scanned: string; seq: string | null; reason: string } | null>(null)
+  // Visible confirmation that stock was deducted live (so it's never ambiguous again).
+  const [scanSuccess, setScanSuccess] = useState<{ scanned: string; sku: string; remaining: number } | null>(null)
 
   // Import
   const [delhiveryText, setDelhiveryText] = useState('')
@@ -538,35 +542,44 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
 
-    // ── Stock gate (toggleable): the exact scanned piece must be a 'stocked' warehouse unit ──
+    // ── Stock gate: validate the scanned piece against warehouse stock ──
     if (stockGateOn) {
-      const { data: unit } = await supabase.from('packed_units').select('id, status').eq('barcode', scanned).maybeSingle()
-      if (!unit) {
+      // Fetch every packed_unit with this barcode (array — robust to duplicates).
+      const { data: units } = await supabase.from('packed_units').select('id, status, sku').eq('barcode', scanned)
+      const rows = units || []
+
+      // HARD BLOCK: this exact piece was already dispatched before — never ship twice.
+      if (rows.some(u => u.status === 'dispatched')) {
         beepError()
-        const reason = `${scanned} is not in warehouse stock (no such packed unit).`
-        setScanError(reason)
-        if (isOwner) setForcePrompt({ scanned, seq, reason })
+        setScanError(`${scanned} was already dispatched — this piece has shipped. Not dispatching again.`)
         return
       }
-      if (unit.status !== 'stocked') {
-        beepError()
-        const reason = `${scanned} is "${unit.status}", not stocked — can't dispatch from stock.`
-        setScanError(reason)
-        if (isOwner) setForcePrompt({ scanned, seq, reason })
+
+      const stocked = rows.find(u => u.status === 'stocked')
+      if (stocked) {
+        // Normal path: dispatch the order + flip THIS stocked unit, show live confirmation.
+        await commitDispatch(scanned, seq, stocked.id, stocked.sku, false)
         return
       }
-      await commitDispatch(scanned, seq, scanned, false)
+
+      // Piece is not stocked: either not in the system at all, or in another status.
+      const reason = rows.length === 0
+        ? `${scanned} isn't in the system. If it's real stock, move it in & dispatch — or force dispatch.`
+        : `${scanned} is "${rows[0].status}", not stocked. Move it to stock & dispatch, or force dispatch.`
+      beepError()
+      setStockPrompt({ scanned, seq, reason })
       return
     }
 
-    // Stock gate OFF — don't block, but still deduct stock by flipping the matching
-    // stocked unit directly (mirrors the reconciliation SQL; robust to duplicates).
-    await commitDispatch(scanned, seq, scanned, false)
+    // Stock gate OFF — dispatch and softly deduct a matching stocked unit (no block).
+    await commitDispatch(scanned, seq, null, null, false)
   }
 
   // Commit the dispatch: guard against double-dispatch, flip the packed_unit to
-  // dispatched (unless forced/no unit), log, update local state, advance.
-  const commitDispatch = async (scanned: string, seq: string | null, deductBarcode: string | null, forced: boolean) => {
+  // dispatched, show live confirmation, log, update local state, advance.
+  // deductId: specific stocked unit id to flip (gate ON). deductSku: its SKU (for remaining count).
+  // When deductId is null and not forced, soft-flips any stocked unit matching the scanned barcode.
+  const commitDispatch = async (scanned: string, seq: string | null, deductId: string | null, deductSku: string | null, forced: boolean) => {
     if (!scanOrder) return
     const now = new Date().toISOString()
     const { data: updated, error } = await supabase.from('dispatch_orders').update({
@@ -585,10 +598,24 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
 
-    // Flip the warehouse unit stocked -> dispatched by barcode (skip on forced/no barcode).
-    // Direct keyed update — robust to lookup quirks/duplicates, mirrors the reconcile SQL.
-    if (deductBarcode) {
-      await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('barcode', deductBarcode).eq('status', 'stocked')
+    // Flip the warehouse unit stocked -> dispatched.
+    let deductedSku: string | null = null
+    if (deductId) {
+      // Gate ON: flip the specific stocked unit we matched.
+      await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('id', deductId)
+      deductedSku = deductSku
+    } else if (!forced) {
+      // Gate OFF soft path: flip any stocked unit with this barcode (mirrors reconcile SQL).
+      const { data: flipped } = await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('barcode', scanned).eq('status', 'stocked').select('sku')
+      if (flipped && flipped.length > 0) deductedSku = flipped[0].sku
+    }
+
+    // Live confirmation: show remaining stocked count for the SKU we just deducted.
+    if (deductedSku) {
+      const { count } = await supabase.from('packed_units').select('id', { count: 'exact', head: true }).eq('sku', deductedSku).eq('status', 'stocked')
+      setScanSuccess({ scanned, sku: deductedSku, remaining: count ?? 0 })
+    } else {
+      setScanSuccess(null)
     }
 
     logEvent(scanOrder.order_id, 'dispatched', `${forced ? 'FORCE-dispatched (not in stock)' : 'Scan-verified dispatch'} · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
@@ -601,6 +628,39 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setScanResult(null)
     setScanError(null)
     setForcePrompt(null)
+    setStockPrompt(null)
+  }
+
+  // Override A — "Move to stock & dispatch": piece is real stock missing from the system.
+  // Records it as a recovered unit (tagged source='gate_override' for later audit), then dispatches.
+  const moveToStockAndDispatch = async (scanned: string, seq: string | null) => {
+    const now = new Date().toISOString()
+    const sku = (scanOrder?.barcode_sku || '').trim()
+    // Insert one row: stocked + dispatched at the same moment, tagged as an override recovery.
+    const { data: inserted } = await supabase.from('packed_units').insert({
+      barcode: scanned,
+      sku: sku || null,
+      seq: seq ? parseInt(seq) : null,
+      status: 'dispatched',
+      source: 'gate_override',
+      stocked_at: now,
+      dispatched_at: now,
+      created_by: user.id,
+    }).select('id').maybeSingle()
+    // Mark the order dispatched (deductId null + forced=true so commitDispatch won't double-flip).
+    await commitDispatch(scanned, seq, null, null, true)
+    if (inserted && sku) {
+      const { count } = await supabase.from('packed_units').select('id', { count: 'exact', head: true }).eq('sku', sku).eq('status', 'stocked')
+      setScanSuccess({ scanned, sku, remaining: count ?? 0 })
+    }
+    setStockPrompt(null)
+  }
+
+  // Override B — "Force dispatch": ship without touching stock (logged as forced).
+  const forceDispatchFromPrompt = async (scanned: string, seq: string | null) => {
+    await commitDispatch(scanned, seq, null, null, true)
+    setStockPrompt(null)
+    setForcePrompt(null)
   }
 
   const resetScan = () => {
@@ -610,6 +670,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setScanResult(null)
     setScanError(null)
     setForcePrompt(null)
+    setStockPrompt(null)
   }
 
   // Owner toggles the EOD stock gate on/off; persisted in app_config (shared, survives reload).
@@ -3569,13 +3630,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     </div>
                   )}
 
-                  {forcePrompt && isOwner && (
+                  {scanSuccess && !scanError && !stockPrompt && (
+                    <div style={{ padding: '10px 14px', background: 'var(--dispatched-bg)', border: '1px solid #bbf7d0', borderRadius: 7, color: 'var(--dispatched)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ flexShrink: 0, fontWeight: 700 }}>✓</span>
+                      <span>Dispatched &amp; deducted — <span style={{ fontFamily: 'DM Mono' }}>{scanSuccess.sku}</span> now <b>{scanSuccess.remaining}</b> in stock.</span>
+                    </div>
+                  )}
+
+                  {stockPrompt && (
                     <div style={{ padding: '12px 14px', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 7, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
-                      <div style={{ fontSize: 13, color: 'var(--today)', fontWeight: 600 }}>Not in stock — force dispatch anyway?</div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>This piece isn&apos;t a stocked warehouse unit. As owner you can override — the order will be marked dispatched but no warehouse stock will be decremented, and it&apos;ll be logged as a forced dispatch.</div>
-                      <div style={{ display: 'flex', gap: 10 }}>
-                        <button onClick={() => commitDispatch(forcePrompt.scanned, forcePrompt.seq, null, true)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Force dispatch</button>
-                        <button onClick={() => { setForcePrompt(null); setScanError(null); setScanItem('') }} style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+                      <div style={{ fontSize: 13, color: 'var(--today)', fontWeight: 600 }}>Not in stock</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{stockPrompt.reason}</div>
+                      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
+                        <button onClick={() => moveToStockAndDispatch(stockPrompt.scanned, stockPrompt.seq)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Move to stock &amp; dispatch</button>
+                        <button onClick={() => forceDispatchFromPrompt(stockPrompt.scanned, stockPrompt.seq)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Force dispatch (no stock)</button>
+                        <button onClick={() => { setStockPrompt(null); setScanError(null); setScanItem('') }} style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
                       </div>
                     </div>
                   )}
