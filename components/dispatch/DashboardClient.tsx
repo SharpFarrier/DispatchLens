@@ -2255,15 +2255,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               </div>
             ) : (
               <div style={{ ...card, overflow: 'hidden' }}>
-                <div style={{ overflowX: 'auto' }}>
+                <div style={{ overflowX: 'auto', overflowY: 'auto' as const, maxHeight: 'calc(100vh - 300px)' }} onScroll={() => { if (showSkuPopover) setShowSkuPopover(false); if (showCourierPopover) setShowCourierPopover(false); if (showDaysPopover) setShowDaysPopover(false); if (showDispatchDatePopover) setShowDispatchDatePopover(false) }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
-                    <thead>
+                    <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
                       <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-                        <th style={{ padding: '9px 12px', width: 36 }}>
+                        <th style={{ background: 'var(--bg2)', padding: '9px 12px', width: 36 }}>
                           <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: 14, height: 14, accentColor: 'var(--accent)' }} />
                         </th>
                         {/* Priority */}
-                        <th style={{ padding: '9px 12px', width: 32 }} />
+                        <th style={{ background: 'var(--bg2)', padding: '9px 12px', width: 32 }} />
                         {/* Sortable headers */}
                         {([
                           { label: 'Urgency', col: 'urgency' },
@@ -2280,7 +2280,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         ] as { label: string; col: string | null }[]).map(({ label, col }) => {
                           // Special SKU header with filter
                           if (label === 'SKU_FILTER_SPECIAL') return (
-                            <th key="sku" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                            <th key="sku" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span onClick={() => handleColSort('sku')} style={{ color: sortCol === 'sku' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}>
                                   SKU{sortCol === 'sku' ? <span style={{ marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
@@ -2334,7 +2334,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
                           // Special courier header with filter
                           if (label === 'COURIER_SPECIAL') return (
-                            <th key="courier" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                            <th key="courier" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span
                                   onClick={() => handleColSort('courier')}
@@ -2419,6 +2419,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           <th key={label}
                             onClick={() => col && handleColSort(col)}
                             style={{
+                              background: 'var(--bg2)',
                               padding: '9px 12px', textAlign: 'left' as const,
                               color: sortCol === col ? 'var(--accent)' : 'var(--text3)',
                               fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500,
@@ -2437,7 +2438,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           )
                         })}
                         {/* Days Left — with filter popover */}
-                        <th style={{ padding: '9px 12px', textAlign: 'left' as const, whiteSpace: 'nowrap' as const }}>
+                        <th style={{ background: 'var(--bg2)', padding: '9px 12px', textAlign: 'left' as const, whiteSpace: 'nowrap' as const }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span
                               onClick={() => handleColSort('days_left')}
@@ -2527,7 +2528,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             </div>
                           )}
                         </th>
-                        <th style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                        <th style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Decision</span>
                             <button
@@ -2694,7 +2695,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 <p>No unfulfillable orders. All orders have been planned.</p>
               </div>
             ) : (
-              <>
+              <div style={{ overflowY: 'auto' as const, maxHeight: 'calc(100vh - 220px)', display: 'flex', flexDirection: 'column' as const, gap: 20, paddingRight: 4 }}>
                 {/* Group by reason */}
                 {UNFULFILLABLE_REASONS.map(reason => {
                   const group = unfulfillableOrders.filter(o => o.unfulfillable_reason === reason)
@@ -2860,7 +2861,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     </div>
                   )
                 })()}
-              </>
+              </div>
             )}
           </div>
         )}
