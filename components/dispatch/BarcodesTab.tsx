@@ -76,6 +76,7 @@ export default function BarcodesTab() {
   const supabase = useMemo(() => createClient(), [])
   const [pieces, setPieces] = useState<Piece[]>([])
   const [loading, setLoading] = useState(true)
+  const [windowMode, setWindowMode] = useState<'7d' | 'all'>('7d')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [errorScan, setErrorScan] = useState('')
@@ -84,11 +85,15 @@ export default function BarcodesTab() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const data = await fetchAllRows<Piece>((from, to) =>
-      supabase.from('pieces').select('*').order('created_at', { ascending: false }).range(from, to))
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400 * 1000).toISOString()
+    const data = await fetchAllRows<Piece>((from, to) => {
+      let q = supabase.from('pieces').select('*').order('created_at', { ascending: false })
+      if (windowMode === '7d') q = q.gte('created_at', sevenDaysAgo)
+      return q.range(from, to)
+    })
     setPieces(data)
     setLoading(false)
-  }, [supabase])
+  }, [supabase, windowMode])
 
   useEffect(() => { void load() }, [load])
 
@@ -116,11 +121,17 @@ export default function BarcodesTab() {
   const handleErrorScan = useCallback(async () => {
     const code = errorScan.trim()
     if (!code) return
-    const piece = pieces.find(p => p.barcode === code)
+    let piece: { id: string; barcode: string; status: string } | undefined = pieces.find(p => p.barcode === code)
+    // If not in the loaded window (e.g. we're on the 7-day view), look it up directly in the DB
+    // so scanning always works regardless of the current window.
+    if (!piece) {
+      const { data } = await supabase.from('pieces').select('id, barcode, status').eq('barcode', code).limit(1)
+      if (data && data.length) piece = data[0] as { id: string; barcode: string; status: string }
+    }
     if (!piece) { setScanMsg({ ok: false, text: `${code} not found.` }); setErrorScan(''); return }
     const ok = await markError(piece, 'Scanned at Barcodes tab')
     if (ok) setErrorScan('')
-  }, [errorScan, pieces, markError])
+  }, [errorScan, pieces, markError, supabase])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: pieces.length, coated: 0, picked: 0, packed: 0, dispatched: 0, error: 0 }
@@ -146,9 +157,24 @@ export default function BarcodesTab() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' as const }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Barcodes</h2>
-        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{counts.all} pieces generated</span>
+        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+          {counts.all} {windowMode === '7d' ? 'in last 7 days' : 'total'}
+        </span>
+        {/* Window toggle: default 7-day view, or load everything */}
+        <div style={{ display: 'flex', gap: 0, marginLeft: 'auto', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+          {(['7d', 'all'] as const).map(mode => (
+            <button key={mode} onClick={() => setWindowMode(mode)}
+              style={{
+                padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                background: windowMode === mode ? 'var(--accent)' : 'var(--surface)',
+                color: windowMode === mode ? '#fff' : 'var(--text2)',
+              }}>
+              {mode === '7d' ? 'Last 7 days' : 'Load all'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Status filter pills */}
@@ -195,14 +221,23 @@ export default function BarcodesTab() {
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><Spinner size="lg" /></div>
       ) : !filtered.length ? (
-        <EmptyState icon="🏷️" message={pieces.length ? 'No barcodes match your filter' : 'No barcodes generated yet'} />
+        <div>
+          <EmptyState icon="🏷️" message={pieces.length ? 'No barcodes match your filter' : windowMode === '7d' ? 'No barcodes in the last 7 days' : 'No barcodes generated yet'} />
+          {windowMode === '7d' && search.trim() && (
+            <div style={{ textAlign: 'center' as const, marginTop: -8, marginBottom: 16, fontSize: 13, color: 'var(--text3)' }}>
+              Searching only the last 7 days.{' '}
+              <button onClick={() => setWindowMode('all')} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontWeight: 600, fontSize: 13, padding: 0, textDecoration: 'underline' }}>Load all</button>
+              {' '}to search everything.
+            </div>
+          )}
+        </div>
       ) : (
-        <div style={{ background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'auto' }}>
+        <div style={{ background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 380px)' }}>
           <table style={{ width: '100%', fontSize: 14, minWidth: 640, borderCollapse: 'collapse' }}>
-            <thead style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-              <tr>
+            <thead style={{ position: 'sticky' as const, top: 0, zIndex: 10 }}>
+              <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
                 {['Barcode', 'Frame', 'Status', 'Lifecycle', 'Created', ''].map(h => (
-                  <th key={h} style={{ padding: '8px 12px', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text3)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                  <th key={h} style={{ background: 'var(--bg2)', padding: '8px 12px', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text3)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
