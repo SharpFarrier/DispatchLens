@@ -270,6 +270,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         const existing = existingMap.get(o.order_id)!
         await supabase.from('dispatch_orders').update({
           tracking_number: o.tracking_number,
+          lr_number: o.lr_number ?? existing.lr_number ?? null,
           updated_at: new Date().toISOString(),
         }).eq('id', existing.id)
         logEvent(o.order_id, 'note', `Tracking number updated via re-import: ${o.tracking_number}`)
@@ -1508,6 +1509,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         else if (sortCol === 'dispatch_by') { av = a.dispatch_by_date || ''; bv = b.dispatch_by_date || '' }
         else if (sortCol === 'transit') { av = a.transit_days; bv = b.transit_days }
         else if (sortCol === 'pincode') { av = a.pincode; bv = b.pincode }
+        else if (sortCol === 'lr_number') { av = a.lr_number || ''; bv = b.lr_number || '' }
         else { av = 0; bv = 0 }
         if (av < bv) return sortDir === 'asc' ? -1 : 1
         if (av > bv) return sortDir === 'asc' ? 1 : -1
@@ -2274,6 +2276,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           { label: 'Pincode · City', col: 'pincode' },
                           { label: 'ODA', col: null },
                           { label: 'AWB', col: null },
+                          { label: 'LR', col: 'lr_number' },
                           { label: 'Transit', col: 'transit' },
                           { label: 'Promise', col: 'promise' },
                           { label: 'Dispatch By', col: 'dispatch_by' },
@@ -2613,7 +2616,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     </thead>
                     <tbody>
                       {filteredActive.length === 0 && (
-                        <tr><td colSpan={16} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No orders match this filter. Adjust or clear the filters above.</td></tr>
+                        <tr><td colSpan={17} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No orders match this filter. Adjust or clear the filters above.</td></tr>
                       )}
                       {filteredActive.map(order => (
                         <OrderRow key={order.id} order={order}
@@ -4071,6 +4074,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onSaveAwb: (id: string) => void
   onCancelAwb: () => void
 }) {
+  const [lrCopied, setLrCopied] = useState(false)
   const uc = {
     CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
     TODAY:    { color: 'var(--today)',    bg: 'var(--today-bg)',    border: '#fed7aa' },
@@ -4165,6 +4169,17 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
             </button>
           </div>
         )}
+      </td>
+      {/* LR / LTL — Delhivery only; click to copy */}
+      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
+        {order.lr_number
+          ? <span
+              onClick={() => { navigator.clipboard?.writeText(order.lr_number || ''); setLrCopied(true); setTimeout(() => setLrCopied(false), 1200) }}
+              title={lrCopied ? 'Copied' : 'Click to copy LR'}
+              style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, cursor: 'pointer', border: lrCopied ? '1px solid var(--dispatched)' : '1px solid var(--border)' }}
+            >{lrCopied ? '✓ copied' : order.lr_number}</span>
+          : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
+        }
       </td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>

@@ -54,6 +54,7 @@ export interface ParsedOrder {
   qty: number
   courier: Courier
   tracking_number: string | null
+  lr_number: string | null
   sku: string
   raw_status: string
   promise_date: string | null
@@ -82,6 +83,7 @@ export interface DBOrder {
   tracking_label: string | null
   tracking_last_update: string | null
   tracking_synced_at: string | null
+  lr_number: string | null
   sku: string
   barcode_sku: string | null
   sku_mapped: boolean

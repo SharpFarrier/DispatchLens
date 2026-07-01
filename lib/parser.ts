@@ -152,6 +152,9 @@ export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
       qty: parseInt(get('qty')) || 1,
       courier,
       tracking_number: (courier === 'Delhivery' ? parsePossibleScientific(get('master')) : get('tracking')) || null,
+      // LR / LTL number — only Delhivery pastes carry the 'LTL no' column; for Delhivery the
+      // AWB comes from 'master', so the 'tracking' slot holds the LTL. Bluedart has no LTL → null.
+      lr_number: (courier === 'Delhivery' ? (get('tracking') || null) : null),
       sku: skuRaw,
       raw_status: rawStatus,
       promise_date: promiseDateStr,
