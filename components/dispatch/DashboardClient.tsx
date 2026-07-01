@@ -3248,9 +3248,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             {access.can_users && <CargoTokenPanel />}
 
             <div style={{ ...card, overflow: 'hidden' }}>
-              <div style={{ overflowX: 'auto' as const }}>
+              <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 320px)' }} onScroll={() => { if (showDispatchedCourierPopover) setShowDispatchedCourierPopover(false); if (showDispatchedStatusPopover) setShowDispatchedStatusPopover(false); if (showDispatchedDatePopover) setShowDispatchedDatePopover(false) }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' as const, minWidth: 900 }}>
-                  <thead>
+                  <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
                     <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
                       {([
                         { label: 'DISPATCHED_DATE_SPECIAL', col: 'dispatched_at' },
@@ -3270,7 +3270,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           const COURIER_OPTS = ['Bluedart', 'Delhivery']
                           const courierCount = (c: string) => dispWindowOrders.filter(o => o.courier === c).length
                           return (
-                            <th key="courier" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                            <th key="courier" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Cour.</span>
                                 <button onClick={e => {
@@ -3334,7 +3334,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             return ls === key
                           }).length
                           return (
-                            <th key="status" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                            <th key="status" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Status</span>
                                 <button onClick={e => {
@@ -3382,7 +3382,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         }
 
                         if (label === 'DISPATCHED_DATE_SPECIAL') return (
-                          <th key="dispatched_at" style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                          <th key="dispatched_at" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                               <span
                                 onClick={() => {
@@ -3461,6 +3461,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             else { setDispatchedSortCol(col); setDispatchedSortDir('asc') }
                           }}
                           style={{
+                            background: 'var(--bg2)',
                             padding: '9px 12px', textAlign: 'left' as const,
                             color: dispatchedSortCol === col ? 'var(--accent)' : 'var(--text3)',
                             fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500,
