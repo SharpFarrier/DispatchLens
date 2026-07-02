@@ -307,11 +307,23 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</td>
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
                   <td style={{ padding: '9px 12px' }}>
-                    <select value={r.reason || ''} onChange={e => patchReturn(r.id, { reason: e.target.value })}
-                      style={{ fontSize: 11, fontFamily: 'DM Sans', color: reasonColor(r.reason), background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 5, padding: '3px 6px', cursor: 'pointer', maxWidth: 200 }}>
-                      <option value="">— set reason —</option>
-                      {RETURN_REASONS.map(rs => <option key={rs} value={rs}>{rs}</option>)}
-                    </select>
+                    {(() => {
+                      const needsReason = r.warehouse_received && (!r.reason || r.reason === 'Pending review')
+                      // Show the stored value; if it's the placeholder / unset, sit on the blank option.
+                      const selectVal = (!r.reason || r.reason === 'Pending review') ? '' : r.reason
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {needsReason && (
+                            <span title="Received — reason not set yet" style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--critical)', background: 'var(--critical-bg)', border: '1px solid #fecaca', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>NEEDS REASON</span>
+                          )}
+                          <select value={selectVal} onChange={e => patchReturn(r.id, { reason: e.target.value })}
+                            style={{ fontSize: 11, fontFamily: 'DM Sans', color: reasonColor(selectVal || null), background: 'var(--surface)', border: `1px solid ${needsReason ? '#fecaca' : 'var(--border)'}`, borderRadius: 5, padding: '3px 6px', cursor: 'pointer', maxWidth: 200 }}>
+                            <option value="">— set reason —</option>
+                            {RETURN_REASONS.map(rs => <option key={rs} value={rs}>{rs}</option>)}
+                          </select>
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td style={{ padding: '9px 12px' }}>
                     <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: r.source === 'rto_auto' ? 'var(--today)' : 'var(--text3)', background: r.source === 'rto_auto' ? 'var(--today-bg)' : 'var(--bg2)', border: `1px solid ${r.source === 'rto_auto' ? '#fed7aa' : 'var(--border)'}`, padding: '2px 7px', borderRadius: 4 }}>

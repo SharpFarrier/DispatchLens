@@ -69,10 +69,68 @@ export default function RtoTab() {
         return
       }
 
-      // ── 2) Fall back to BARCODE lookup in packed_units (original behaviour). ──
+      // ── 2) FORWARD AWB fallback: the scan may be the original dispatch AWB of an
+      //        RTO'd order whose return has no reverse_tracking_id set. Find the order
+      //        by tracking_number, then an unreceived return for that order.
+      const { data: fwdOrders } = await supabase.from('dispatch_orders')
+        .select('order_id, scanned_barcode, tracking_number').eq('tracking_number', barcode).limit(5)
+      if (fwdOrders && fwdOrders.length) {
+        const orderIds = fwdOrders.map(o => o.order_id)
+        const { data: fwdReturns } = await supabase.from('returns')
+          .select('id, order_id, barcode, warehouse_received, created_at')
+          .in('order_id', orderIds).eq('warehouse_received', false)
+          .order('created_at', { ascending: false })
+        if (fwdReturns && fwdReturns.length) {
+          // Existing return → mark it received.
+          const ret = fwdReturns[0]
+          await supabase.from('returns')
+            .update({ warehouse_received: true, warehouse_received_at: now, updated_at: now })
+            .eq('id', ret.id)
+          let prevStatus = 'return'
+          let unitId = `ret:${ret.id}`
+          if (ret.barcode) {
+            const { data: u } = await supabase.from('packed_units').select('id, status').eq('barcode', ret.barcode).maybeSingle()
+            if (u && u.status !== 'rto') {
+              await supabase.from('packed_units').update({ status: 'rto', rto_at: now }).eq('id', u.id)
+              prevStatus = u.status; unitId = u.id
+            }
+          }
+          setScanned(prev => [{ barcode, prevStatus, unitId, returnId: ret.id }, ...prev])
+          flash('success', `Return received: ${barcode} · order ${ret.order_id} (matched forward AWB)`)
+          return
+        }
+        // No return exists for this order yet → AUTO-CREATE one, received, reason pending,
+        // so it surfaces in the Returns tab for the manager to set reason + refund.
+        const ord = fwdOrders[0]
+        const { data: created } = await supabase.from('returns').upsert({
+          order_id: ord.order_id,
+          source: 'rto_auto',
+          reason: 'Pending review',
+          barcode: ord.scanned_barcode || null,
+          reverse_tracking_id: ord.tracking_number || barcode,
+          warehouse_received: true,
+          warehouse_received_at: now,
+          updated_at: now,
+        }, { onConflict: 'order_id' }).select('id').maybeSingle()
+        // If the packed barcode is known, flip that unit to rto for stock accuracy.
+        let prevStatus = 'return'
+        let unitId = created?.id ? `ret:${created.id}` : `ret:${ord.order_id}`
+        if (ord.scanned_barcode) {
+          const { data: u } = await supabase.from('packed_units').select('id, status').eq('barcode', ord.scanned_barcode).maybeSingle()
+          if (u && u.status !== 'rto') {
+            await supabase.from('packed_units').update({ status: 'rto', rto_at: now }).eq('id', u.id)
+            prevStatus = u.status; unitId = u.id
+          }
+        }
+        setScanned(prev => [{ barcode, prevStatus, unitId, returnId: created?.id }, ...prev])
+        flash('success', `Return received & logged: order ${ord.order_id} — set reason in Returns tab`)
+        return
+      }
+
+      // ── 3) Fall back to BARCODE lookup in packed_units (original behaviour). ──
       const { data: unit, error } = await supabase.from('packed_units').select('*').eq('barcode', barcode).maybeSingle()
       if (error) throw error
-      if (!unit) { flash('error', `${barcode} not found (no return or barcode match)`); return }
+      if (!unit) { flash('error', `${barcode} not found (no return, forward AWB, or barcode match)`); return }
       if (unit.status === 'rto') { flash('warn', `${barcode} already marked RTO`); return }
 
       const { error: upErr } = await supabase.from('packed_units').update({
@@ -80,14 +138,37 @@ export default function RtoTab() {
       }).eq('id', unit.id)
       if (upErr) throw upErr
 
-      // Bridge to the commercial Returns tracker by barcode as well.
+      // Bridge to the commercial Returns tracker by barcode.
       const { data: matchedReturns } = await supabase.from('returns')
         .update({ warehouse_received: true, warehouse_received_at: now, updated_at: now })
         .eq('barcode', barcode).eq('warehouse_received', false).select('id')
-      const linkedReturn = !!(matchedReturns && matchedReturns.length)
+      let linkedReturnId: string | undefined = matchedReturns?.[0]?.id
+      let noteExtra = linkedReturnId ? ' · return received' : ''
 
-      setScanned(prev => [{ barcode, prevStatus: unit.status, unitId: unit.id, returnId: matchedReturns?.[0]?.id }, ...prev])
-      flash('success', `RTO marked: ${barcode}${unit.status !== 'dispatched' ? ` (was ${unit.status})` : ''}${linkedReturn ? ' · return received' : ''}`)
+      // If no return existed for this barcode, try to resolve its order via the packed
+      // barcode and AUTO-CREATE a return (received, reason pending) so it hits Returns tab.
+      if (!linkedReturnId) {
+        const { data: bOrders } = await supabase.from('dispatch_orders')
+          .select('order_id, tracking_number').eq('scanned_barcode', barcode).limit(1)
+        if (bOrders && bOrders.length) {
+          const bo = bOrders[0]
+          const { data: created } = await supabase.from('returns').upsert({
+            order_id: bo.order_id,
+            source: 'rto_auto',
+            reason: 'Pending review',
+            barcode,
+            reverse_tracking_id: bo.tracking_number || null,
+            warehouse_received: true,
+            warehouse_received_at: now,
+            updated_at: now,
+          }, { onConflict: 'order_id' }).select('id').maybeSingle()
+          linkedReturnId = created?.id
+          noteExtra = ` · return logged (order ${bo.order_id}) — set reason in Returns tab`
+        }
+      }
+
+      setScanned(prev => [{ barcode, prevStatus: unit.status, unitId: unit.id, returnId: linkedReturnId }, ...prev])
+      flash('success', `RTO marked: ${barcode}${unit.status !== 'dispatched' ? ` (was ${unit.status})` : ''}${noteExtra}`)
     } catch (e) {
       flash('error', 'Error: ' + (e as Error).message)
     } finally {
