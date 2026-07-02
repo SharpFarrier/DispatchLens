@@ -85,6 +85,10 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
   const [returnReason, setReturnReason] = useState<string>(RETURN_REASONS[0])
   const [returnNote, setReturnNote] = useState('')
   const [creatingReturn, setCreatingReturn] = useState(false)
+  // Reverse-tracking: default the reverse AWB to the forward AWB (RTO case), editable.
+  const [revSameAsForward, setRevSameAsForward] = useState(true)
+  const [reverseTrackingId, setReverseTrackingId] = useState('')
+  const [reverseCourier, setReverseCourier] = useState<'' | 'Bluedart' | 'Delhivery'>('')
 
   useEffect(() => {
     fetchEvents()
@@ -135,6 +139,8 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
       source: 'manual',
       reason: returnReason,
       barcode: order.scanned_barcode || null,
+      reverse_tracking_id: (revSameAsForward ? (order.tracking_number || null) : (reverseTrackingId.trim() || null)),
+      reverse_courier: reverseCourier || null,
       notes: returnNote.trim() || null,
       created_by: user?.id ?? null,
       created_by_email: user?.email ?? null,
@@ -244,7 +250,7 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
 
             {/* Mark as Return */}
             {canMarkReturn && !showReturnForm && (
-              <button onClick={() => setShowReturnForm(true)}
+              <button onClick={() => { setRevSameAsForward(true); setReverseTrackingId(order.tracking_number || ''); setReverseCourier(''); setShowReturnForm(true) }}
                 style={{ marginTop: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #fed7aa', background: 'var(--today-bg)', color: 'var(--today)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <RotateCcw size={12} /> Mark as Return
               </button>
@@ -256,11 +262,30 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
                   style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
                   {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
+
+                {/* Reverse tracking ID — same as forward AWB (RTO) or a new reverse-pickup ID */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={revSameAsForward}
+                    onChange={e => { setRevSameAsForward(e.target.checked); if (e.target.checked) setReverseTrackingId(order.tracking_number || '') }} />
+                  Reverse tracking same as forward AWB{order.tracking_number ? ` (${order.tracking_number})` : ''}
+                </label>
+                {!revSameAsForward && (
+                  <input value={reverseTrackingId} onChange={e => setReverseTrackingId(e.target.value)}
+                    placeholder="Reverse tracking / pickup ID…"
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono', outline: 'none', boxSizing: 'border-box' }} />
+                )}
+                <select value={reverseCourier} onChange={e => setReverseCourier(e.target.value as '' | 'Bluedart' | 'Delhivery')}
+                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: `1px solid ${reverseCourier ? 'var(--border)' : '#fed7aa'}`, background: 'var(--surface)', color: reverseCourier ? 'var(--text)' : 'var(--text3)', fontSize: 12, cursor: 'pointer' }}>
+                  <option value="">— reverse courier (required) —</option>
+                  <option value="Bluedart">Bluedart</option>
+                  <option value="Delhivery">Delhivery</option>
+                </select>
+
                 <textarea value={returnNote} onChange={e => setReturnNote(e.target.value)} placeholder="Optional note…" rows={2}
                   style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Sans', resize: 'none', outline: 'none' }} />
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={createReturn} disabled={creatingReturn}
-                    style={{ flex: 1, padding: '7px 12px', borderRadius: 6, border: 'none', background: 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                  <button onClick={createReturn} disabled={creatingReturn || !reverseCourier || (!revSameAsForward && !reverseTrackingId.trim())}
+                    style={{ flex: 1, padding: '7px 12px', borderRadius: 6, border: 'none', background: (!reverseCourier || (!revSameAsForward && !reverseTrackingId.trim())) ? 'var(--border2)' : 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: (!reverseCourier || (!revSameAsForward && !reverseTrackingId.trim())) ? 'not-allowed' : 'pointer' }}>
                     {creatingReturn ? 'Adding…' : 'Confirm Return'}
                   </button>
                   <button onClick={() => setShowReturnForm(false)}

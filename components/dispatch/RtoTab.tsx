@@ -6,7 +6,7 @@ import { Camera, Undo2, AlertTriangle } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
-interface ScannedItem { barcode: string; prevStatus: string; unitId: string }
+interface ScannedItem { barcode: string; prevStatus: string; unitId: string; returnId?: string }
 type ResultType = 'success' | 'warn' | 'error'
 
 export default function RtoTab() {
@@ -40,24 +40,53 @@ export default function RtoTab() {
     if (processingRef.current) return
     processingRef.current = true
     try {
+      const now = new Date().toISOString()
+
+      // ── 1) Try REVERSE TRACKING ID first (the reliable identifier; barcode may be
+      //        missing/damaged). Match an unreceived return whose reverse_tracking_id
+      //        equals the scan. If several match (rare re-ship), take the newest.
+      const { data: revReturns } = await supabase.from('returns')
+        .select('id, order_id, barcode, warehouse_received, created_at')
+        .eq('reverse_tracking_id', barcode).eq('warehouse_received', false)
+        .order('created_at', { ascending: false })
+      if (revReturns && revReturns.length) {
+        const ret = revReturns[0]
+        await supabase.from('returns')
+          .update({ warehouse_received: true, warehouse_received_at: now, updated_at: now })
+          .eq('id', ret.id)
+        // If the return carries a packed barcode, also flip that unit to rto (keeps stock correct).
+        let prevStatus = 'return'
+        let unitId = `ret:${ret.id}`
+        if (ret.barcode) {
+          const { data: u } = await supabase.from('packed_units').select('id, status').eq('barcode', ret.barcode).maybeSingle()
+          if (u && u.status !== 'rto') {
+            await supabase.from('packed_units').update({ status: 'rto', rto_at: now }).eq('id', u.id)
+            prevStatus = u.status; unitId = u.id
+          }
+        }
+        setScanned(prev => [{ barcode, prevStatus, unitId, returnId: ret.id }, ...prev])
+        flash('success', `Return received: ${barcode} · order ${ret.order_id}`)
+        return
+      }
+
+      // ── 2) Fall back to BARCODE lookup in packed_units (original behaviour). ──
       const { data: unit, error } = await supabase.from('packed_units').select('*').eq('barcode', barcode).maybeSingle()
       if (error) throw error
-      if (!unit) { flash('error', `${barcode} not found`); return }
+      if (!unit) { flash('error', `${barcode} not found (no return or barcode match)`); return }
       if (unit.status === 'rto') { flash('warn', `${barcode} already marked RTO`); return }
 
       const { error: upErr } = await supabase.from('packed_units').update({
-        status: 'rto', rto_at: new Date().toISOString(),
+        status: 'rto', rto_at: now,
       }).eq('id', unit.id)
       if (upErr) throw upErr
 
-      // Bridge to the commercial Returns tracker: if a return row exists for this
-      // barcode, mark the physical parcel received so the refund loop can close.
+      // Bridge to the commercial Returns tracker by barcode as well.
       const { data: matchedReturns } = await supabase.from('returns')
-        .update({ warehouse_received: true, warehouse_received_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ warehouse_received: true, warehouse_received_at: now, updated_at: now })
         .eq('barcode', barcode).eq('warehouse_received', false).select('id')
       const linkedReturn = !!(matchedReturns && matchedReturns.length)
 
-      setScanned(prev => [{ barcode, prevStatus: unit.status, unitId: unit.id }, ...prev])
+      setScanned(prev => [{ barcode, prevStatus: unit.status, unitId: unit.id, returnId: matchedReturns?.[0]?.id }, ...prev])
       flash('success', `RTO marked: ${barcode}${unit.status !== 'dispatched' ? ` (was ${unit.status})` : ''}${linkedReturn ? ' · return received' : ''}`)
     } catch (e) {
       flash('error', 'Error: ' + (e as Error).message)
@@ -77,14 +106,24 @@ export default function RtoTab() {
 
   async function undoScan(item: ScannedItem) {
     try {
-      const { error } = await supabase.from('packed_units').update({
-        status: item.prevStatus, rto_at: null,
-      }).eq('id', item.unitId).eq('status', 'rto')
-      if (error) throw error
-      // Reverse the Returns bridge too, so warehouse_received doesn't stay stuck on.
-      await supabase.from('returns')
-        .update({ warehouse_received: false, warehouse_received_at: null, updated_at: new Date().toISOString() })
-        .eq('barcode', item.barcode).eq('warehouse_received', true)
+      const now = new Date().toISOString()
+      // Reverse the packed_unit RTO only if a real unit was flipped (unitId not synthetic).
+      if (item.unitId && !item.unitId.startsWith('ret:')) {
+        const { error } = await supabase.from('packed_units').update({
+          status: item.prevStatus, rto_at: null,
+        }).eq('id', item.unitId).eq('status', 'rto')
+        if (error) throw error
+      }
+      // Reverse the Returns bridge — by return id when we have it, else by barcode.
+      if (item.returnId) {
+        await supabase.from('returns')
+          .update({ warehouse_received: false, warehouse_received_at: null, updated_at: now })
+          .eq('id', item.returnId)
+      } else {
+        await supabase.from('returns')
+          .update({ warehouse_received: false, warehouse_received_at: null, updated_at: now })
+          .eq('barcode', item.barcode).eq('warehouse_received', true)
+      }
       setScanned(prev => prev.filter(s => s.unitId !== item.unitId))
       flash('warn', `Undone: ${item.barcode} back to ${item.prevStatus}`)
     } catch (e) {

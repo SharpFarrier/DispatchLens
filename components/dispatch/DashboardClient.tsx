@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
+import { fetchTracking } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
@@ -853,129 +854,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setOrders(prev => prev.map(o => ids.includes(o.id) ? { ...o, manifested_at: manifestedNow } : o))
   }
 
-  // ── Sync tracking (called directly from browser) ──
-  const WORKER = 'https://tracklens-proxy.adityaramnani91581.workers.dev'
-  const BD_API_KEY = 'WxObKDF1pSM0GWYCBBjnemimMH7Ed3Gp'
-  const BD_API_SECRET = 'j2FGlGEWnGcgVYDs'
-  const BD_LOGIN_ID = 'BOM41184'
-  const BD_LICENCE_KEY = 'hkfoiszukslp0umqriqgn2bolmgovtge'
-
-  const normalizeBD = (code: string, desc: string) => {
-    const s = (code + ' ' + desc).toLowerCase()
-    if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
-    if (s.includes('out for delivery') || s.includes('ofd')) return { status: 'ofd', label: 'Out for Delivery' }
-    if (s.includes('ndr') || s.includes('delivery attempt') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
-    if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
-    if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
-    if (s.includes('transit') || s.includes('arrived') || s.includes('departed')) return { status: 'in_transit', label: 'In Transit' }
-    if (s.includes('booked') || s.includes('manifested')) return { status: 'booked', label: 'Booked' }
-    return { status: 'unknown', label: desc || code || 'Unknown' }
-  }
-
-  const normalizeDL = (status: string) => {
-    const s = (status || '').toLowerCase()
-    if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
-    if (s.includes('out for delivery')) return { status: 'ofd', label: 'Out for Delivery' }
-    if (s.includes('failed delivery') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
-    if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
-    if (s.includes('transit')) return { status: 'in_transit', label: 'In Transit' }
-    if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
-    return { status: 'booked', label: status || 'Booked' }
-  }
-
+  // ── Sync tracking (courier engine lives in @/lib/tracking) ──
   const syncTracking = async () => {
     // Skip orders already delivered (status never changes after delivery)
     const toTrack = trackOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered' && o.tracking_status !== 'rto')
     if (!toTrack.length) { setTrackingLastSync(new Date()); return }
     setTrackingLoading(true)
     setTrackingProgress({ done: 0, total: toTrack.length })
-    const results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
+    let results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
 
     try {
-      // 1. Get Bluedart JWT
-      const bdOrders = toTrack.filter(o => o.courier === 'Bluedart')
-      const dlOrders = toTrack.filter(o => o.courier === 'Delhivery')
-
-      if (bdOrders.length) {
-        let bdToken: string | null = null
-        try {
-          const tokenRes = await fetch(`${WORKER}/bluedart/in/transportation/token/v1/login`, {
-            method: 'GET',
-            headers: { 'ClientID': BD_API_KEY, 'ClientSecret': BD_API_SECRET },
-          })
-          const tokenData = await tokenRes.json()
-          bdToken = tokenData?.JWTToken || null
-        } catch { /* token failed */ }
-
-        if (bdToken) {
-          // Throttled: 3 concurrent, 350ms gap between batches to avoid 429
-          // Endpoint format from TrackLens: query params + XML response
-          const CONCURRENCY = 6
-          for (let i = 0; i < bdOrders.length; i += CONCURRENCY) {
-            const batch = bdOrders.slice(i, i + CONCURRENCY)
-            await Promise.all(batch.map(async o => {
-              try {
-                const params = new URLSearchParams({
-                  handler: 'tnt',
-                  action: 'custawbquery',
-                  loginid: BD_LOGIN_ID,
-                  awb: 'awb',
-                  numbers: o.tracking_number!.trim(),
-                  format: 'xml',
-                  lickey: BD_LICENCE_KEY,
-                  verno: '1.3',
-                  scan: '1',
-                })
-                const res = await fetch(`${WORKER}/bluedart/in/transportation/tracking/v1?${params}`, {
-                  method: 'GET',
-                  headers: { 'JWTToken': bdToken },
-                })
-                if (res.status === 429) return // rate limited, will retry next sync
-                const xmlText = await res.text()
-                const doc = new DOMParser().parseFromString(xmlText, 'text/xml')
-                const shipment = doc.querySelector('Shipment')
-                if (shipment) {
-                  const statusEl = shipment.querySelector('Status')
-                  const firstScan = shipment.querySelector('Scans Scan, Scans > ScanDetail')
-                  const scanText = firstScan?.querySelector('Scan')?.textContent || firstScan?.textContent || ''
-                  const scanDate = firstScan?.querySelector('ScanDate')?.textContent || ''
-                  const statusText = statusEl?.textContent || scanText || ''
-                  if (statusText) {
-                    results[o.tracking_number!] = {
-                      ...normalizeBD('', statusText),
-                      lastUpdate: scanDate,
-                    }
-                  }
-                }
-              } catch { /* skip */ }
-            }))
-            setTrackingProgress(p => p ? { ...p, done: Math.min(p.done + batch.length, p.total) } : p)
-            if (i + CONCURRENCY < bdOrders.length) await new Promise(r => setTimeout(r, 200))
-          }
-        }
-      }
-
-      // 2. Delhivery — server route, chunked to stay under serverless timeout
-      if (dlOrders.length) {
-        const CHUNK = 25
-        for (let i = 0; i < dlOrders.length; i += CHUNK) {
-          const chunk = dlOrders.slice(i, i + CHUNK)
-          try {
-            const res = await fetch('/api/tracking', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                orders: chunk.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier }))
-              }),
-            })
-            if (res.ok) {
-              const data = await res.json()
-              Object.assign(results, data)
-            }
-          } catch { /* skip chunk */ }
-          setTrackingProgress(p => p ? { ...p, done: Math.min(p.done + chunk.length, p.total) } : p)
-        }
-      }
+      results = await fetchTracking(
+        toTrack.map(o => ({ id: o.id, awb: o.tracking_number!, courier: o.courier })),
+        (justDone) => setTrackingProgress(p => p ? { ...p, done: Math.min(p.done + justDone, p.total) } : p),
+      )
     } catch (e) { console.error('Tracking sync failed:', e) }
 
     // Persist results to DB so status survives page reloads

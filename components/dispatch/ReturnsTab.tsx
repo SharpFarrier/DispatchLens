@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
+import { fetchTracking } from '@/lib/tracking'
 import { DBOrder } from '@/types'
 import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw } from 'lucide-react'
 
@@ -23,6 +24,12 @@ export interface ReturnRow {
   refund_status: 'pending' | 'refunded'
   refund_amount: number | null
   barcode: string | null
+  reverse_tracking_id: string | null
+  reverse_courier: string | null
+  reverse_tracking_status: string | null
+  reverse_tracking_label: string | null
+  reverse_tracking_last_update: string | null
+  reverse_tracking_synced_at: string | null
   warehouse_received: boolean
   warehouse_received_at: string | null
   notes: string | null
@@ -51,6 +58,8 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   const [searchHits, setSearchHits] = useState<DBOrder[]>([])
   const [searching, setSearching] = useState(false)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [revSyncing, setRevSyncing] = useState(false)
+  const [revSyncMsg, setRevSyncMsg] = useState<string | null>(null)
   const [amountDraft, setAmountDraft] = useState<Record<string, string>>({})
 
   // ── Load returns + courier-RTO orders not yet tracked ──
@@ -71,6 +80,46 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   }, [supabase])
 
   useEffect(() => { load() }, [load, reloadSignal])
+
+  // Sync the reverse leg (return travelling back) for returns that have a reverse tracking id + courier.
+  const syncReverse = useCallback(async () => {
+    if (revSyncing) return
+    const targets = returns.filter(r =>
+      r.reverse_tracking_id && r.reverse_courier &&
+      r.reverse_tracking_status !== 'delivered' && r.reverse_tracking_status !== 'rto')
+    if (!targets.length) { setRevSyncMsg('No reverse shipments to sync.'); return }
+    setRevSyncing(true); setRevSyncMsg(null)
+    try {
+      const results = await fetchTracking(
+        targets.map(r => ({ id: r.id, awb: r.reverse_tracking_id as string, courier: r.reverse_courier as string })))
+      const now = new Date().toISOString()
+      const norm = (v: string | null | undefined) => (v || '').trim().replace(/\.0+$/, '')
+      let updated = 0
+      await Promise.all(targets.map(async r => {
+        const key = Object.keys(results).find(k => norm(k) === norm(r.reverse_tracking_id))
+        const t = key ? results[key] : undefined
+        if (!t) return
+        updated++
+        await supabase.from('returns').update({
+          reverse_tracking_status: t.status,
+          reverse_tracking_label: t.label,
+          reverse_tracking_last_update: t.lastUpdate,
+          reverse_tracking_synced_at: now,
+          updated_at: now,
+        }).eq('id', r.id)
+      }))
+      setReturns(prev => prev.map(r => {
+        const key = Object.keys(results).find(k => norm(k) === norm(r.reverse_tracking_id))
+        const t = key ? results[key] : undefined
+        return t ? { ...r, reverse_tracking_status: t.status, reverse_tracking_label: t.label, reverse_tracking_last_update: t.lastUpdate, reverse_tracking_synced_at: now } : r
+      }))
+      setRevSyncMsg(`Synced ${updated} reverse shipment${updated === 1 ? '' : 's'}.`)
+    } catch (e) {
+      setRevSyncMsg('Reverse sync failed: ' + (e as Error).message)
+    } finally {
+      setRevSyncing(false)
+    }
+  }, [returns, revSyncing, supabase])
 
   // ── Search dispatched orders for manual add ──
   useEffect(() => {
@@ -149,6 +198,10 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
         <button onClick={load} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
           <RefreshCw size={12} /> Refresh
         </button>
+        <button onClick={syncReverse} disabled={revSyncing} style={{ background: revSyncing ? 'var(--bg2)' : 'var(--accent)', border: 'none', borderRadius: 6, color: revSyncing ? 'var(--text3)' : '#fff', cursor: revSyncing ? 'default' : 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
+          <RotateCcw size={12} /> {revSyncing ? 'Syncing…' : 'Sync Reverse'}
+        </button>
+        {revSyncMsg && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{revSyncMsg}</span>}
         {/* Summary chips */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
           {[
@@ -239,16 +292,16 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 820 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
-                {['Order', 'SKU', 'Reason', 'Source', 'Warehouse', 'Refund', ...(canSeeAmount ? ['Amount'] : []), 'Added'].map(h => (
+                {['Order', 'SKU', 'Reason', 'Source', 'Reverse', 'Warehouse', 'Refund', ...(canSeeAmount ? ['Amount'] : []), 'Added'].map(h => (
                   <th key={h} style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={canSeeAmount ? 8 : 7} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</td></tr>
+                <tr><td colSpan={canSeeAmount ? 9 : 8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</td></tr>
               ) : returns.length === 0 ? (
-                <tr><td colSpan={canSeeAmount ? 8 : 7} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns tracked yet. Add one above.</td></tr>
+                <tr><td colSpan={canSeeAmount ? 9 : 8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns tracked yet. Add one above.</td></tr>
               ) : returns.map((r, i) => (
                 <tr key={r.id} style={{ borderBottom: i < returns.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</td>
@@ -264,6 +317,16 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                     <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: r.source === 'rto_auto' ? 'var(--today)' : 'var(--text3)', background: r.source === 'rto_auto' ? 'var(--today-bg)' : 'var(--bg2)', border: `1px solid ${r.source === 'rto_auto' ? '#fed7aa' : 'var(--border)'}`, padding: '2px 7px', borderRadius: 4 }}>
                       {r.source === 'rto_auto' ? 'RTO' : 'MANUAL'}
                     </span>
+                  </td>
+                  <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                    {r.reverse_tracking_id ? (
+                      <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                        <span style={{ fontFamily: 'DM Mono', fontSize: 10, color: 'var(--text2)' }}>{r.reverse_tracking_id}</span>
+                        <span style={{ fontSize: 10, color: r.reverse_tracking_status === 'delivered' ? 'var(--dispatched)' : r.reverse_tracking_status === 'rto' ? 'var(--critical)' : 'var(--text3)' }}>
+                          {r.reverse_courier || ''}{r.reverse_tracking_label ? ` · ${r.reverse_tracking_label}` : (r.reverse_tracking_status ? ` · ${r.reverse_tracking_status}` : ' · not synced')}
+                        </span>
+                      </div>
+                    ) : <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>}
                   </td>
                   <td style={{ padding: '9px 12px' }}>
                     {r.warehouse_received ? (
