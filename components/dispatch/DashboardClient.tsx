@@ -436,6 +436,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // ── Manual dispatch ──
   const handleManualDispatch = async () => {
     if (!manualDispatchOrder) return
+    // Same hard blocks as the scanner — no dispatching held / cancelled / already-dispatched orders.
+    if (manualDispatchOrder.is_dispatched) { beepError(); alert(`${manualDispatchOrder.order_id} is already dispatched — not dispatching again.`); setManualDispatchOrder(null); return }
+    if (manualDispatchOrder.is_cancelled) { beepError(); alert(`${manualDispatchOrder.order_id} is cancelled — not dispatching. Un-cancel it in Plan first if this is wrong.`); setManualDispatchOrder(null); return }
+    if (manualDispatchOrder.plan_decision === 'hold') { beepError(); alert(`${manualDispatchOrder.order_id} is On Hold — release it from hold in the Plan tab before dispatching.`); setManualDispatchOrder(null); return }
     setManualDispatching(true)
     const now = new Date().toISOString()
     await supabase.from('dispatch_orders').update({
@@ -513,15 +517,40 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setScanError(null)
     setScanResult(null)
 
+    // Every order carrying this AWB (any state), so we can hard-block with a clear reason.
+    const awbOrders = orders.filter(o => o.tracking_number?.trim().replace(/\.0+$/, '') === awb)
+
+    // ── HARD BLOCKS (no override — the decision must be changed in the Plan tab) ──
+    // 1) Already dispatched — never ship the same AWB twice.
+    if (awbOrders.some(o => o.is_dispatched && !o.is_cancelled)) {
+      beepError()
+      setScanError(`AWB ${awb} is already dispatched — not dispatching again.`)
+      setScanOrder(null)
+      return
+    }
+    // 2) Cancelled — do not dispatch a cancelled order.
+    if (awbOrders.length && awbOrders.every(o => o.is_cancelled)) {
+      beepError()
+      setScanError(`AWB ${awb} is cancelled — not dispatching. Un-cancel it in Plan first if this is wrong.`)
+      setScanOrder(null)
+      return
+    }
+    // 3) On hold — must be released from hold in the Plan tab before it can ship.
+    const holdMatch = awbOrders.find(o => o.plan_decision === 'hold' && !o.is_cancelled && !o.is_dispatched)
+    if (holdMatch) {
+      beepError()
+      setScanError(`AWB ${awb} is On Hold — release it from hold in the Plan tab before dispatching.`)
+      setScanOrder(null)
+      return
+    }
+
     const allMatches = orders.filter(o =>
       o.tracking_number?.trim().replace(/\.0+$/, '') === awb &&
       !o.is_cancelled && !o.is_dispatched
     )
     if (!allMatches.length) {
-      // Distinguish "already dispatched" from "never existed"
-      const dispatched = orders.find(o => o.tracking_number?.trim().replace(/\.0+$/, '') === awb && o.is_dispatched && !o.is_cancelled)
       beepError()
-      setScanError(dispatched ? `AWB ${awb} is already dispatched.` : `No pending order found for AWB ${awb}`)
+      setScanError(`No pending order found for AWB ${awb}`)
       setScanOrder(null)
       return
     }
