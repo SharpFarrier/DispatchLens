@@ -167,6 +167,25 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [editingAwbValue, setEditingAwbValue] = useState('')
   const [manualDispatchSku, setManualDispatchSku] = useState('')
   const [manualDispatching, setManualDispatching] = useState(false)
+  // ⌘K focuses the global omnisearch.
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); searchInputRef.current?.focus(); setShowSearch(true)
+      }
+      if (e.key === 'Escape') searchInputRef.current?.blur()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  // Lightweight toast notifications (replaces alert()); auto-dismiss after 4s.
+  const [toasts, setToasts] = useState<{ id: number; msg: string; kind: 'error' | 'success' | 'info' }[]>([])
+  const showToast = (msg: string, kind: 'error' | 'success' | 'info' = 'info') => {
+    const id = Date.now() + Math.random()
+    setToasts(prev => [...prev, { id, msg, kind }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
+  }
   // Global search
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
@@ -438,9 +457,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const handleManualDispatch = async () => {
     if (!manualDispatchOrder) return
     // Same hard blocks as the scanner — no dispatching held / cancelled / already-dispatched orders.
-    if (manualDispatchOrder.is_dispatched) { beepError(); alert(`${manualDispatchOrder.order_id} is already dispatched — not dispatching again.`); setManualDispatchOrder(null); return }
-    if (manualDispatchOrder.is_cancelled) { beepError(); alert(`${manualDispatchOrder.order_id} is cancelled — not dispatching. Un-cancel it in Plan first if this is wrong.`); setManualDispatchOrder(null); return }
-    if (manualDispatchOrder.plan_decision === 'hold') { beepError(); alert(`${manualDispatchOrder.order_id} is On Hold — release it from hold in the Plan tab before dispatching.`); setManualDispatchOrder(null); return }
+    if (manualDispatchOrder.is_dispatched) { beepError(); showToast(`${manualDispatchOrder.order_id} is already dispatched — not dispatching again.`, 'error'); setManualDispatchOrder(null); return }
+    if (manualDispatchOrder.is_cancelled) { beepError(); showToast(`${manualDispatchOrder.order_id} is cancelled — not dispatching. Un-cancel it in Plan first if this is wrong.`, 'error'); setManualDispatchOrder(null); return }
+    if (manualDispatchOrder.plan_decision === 'hold') { beepError(); showToast(`${manualDispatchOrder.order_id} is On Hold — release it from hold in the Plan tab before dispatching.`, 'error'); setManualDispatchOrder(null); return }
     setManualDispatching(true)
     const now = new Date().toISOString()
     await supabase.from('dispatch_orders').update({
@@ -1088,7 +1107,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       o.order_id.toLowerCase().includes(q) ||
       o.customer_name.toLowerCase().includes(q) ||
       o.sku.toLowerCase().includes(q) ||
-      (o.tracking_number && o.tracking_number.toLowerCase().includes(q))
+      (o.tracking_number && o.tracking_number.toLowerCase().includes(q)) ||
+      (o.scanned_barcode && o.scanned_barcode.toLowerCase().includes(q)) ||
+      (o.lr_number && o.lr_number.toLowerCase().includes(q)) ||
+      (o.pincode && o.pincode.includes(q))
     ).slice(0, 8)
   }, [orders, searchQuery])
 
@@ -1901,31 +1923,53 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           <div style={{ width: 30, height: 30, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14, color: '#fff' }}>D</div>
           <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>DispatchLens</span>
         </div>
-        <nav style={{ display: 'flex', gap: 2, flex: 1 }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+          {/* Pipeline stages, in workflow order, joined by chevrons */}
           {([
-            { key: 'import', label: 'Import', show: effectiveAccess.can_import },
-            { key: 'plan', label: activeOrders.length ? `Plan (${activeOrders.length})` : 'Plan', show: effectiveAccess.can_plan },
-            { key: 'review', label: reviewCount > 0 ? `Review (${reviewCount})` : 'Review', show: effectiveAccess.can_review },
-            { key: 'picklist', label: dispatchTodayCount ? `Picklist (${dispatchTodayCount})` : 'Picklist', show: effectiveAccess.can_picklist },
-            { key: 'dispatched', label: dispatchedOrders.length ? `Dispatched (${dispatchedOrders.length})` : 'Dispatched', show: effectiveAccess.can_dispatched },
+            { key: 'import', label: 'Import', count: 0, show: effectiveAccess.can_import },
+            { key: 'plan', label: 'Plan', count: activeOrders.length, show: effectiveAccess.can_plan },
+            { key: 'review', label: 'Review', count: reviewCount, show: effectiveAccess.can_review },
+            { key: 'picklist', label: 'Picklist', count: dispatchTodayCount, show: effectiveAccess.can_picklist },
+            { key: 'dispatched', label: 'Dispatched', count: dispatchedOrders.length, show: effectiveAccess.can_dispatched },
+            { key: 'eod', label: 'EOD', count: 0, show: effectiveAccess.can_eod },
+          ] as { key: Tab; label: string; count: number; show: boolean }[]).filter(t => t.show).map(({ key, label, count }, i) => (
+            <span key={key} style={{ display: 'flex', alignItems: 'center' }}>
+              {i > 0 && <span style={{ color: 'var(--text3)', fontSize: 11, margin: '0 1px', userSelect: 'none' as const }}>›</span>}
+              <button onClick={() => setTab(key)} style={{
+                padding: '6px 11px', border: 'none', borderRadius: 6,
+                background: tab === key ? 'var(--accent-bg)' : 'transparent',
+                color: tab === key ? 'var(--accent)' : 'var(--text2)',
+                fontFamily: 'DM Sans', fontWeight: tab === key ? 600 : 400, fontSize: 13,
+                cursor: 'pointer', transition: 'all 0.15s',
+                display: 'flex', alignItems: 'center', gap: 5,
+                position: 'relative' as const, whiteSpace: 'nowrap' as const,
+              }}>
+                {label}
+                {count > 0 && (
+                  <span style={{ fontFamily: 'DM Mono', fontSize: 10, fontWeight: 600, background: tab === key ? 'var(--surface)' : 'var(--bg2)', color: tab === key ? 'var(--accent)' : 'var(--text3)', borderRadius: 8, padding: '1px 6px' }}>{count}</span>
+                )}
+                {key === 'review' && reviewCount > 0 && (
+                  <span style={{ position: 'absolute' as const, top: 2, right: 2, width: 6, height: 6, borderRadius: '50%', background: 'var(--today)' }} />
+                )}
+              </button>
+            </span>
+          ))}
+          <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 10px' }} />
+          {/* Non-pipeline cluster */}
+          {([
             { key: 'returns', label: 'Returns', show: effectiveAccess.can_returns },
-            { key: 'eod', label: 'End of Day', show: effectiveAccess.can_eod },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
-              padding: '6px 16px', border: 'none', borderRadius: 6,
+              padding: '6px 10px', border: 'none', borderRadius: 6,
               background: tab === key ? 'var(--accent-bg)' : 'transparent',
-              color: tab === key ? 'var(--accent)' : 'var(--text2)',
-              fontFamily: 'DM Sans', fontWeight: tab === key ? 600 : 400, fontSize: 14,
-              cursor: 'pointer', transition: 'all 0.15s',
-              position: 'relative' as const,
+              color: tab === key ? 'var(--accent)' : 'var(--text3)',
+              fontFamily: 'DM Sans', fontWeight: tab === key ? 600 : 400, fontSize: 12.5,
+              cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap' as const,
             }}>
               {label}
-              {key === 'review' && reviewCount > 0 && (
-                <span style={{ position: 'absolute' as const, top: 2, right: 4, width: 6, height: 6, borderRadius: '50%', background: 'var(--today)' }} />
-              )}
             </button>
           ))}
         </nav>
@@ -1945,7 +1989,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 onChange={e => { setSearchQuery(e.target.value); setShowSearch(true) }}
                 onFocus={() => setShowSearch(true)}
                 onBlur={() => setTimeout(() => setShowSearch(false), 200)}
-                placeholder="Search orders…"
+                ref={searchInputRef}
+                placeholder="Order · AWB · barcode · LR…  ⌘K"
                 style={{
                   border: 'none', background: 'transparent',
                   color: 'var(--text)', fontSize: 13, outline: 'none',
@@ -2123,7 +2168,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     border: `1px solid ${isActive ? kpi.border : 'var(--border)'}`,
                     borderRadius: 8, cursor: 'pointer',
                     display: 'flex', flexDirection: 'column' as const, gap: 2, textAlign: 'left' as const,
-                    boxShadow: isActive ? `0 0 0 3px ${kpi.bg}` : '0 1px 3px rgba(0,0,0,0.06)',
+                    boxShadow: isActive ? `0 0 0 2px ${kpi.color}` : '0 1px 3px rgba(0,0,0,0.06)',
+                    opacity: kpi.value === 0 && !isActive ? 0.45 : 1,
                     transition: 'all 0.15s', outline: 'none',
                   }}>
                     <span style={{ color: kpi.color, fontFamily: 'DM Mono', fontSize: 22, fontWeight: 700, lineHeight: 1 }}>{kpi.value}</span>
@@ -3119,6 +3165,24 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' as const }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Dispatched Orders</h1>
               <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filteredDispatched.length} in window</span>
+              {/* Sparkline: dispatches per day over the last 7 days (IST), from real dispatched_at data */}
+              {(() => {
+                const days: number[] = Array(7).fill(0)
+                const now = Date.now()
+                const istDayIdx = (iso: string) => Math.floor((new Date(istTodayStartISO()).getTime() + 86400000 - new Date(iso).getTime() - 1) / 86400000)
+                dispWindowOrders.forEach(o => {
+                  if (!o.dispatched_at) return
+                  const d = istDayIdx(o.dispatched_at)
+                  if (d >= 0 && d < 7) days[6 - d]++
+                })
+                const max = Math.max(...days, 1)
+                const pts = days.map((v, i) => `${i * 12},${22 - (v / max) * 18}`).join(' ')
+                return (
+                  <svg width="76" height="24" viewBox="0 0 76 24" style={{ overflow: 'visible' }} aria-hidden="true">
+                    <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )
+              })()}
               {/* Window switcher */}
               <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
                 {([['7d', '7 days'], ['30d', '30 days'], ['month', 'This month'], ['custom', 'Custom']] as [typeof dispWindow, string][]).map(([key, label]) => (
@@ -3171,6 +3235,61 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             </div>
 
             {access.can_users && <CargoTokenPanel />}
+
+            {/* Status distribution — live counts from the current window; click a segment to filter. */}
+            {(() => {
+              const normA = (v: string | null | undefined) => (v || '').trim().replace(/\.0+$/, '')
+              const counts: Record<string, number> = {}
+              dispWindowOrders.forEach(o => {
+                const awb = normA(o.tracking_number)
+                const live = (o.tracking_number && trackingData[awb]?.status) || o.tracking_status || '__none'
+                counts[live] = (counts[live] || 0) + 1
+              })
+              const SEGS: { key: string; label: string; bg: string; fg: string }[] = [
+                { key: 'booked',     label: 'Booked',     bg: '#f1f5f9', fg: '#475569' },
+                { key: 'picked_up',  label: 'Picked up',  bg: '#ecfeff', fg: '#0e7490' },
+                { key: 'in_transit', label: 'In transit', bg: '#eff6ff', fg: '#1d4ed8' },
+                { key: 'ofd',        label: 'OFD',        bg: '#f5f3ff', fg: '#6d28d9' },
+                { key: 'delivered',  label: 'Delivered',  bg: '#ecfdf5', fg: '#047857' },
+                { key: 'ndr',        label: 'NDR',        bg: '#fffbeb', fg: '#b45309' },
+                { key: 'rto',        label: 'RTO',        bg: '#fef2f2', fg: '#b91c1c' },
+                { key: 'unknown',    label: 'Unknown',    bg: '#f5f5f4', fg: '#57534e' },
+                { key: '__none',     label: 'Not synced', bg: 'var(--bg2)', fg: 'var(--text3)' },
+              ]
+              const total = dispWindowOrders.length
+              if (!total) return null
+              const active = SEGS.filter(sg => (counts[sg.key] || 0) > 0)
+              return (
+                <div>
+                  <div style={{ display: 'flex', height: 28, borderRadius: 7, overflow: 'hidden', border: '1px solid var(--border)' }}>
+                    {active.map(sg => {
+                      const n = counts[sg.key]
+                      const isOn = sg.key !== '__none' && dispatchedStatusFilter.size === 1 && dispatchedStatusFilter.has(sg.key)
+                      const wide = n / total > 0.09
+                      return (
+                        <button key={sg.key} title={`${sg.label}: ${n}`}
+                          onClick={() => {
+                            if (sg.key === '__none') { setDispatchedStatusFilter(new Set()); return }
+                            setDispatchedStatusFilter(prev => (prev.size === 1 && prev.has(sg.key)) ? new Set() : new Set([sg.key]))
+                          }}
+                          style={{
+                            flex: n, minWidth: 26, border: 'none', cursor: 'pointer', padding: 0,
+                            background: sg.bg, color: sg.fg,
+                            fontSize: 11, fontWeight: 600, fontFamily: 'DM Sans',
+                            whiteSpace: 'nowrap' as const, overflow: 'hidden',
+                            boxShadow: isOn ? `inset 0 -3px 0 ${sg.fg}` : 'none',
+                            opacity: dispatchedStatusFilter.size > 0 && !isOn ? 0.45 : 1,
+                            transition: 'opacity 0.15s',
+                          }}>
+                          {wide ? `${sg.label} ${n}` : n}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>Click a segment to filter · click again to clear</div>
+                </div>
+              )
+            })()}
 
             <div style={{ ...card, overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 320px)' }} onScroll={() => { if (showDispatchedCourierPopover) setShowDispatchedCourierPopover(false); if (showDispatchedStatusPopover) setShowDispatchedStatusPopover(false); if (showDispatchedDatePopover) setShowDispatchedDatePopover(false) }}>
@@ -3404,7 +3523,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   </thead>
                   <tbody>
                     {dispWindowLoading ? (
-                      <tr><td colSpan={11} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading window…</td></tr>
+                      <>{[0, 1, 2, 3, 4, 5].map(i => (
+                        <tr key={`sk${i}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td colSpan={11} style={{ padding: '13px 12px' }}>
+                            <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                              <div style={{ height: 11, width: 90, background: 'var(--bg2)', borderRadius: 4 }} />
+                              <div style={{ height: 11, width: 150, background: 'var(--bg2)', borderRadius: 4 }} />
+                              <div style={{ height: 11, width: 110, background: 'var(--bg2)', borderRadius: 4, opacity: 0.7 }} />
+                              <div style={{ height: 11, width: 70, background: 'var(--bg2)', borderRadius: 4, opacity: 0.5 }} />
+                              <div style={{ height: 11, flex: 1, maxWidth: 180, background: 'var(--bg2)', borderRadius: 4, opacity: 0.35 }} />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}</>
                     ) : filteredDispatched.length === 0 ? (
                       <tr><td colSpan={11} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders in this window</td></tr>
                     ) : pagedDispatched.map((order, i) => {
@@ -3450,7 +3581,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>
                             )}
                           </td>
-                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}{order.city ? ` · ${order.city}` : ''}</td>
+                          <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                            <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}</span>
+                            {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
+                          </td>
                           <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
                           <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>{(() => {
                             const liveStatus = (order.tracking_number && trackingData[order.tracking_number]?.status) || order.tracking_status || null
@@ -3971,6 +4105,23 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           onClose={() => setHistoryOrder(null)}
           onReturnCreated={() => setReturnsReload(n => n + 1)}
         />
+      )}
+
+      {/* Toast stack */}
+      {toasts.length > 0 && (
+        <div style={{ position: 'fixed' as const, bottom: 20, right: 20, zIndex: 1000, display: 'flex', flexDirection: 'column' as const, gap: 8, maxWidth: 380 }}>
+          {toasts.map(t => (
+            <div key={t.id} style={{
+              background: 'var(--surface)', border: `1px solid ${t.kind === 'error' ? '#fecaca' : t.kind === 'success' ? '#bbf7d0' : 'var(--border)'}`,
+              borderLeft: `3px solid ${t.kind === 'error' ? 'var(--critical)' : t.kind === 'success' ? 'var(--dispatched)' : 'var(--accent)'}`,
+              borderRadius: 8, padding: '10px 14px', fontSize: 13, color: 'var(--text)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.12)', display: 'flex', alignItems: 'flex-start', gap: 8,
+            }}>
+              <span style={{ flex: 1 }}>{t.msg}</span>
+              <button onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0, lineHeight: 1 }}><X size={12} /></button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
