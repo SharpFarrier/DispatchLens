@@ -224,7 +224,8 @@ export default function FramePicker({ onAdd, showColour = false, mode = 'inward'
     categories, parts, loaded,
   } = useProductStore()
 
-  const routesToParts = mode === 'inward'
+  // Assembly/parts inward flow removed — everything is inwarded as a finished frame.
+  const routesToParts = false
 
   const [step, setStep] = useState<'category' | 'product' | 'size' | 'mattress' | 'colour' | 'pieces' | 'parts'>('category')
   const [category, setCategory] = useState<Category | null>(null)

@@ -170,19 +170,16 @@ export default function InventoryProdTab() {
     setIsFetching(true)
     // Growable transactional tables are paged past the 1000-row cap; small
     // reference tables (bom_items, products_with_flags) stay single-shot.
-    const [sl, cl, pk, os, ap, bom, prods] = await Promise.all([
+    const [sl, cl, pk, os] = await Promise.all([
       fetchAllRows((from, to) => supabase.from('shipment_items').select('*, shipments!inner(status,supplier)').neq('shipments.status', 'deleted').range(from, to)),
       fetchAllRows((from, to) => supabase.from('coating_items').select('*, coating_trolleys!inner(status)').neq('coating_trolleys.status', 'deleted').range(from, to)),
       fetchAllRows((from, to) => supabase.from('pick_items').select('*, pick_sessions!inner(status)').neq('pick_sessions.status', 'deleted').range(from, to)),
       fetchAllRows((from, to) => supabase.from('opening_stock').select('*').range(from, to)),
-      fetchAllRows((from, to) => supabase.from('assembly_picks').select('*').range(from, to)),
-      supabase.from('bom_items').select('*, parts(name)'),
-      supabase.from('products_with_flags').select('*, product_shapes(name)').eq('is_assembly', true).eq('is_active', true),
     ])
     setData({
       shipmentItems: sl || [], coatingItems: cl || [], pickItems: pk || [],
       packPieces: [], // STUB: pack_pieces not in DispatchLens (old packing system)
-      openingStock: os || [], bomItems: bom.data || [], assemblyPicks: ap || [], assemblyProducts: prods.data || [],
+      openingStock: os || [],
     })
     setIsLoading(false)
     setIsFetching(false)
@@ -193,7 +190,7 @@ export default function InventoryProdTab() {
   if (isLoading) return <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><Spinner size="lg" /></div>
   if (!data) return null
 
-  const { shipmentItems, coatingItems, pickItems, packPieces, openingStock, bomItems, assemblyPicks, assemblyProducts } = data
+  const { shipmentItems, coatingItems, pickItems, packPieces, openingStock } = data
 
   const receivedMap: Record<string, Row> = {}
   shipmentItems.filter((i: Row) => i.category !== 'parts').forEach((i: Row) => {
@@ -266,47 +263,6 @@ export default function InventoryProdTab() {
     coatedLeft: r.totalCoated - Object.values(pickedMap).filter(p => `${p.shape}|${p.size}|${p.mattress}` === `${r.shape}|${r.size}|${r.mattress}`).reduce((s, p) => s + p.picked, 0),
   }))
 
-  // Assembly pipeline
-  const assemblyPipelineRows: Row[] = []
-  assemblyProducts.forEach((product: Row) => {
-    const productBom = bomItems.filter((b: Row) => b.product_id === product.id)
-    if (!productBom.length) return
-    const bomHasVariants = productBom.some((b: Row) => b.size || b.mattress)
-    let variantKeys: Set<string>
-    if (bomHasVariants) variantKeys = new Set(productBom.map((b: Row) => `${b.size || ''}|${b.mattress || ''}`))
-    else {
-      const coatingVariants = coatingItems.filter((i: Row) => i.category === 'parts' && i.product_id === product.id).map((i: Row) => `${i.size || ''}|${i.mattress || ''}`)
-      variantKeys = new Set(coatingVariants.length ? coatingVariants : ['|'])
-    }
-    variantKeys.forEach(vk => {
-      const [vSize, vMattress] = vk.split('|')
-      const variantBom = bomHasVariants ? productBom.filter((b: Row) => (b.size || '') === vSize && (b.mattress || '') === vMattress) : productBom
-      if (!variantBom.length) return
-      const shapeName = product.product_shapes?.name || product.name
-      const partCoatedMap: Record<string, number> = {}
-      coatingItems.filter((i: Row) => i.category === 'parts' && i.product_id === product.id).forEach((i: Row) => {
-        if ((i.size || '') === vSize && (i.mattress || '') === vMattress) partCoatedMap[i.part_id] = (partCoatedMap[i.part_id] || 0) + i.pieces
-      })
-      const partAssembledMap: Record<string, number> = {}
-      assemblyPicks.filter((a: Row) => a.product_id === product.id).forEach((a: Row) => {
-        variantBom.forEach((b: Row) => {
-          if ((a.size || '') === vSize && (a.mattress || '') === vMattress) partAssembledMap[b.part_id] = (partAssembledMap[b.part_id] || 0) + (b.quantity * a.quantity)
-        })
-      })
-      let completable = Infinity, bottleneckPart: string | null = null
-      const partStats = variantBom.map((b: Row) => {
-        const coated = partCoatedMap[b.part_id] || 0, assembled = partAssembledMap[b.part_id] || 0
-        const left = Math.max(0, coated - assembled), canMake = b.quantity > 0 ? Math.floor(left / b.quantity) : 0
-        if (canMake < completable) { completable = canMake; bottleneckPart = b.parts?.name }
-        return { partName: b.parts?.name, quantity: b.quantity, coated, assembled, left, canMake }
-      })
-      const totalCoatedParts = partStats.reduce((s: number, p: Row) => s + p.coated, 0)
-      if (!totalCoatedParts) return
-      completable = completable === Infinity ? 0 : completable
-      const extraParts = partStats.filter((p: Row) => p.left > completable * p.quantity).map((p: Row) => `${p.partName}: ${p.left - completable * p.quantity} extra`)
-      assemblyPipelineRows.push({ productId: product.id, productName: product.name, shapeName, size: vSize || null, mattress: vMattress || null, completable, bottleneckPart: completable === 0 ? bottleneckPart : null, partStats, extraParts, totalCoatedParts })
-    })
-  })
 
   const issueRows = pipelineRows.filter(r => r.rawLeft < 0 || r.coatedLeft < 0)
 
@@ -369,59 +325,6 @@ export default function InventoryProdTab() {
     )
   }
 
-  function AssemblyPipelineTable() {
-    const [expandedRow, setExpandedRow] = useState<number | null>(null)
-    if (!assemblyPipelineRows.length) return <div style={{ ...cardBase, border: '1px solid var(--border)', padding: '32px 16px', textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>No assembly products have been coated yet</div>
-    return (
-      <div style={{ ...cardBase, border: '1px solid var(--border)', overflow: 'auto' }}>
-        <table style={{ width: '100%', fontSize: 14, minWidth: 560, borderCollapse: 'collapse' }}>
-          <thead style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-            <tr>
-              <th style={thStyle}>Product</th><th style={thStyle}>Size</th><th style={thStyle}>Mattress</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Parts Coated</th><th style={{ ...thStyle, textAlign: 'right' }}>Completable</th><th style={thStyle}>Extra Parts</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assemblyPipelineRows.map((r, i) => (
-              <FragmentRow key={i}>
-                <tr onClick={() => setExpandedRow(expandedRow === i ? null : i)} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: r.completable === 0 ? 'var(--critical-bg)' : 'transparent' }}>
-                  <td style={{ padding: '10px 12px', fontWeight: 700, color: 'var(--text)' }}>{r.shapeName}</td>
-                  <td style={{ padding: '10px 12px', color: 'var(--text3)' }}>{r.size || '—'}</td>
-                  <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text3)' }}>{r.mattress || '—'}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{r.totalCoatedParts}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: r.completable === 0 ? 'var(--critical)' : 'var(--dispatched)' }}>{r.completable}</td>
-                  <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text3)' }}>{r.extraParts.length ? r.extraParts.join(', ') : '—'}</td>
-                </tr>
-                {expandedRow === i && (
-                  <tr style={{ background: 'var(--bg2)', borderTop: '1px solid var(--border)' }}>
-                    <td colSpan={6} style={{ padding: '12px 16px' }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Parts Breakdown</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {r.partStats.map((p: Row, j: number) => (
-                          <div key={j} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{ fontWeight: 600, color: 'var(--text2)', width: 128 }}>{p.partName}</span>
-                              <span style={{ color: 'var(--text3)' }}>× {p.quantity} per unit</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                              <span style={{ color: 'var(--text3)' }}>Coated: <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{p.coated}</span></span>
-                              <span style={{ color: 'var(--text3)' }}>Assembled: <span style={{ fontWeight: 700, color: 'var(--text2)' }}>{p.assembled}</span></span>
-                              <span style={{ fontWeight: 800, color: p.left === 0 ? 'var(--critical)' : 'var(--dispatched)' }}>Left: {p.left}</span>
-                              {p.left === 0 && <span style={{ padding: '1px 6px', borderRadius: 999, background: 'var(--critical-bg)', color: 'var(--critical)', fontWeight: 700 }}>bottleneck</span>}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </FragmentRow>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
 
   const cardDefs = [
     { key: 'raw', label: 'Raw', val: rawStock, col: '#9333ea' },
@@ -516,13 +419,6 @@ export default function InventoryProdTab() {
         <PipelineTable />
       </div>
 
-      <div>
-        <div style={{ marginBottom: 4 }}>
-          <div style={{ ...sectionTitle, marginBottom: 0 }}>Assembly Stock</div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>Parts coated and available for final assembly · tap a row to see breakdown</div>
-        </div>
-        <AssemblyPipelineTable />
-      </div>
     </div>
   )
 }
