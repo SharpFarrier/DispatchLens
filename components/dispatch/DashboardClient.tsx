@@ -1926,12 +1926,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       {/* ── Header ── */}
       <style>{`
         @media (max-width: 768px) {
-          .dl-header { padding: 0 12px !important; }
-          .dl-logo { margin-right: 12px !important; }
-          .dl-nav { gap: 1px !important; }
-          .dl-search-wrap { width: 40px !important; }
-          .dl-search-wrap.dl-search-open { width: 200px !important; }
+          .dl-header { padding: 0 8px !important; }
+          .dl-logo { margin-right: 8px !important; }
+          .dl-wordmark { display: none !important; }
+          .dl-nav { gap: 1px !important; flex: 1 1 auto !important; }
+          .dl-search-wrap { width: 36px !important; }
+          .dl-search-wrap.dl-search-open { width: 170px !important; }
           .dl-date-pill { display: none !important; }
+          .dl-username { display: none !important; }
+          .dl-right { gap: 6px !important; }
         }
         .dl-nav { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .dl-nav::-webkit-scrollbar { display: none; }
@@ -1939,7 +1942,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
           <div style={{ width: 30, height: 30, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14, color: '#fff' }}>D</div>
-          <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>DispatchLens</span>
+          <span className="dl-wordmark" style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>DispatchLens</span>
         </div>
         <nav ref={navRef} className="dl-nav" style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0, overflowX: 'auto' as const }}>
           {/* Pipeline stages, in workflow order, joined by chevrons */}
@@ -1991,7 +1994,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             </button>
           ))}
         </nav>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <div className="dl-right" style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
           {/* Global search */}
           <div style={{ position: 'relative' as const }}>
             <div className={`dl-search-wrap${showSearch ? ' dl-search-open' : ''}`} style={{
@@ -2088,7 +2091,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {user.user_metadata?.avatar_url && <img src={user.user_metadata.avatar_url} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />}
-            <span style={{ fontSize: 13, color: 'var(--text2)' }}>{user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0]}</span>
+            <span className="dl-username" style={{ fontSize: 13, color: 'var(--text2)' }}>{user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0]}</span>
           </div>
           <button onClick={handleSignOut} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text3)', cursor: 'pointer', padding: '5px 8px', display: 'flex', alignItems: 'center' }}><LogOut size={13} /></button>
         </div>
