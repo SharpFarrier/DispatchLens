@@ -3969,7 +3969,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{scanOrder.customer_name}</span>
                           <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: scanOrder.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: scanOrder.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>{scanOrder.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
                         </div>
-                        <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)' }}>{scanOrder.order_id}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)' }}>{scanOrder.order_id}</span>
+                          {(() => {
+                            const d = displayDaysLeft(scanOrder)
+                            if (d === null) return null
+                            const overdue = d < 0, today = d === 0
+                            const color = overdue ? 'var(--critical)' : today ? 'var(--today)' : 'var(--dispatched)'
+                            const bg = overdue ? 'var(--critical-bg)' : today ? 'var(--today-bg)' : 'var(--dispatched-bg)'
+                            const label = overdue ? `${Math.abs(d)}d overdue` : today ? 'due today' : `${d}d left`
+                            return (
+                              <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 700, color, background: bg, padding: '2px 8px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>
+                                {label}
+                              </span>
+                            )
+                          })()}
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                           <span style={{ fontSize: 11, color: 'var(--text3)' }}>Expected barcode SKU:</span>
                           <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: scanOrder.barcode_sku ? 'var(--accent)' : 'var(--critical)' }}>
