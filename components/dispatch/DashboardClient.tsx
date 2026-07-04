@@ -1102,10 +1102,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
-  const overdueCount = useMemo(() =>
-    activeOrders.filter(o => o.plan_decision !== 'hold' && o.plan_decision !== 'scheduled').filter(o => {
-      const d = displayDaysLeft(o); return d !== null && d < 0
-    }).length, [activeOrders]) // eslint-disable-line react-hooks/exhaustive-deps
   const handleSignOut = async () => { await supabase.auth.signOut(); window.location.href = '/login' }
 
 
@@ -1144,6 +1140,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }
     return o.days_left === null || o.days_left === undefined ? null : o.days_left - 1
   }
+
+  // Active, still-undecided orders whose deadline has already passed (unplanned backlog).
+  const overdueCount = useMemo(() =>
+    activeOrders.filter(o => o.plan_decision !== 'hold' && o.plan_decision !== 'scheduled').filter(o => {
+      const d = displayDaysLeft(o); return d !== null && d < 0
+    }).length, [activeOrders]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live urgency tier, derived from live days-left (same thresholds as the importer).
   // Falls back to the stored urgency if no promise date / days-left is available.
