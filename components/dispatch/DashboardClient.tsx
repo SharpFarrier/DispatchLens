@@ -1101,6 +1101,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setEodDone(true)
   }
 
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const overdueCount = useMemo(() =>
+    activeOrders.filter(o => o.plan_decision !== 'hold' && o.plan_decision !== 'scheduled').filter(o => {
+      const d = displayDaysLeft(o); return d !== null && d < 0
+    }).length, [activeOrders]) // eslint-disable-line react-hooks/exhaustive-deps
   const handleSignOut = async () => { await supabase.auth.signOut(); window.location.href = '/login' }
 
 
@@ -2093,7 +2098,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             {user.user_metadata?.avatar_url && <img src={user.user_metadata.avatar_url} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />}
             <span className="dl-username" style={{ fontSize: 13, color: 'var(--text2)' }}>{user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0]}</span>
           </div>
-          <button onClick={handleSignOut} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text3)', cursor: 'pointer', padding: '5px 8px', display: 'flex', alignItems: 'center' }}><LogOut size={13} /></button>
+          <button onClick={() => setShowLogoutConfirm(true)} title="Sign out" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text3)', cursor: 'pointer', padding: '5px 8px', display: 'flex', alignItems: 'center', marginLeft: 4 }}><LogOut size={13} /></button>
         </div>
       </header>
 
@@ -2170,6 +2175,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ PLAN ════ */}
         {tab === 'plan' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
+            {/* Overdue backlog banner — mirrors the EOD 'undecided' banner pattern */}
+            {overdueCount > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 8, padding: '11px 16px' }}>
+                <AlertTriangle size={16} style={{ color: 'var(--critical)', flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: 'var(--critical)', fontWeight: 600 }}>
+                  {overdueCount} order{overdueCount === 1 ? ' is' : 's are'} overdue — the dispatch date has already passed.
+                </span>
+                <button onClick={() => setActiveFilter(activeFilter === 'undecided' ? 'ALL' : 'undecided')}
+                  style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: '#fff', background: 'var(--critical)', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+                  {activeFilter === 'undecided' ? 'Show all' : 'Review undecided'}
+                </button>
+              </div>
+            )}
             {/* KPI cards */}
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const, alignItems: 'stretch' }}>
               {[
@@ -4127,6 +4145,23 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           onClose={() => setHistoryOrder(null)}
           onReturnCreated={() => setReturnsReload(n => n + 1)}
         />
+      )}
+
+      {/* Logout confirmation */}
+      {showLogoutConfirm && (
+        <div onClick={() => setShowLogoutConfirm(false)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)', padding: 24, maxWidth: 360, width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <LogOut size={18} style={{ color: 'var(--text2)' }} />
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Sign out?</h3>
+            </div>
+            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text2)', lineHeight: 1.5 }}>You&apos;ll be returned to the login screen. Any unsaved scan in progress won&apos;t be affected, but you&apos;ll need to sign back in to continue.</p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowLogoutConfirm(false)} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleSignOut} style={{ padding: '8px 16px', borderRadius: 7, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Sign out</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast stack */}
