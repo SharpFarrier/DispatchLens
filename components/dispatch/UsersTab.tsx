@@ -30,6 +30,21 @@ const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[
 // All access keys, for save payloads.
 const ALL_ACCESS_KEYS: (keyof UserAccess)[] = [...DISPATCH_TOGGLES, ...WAREHOUSE_TOGGLES].map(t => t.key)
 
+// Role presets — one-click sets of permissions. Applying one flips the listed keys
+// ON and everything else OFF; the admin can still fine-tune afterward before saving.
+const ROLE_PRESETS: { label: string; desc: string; keys: (keyof UserAccess)[] }[] = [
+  { label: 'Dispatch Manager', desc: 'Full dispatch pipeline + dispatched view',
+    keys: ['can_import', 'can_plan', 'can_review', 'can_picklist', 'can_eod', 'can_dispatched'] },
+  { label: 'Returns Manager', desc: 'Returns tracker + dispatched view',
+    keys: ['can_returns', 'can_dispatched'] },
+  { label: 'Warehouse Operator', desc: 'Stock, coating, picking, inventory, barcodes',
+    keys: ['can_wh_stock', 'can_wh_coating', 'can_wh_picking', 'can_wh_inventory', 'can_wh_barcodes'] },
+  { label: 'Packing Operator', desc: 'All packing sub-tabs',
+    keys: ['can_wh_pack_generate', 'can_wh_pack_scan', 'can_wh_pack_inventory', 'can_wh_pack_rto', 'can_wh_pack_units'] },
+  { label: 'Full Warehouse', desc: 'Every warehouse + packing permission',
+    keys: ['can_wh_stock', 'can_wh_coating', 'can_wh_picking', 'can_wh_inventory', 'can_wh_barcodes', 'can_wh_pack_generate', 'can_wh_pack_scan', 'can_wh_pack_inventory', 'can_wh_pack_rto', 'can_wh_pack_units'] },
+]
+
 export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
   const [users, setUsers] = useState<UserAccess[]>([])
   const [loading, setLoading] = useState(true)
@@ -55,6 +70,15 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
       const user = users.find(u => u.email === email)!
       const currentVal = field in current ? current[field] : user[field]
       return { ...prev, [email]: { ...current, [field]: !currentVal } }
+    })
+  }
+
+  // Apply a role preset: set the preset's keys ON, all other access keys OFF, as a local edit.
+  const applyPreset = (email: string, keys: (keyof UserAccess)[]) => {
+    setEdits(prev => {
+      const next: Partial<UserAccess> = {}
+      for (const k of ALL_ACCESS_KEYS) (next as Record<string, boolean>)[k] = keys.includes(k)
+      return { ...prev, [email]: { ...(prev[email] || {}), ...next } }
     })
   }
 
@@ -155,6 +179,20 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
           }
           return (
             <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
+              {/* Role presets — one click sets a sensible toggle set, still editable before save */}
+              {!isOwnerRow && (
+                <div>
+                  <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>QUICK ROLE</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+                    {ROLE_PRESETS.map(p => (
+                      <button key={p.label} title={p.desc} onClick={() => applyPreset(user.email, p.keys)}
+                        style={{ fontSize: 11, fontWeight: 600, fontFamily: 'DM Sans', color: 'var(--accent)', background: 'var(--accent-bg)', border: '1px solid var(--accent)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>DISPATCH</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 8 }}>
