@@ -169,6 +169,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [manualDispatching, setManualDispatching] = useState(false)
   // ⌘K focuses the global omnisearch.
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const navRef = useRef<HTMLElement>(null)
+  // On mobile, keep the active pipeline tab scrolled into view.
+  useEffect(() => {
+    const el = navRef.current?.querySelector('[data-active="true"]') as HTMLElement | null
+    el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+  }, [tab])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -1918,12 +1924,24 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       )}
 
       {/* ── Header ── */}
-      <header style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32 }}>
+      <style>{`
+        @media (max-width: 768px) {
+          .dl-header { padding: 0 12px !important; }
+          .dl-logo { margin-right: 12px !important; }
+          .dl-nav { gap: 1px !important; }
+          .dl-search-wrap { width: 40px !important; }
+          .dl-search-wrap.dl-search-open { width: 200px !important; }
+          .dl-date-pill { display: none !important; }
+        }
+        .dl-nav { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .dl-nav::-webkit-scrollbar { display: none; }
+      `}</style>
+      <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+        <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
           <div style={{ width: 30, height: 30, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14, color: '#fff' }}>D</div>
           <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>DispatchLens</span>
         </div>
-        <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0 }}>
+        <nav ref={navRef} className="dl-nav" style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0, overflowX: 'auto' as const }}>
           {/* Pipeline stages, in workflow order, joined by chevrons */}
           {([
             { key: 'import', label: 'Import', count: 0, show: effectiveAccess.can_import },
@@ -1933,9 +1951,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'dispatched', label: 'Dispatched', count: dispatchedOrders.length, show: effectiveAccess.can_dispatched },
             { key: 'eod', label: 'EOD', count: 0, show: effectiveAccess.can_eod },
           ] as { key: Tab; label: string; count: number; show: boolean }[]).filter(t => t.show).map(({ key, label, count }, i) => (
-            <span key={key} style={{ display: 'flex', alignItems: 'center' }}>
+            <span key={key} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
               {i > 0 && <span style={{ color: 'var(--text3)', fontSize: 11, margin: '0 1px', userSelect: 'none' as const }}>›</span>}
-              <button onClick={() => setTab(key)} style={{
+              <button data-active={tab === key} onClick={() => setTab(key)} style={{
                 padding: '6px 11px', border: 'none', borderRadius: 6,
                 background: tab === key ? 'var(--accent-bg)' : 'transparent',
                 color: tab === key ? 'var(--accent)' : 'var(--text2)',
@@ -1954,7 +1972,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               </button>
             </span>
           ))}
-          <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 10px' }} />
+          <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 10px', flexShrink: 0 }} />
           {/* Non-pipeline cluster */}
           {([
             { key: 'returns', label: 'Returns', show: effectiveAccess.can_returns },
@@ -1967,21 +1985,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               background: tab === key ? 'var(--accent-bg)' : 'transparent',
               color: tab === key ? 'var(--accent)' : 'var(--text3)',
               fontFamily: 'DM Sans', fontWeight: tab === key ? 600 : 400, fontSize: 12.5,
-              cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap' as const,
+              cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap' as const, flexShrink: 0,
             }}>
               {label}
             </button>
           ))}
         </nav>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
           {/* Global search */}
           <div style={{ position: 'relative' as const }}>
-            <div style={{
+            <div className={`dl-search-wrap${showSearch ? ' dl-search-open' : ''}`} style={{
               display: 'flex', alignItems: 'center', gap: 8,
               background: 'var(--bg2)', border: '1px solid var(--border)',
               borderRadius: 7, padding: '5px 12px',
               transition: 'width 0.2s, border-color 0.15s',
               width: showSearch ? 240 : 160,
+              overflow: 'hidden',
             }}>
               <Search size={13} style={{ color: 'var(--text3)', flexShrink: 0 }} />
               <input
@@ -2064,7 +2083,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             )}
           </div>
 
-          <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)' }}>
+          <span className="dl-date-pill" style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)', whiteSpace: 'nowrap' as const }}>
             {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
