@@ -62,10 +62,19 @@ export async function PATCH(request: Request) {
     can_wh_stock, can_wh_coating, can_wh_picking, can_wh_inventory, can_wh_barcodes,
     can_wh_pack_generate, can_wh_pack_scan, can_wh_pack_inventory, can_wh_pack_rto, can_wh_pack_units } = body
 
+  // can_warehouse is a derived roll-up: true if ANY warehouse sub-permission is on.
+  // Kept in sync here so a gate checking the top-level flag never locks out a user
+  // who legitimately has granular warehouse access.
+  const can_warehouse = !!(
+    can_wh_stock || can_wh_coating || can_wh_picking || can_wh_inventory || can_wh_barcodes ||
+    can_wh_pack_generate || can_wh_pack_scan || can_wh_pack_inventory || can_wh_pack_rto || can_wh_pack_units
+  )
+
   const { data, error } = await adminClient
     .from('dispatch_user_access')
     .update({
       status,
+      can_warehouse,
       can_import: can_import ?? false,
       can_plan: can_plan ?? false,
       can_review: can_review ?? false,
