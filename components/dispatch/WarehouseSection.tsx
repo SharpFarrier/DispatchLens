@@ -49,7 +49,7 @@ function tabBtn(active: boolean): React.CSSProperties {
   }
 }
 
-export default function WarehouseSection({ userId, access }: { userId: string; access: UserAccess }) {
+export default function WarehouseSection({ userId, access, isOwner = false }: { userId: string; access: UserAccess; isOwner?: boolean }) {
   // Only show sub-tabs the user is permitted to see.
   const packingTabs = PACKING_TABS.filter(t => access[t.perm])
   const topTabs = TOP_TABS.filter(t => t.perm === 'packing' ? packingTabs.length > 0 : access[t.perm as keyof UserAccess])
@@ -92,7 +92,7 @@ export default function WarehouseSection({ userId, access }: { userId: string; a
           {packingTab === 'generate' && <GenerateTab userId={userId} />}
           {packingTab === 'scan' && <ScanToStockTab />}
           {packingTab === 'inventory' && <InventoryTab />}
-          {packingTab === 'lifecycle' && <LifecycleTab userId={userId} />}
+          {packingTab === 'lifecycle' && <LifecycleTab userId={userId} isOwner={isOwner} />}
           {packingTab === 'rto' && <RtoTab />}
           {packingTab === 'treatment' && <RtoTreatmentTab />}
           {packingTab === 'units' && <UnitsTab />}

@@ -4130,7 +4130,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {/* ════ WAREHOUSE ════ */}
         {tab === 'warehouse' && (
-          <WarehouseSection userId={user.id} access={effectiveAccess} />
+          <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} />
         )}
 
         {/* ════ USERS ════ */}
