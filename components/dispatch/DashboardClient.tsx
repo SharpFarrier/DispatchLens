@@ -93,6 +93,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
   const [stockGateOn, setStockGateOn] = useState(false)
   const [stockGateSaving, setStockGateSaving] = useState(false)
+  // Stocked finished-frame count per barcode-SKU (for the Plan tab availability badge).
+  const [stockBySku, setStockBySku] = useState<Record<string, number>>({})
   // When a scanned piece isn't in stock, owner can force-dispatch from this prompt.
   const [forcePrompt, setForcePrompt] = useState<{ scanned: string; seq: string | null; reason: string } | null>(null)
   // Gate-ON: piece is real but not in stock — offer move-to-stock or force (any scanning user).
@@ -267,6 +269,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     supabase.from('app_config').select('value').eq('key', 'stock_gate_enabled').maybeSingle().then(({ data }) => {
       setStockGateOn((data?.value as string) === 'true')
     })
+    // Stocked packed_units grouped by SKU → availability shown while planning.
+    void (async () => {
+      const rows = await fetchAllRows<{ sku: string | null }>((from, to) =>
+        supabase.from('packed_units').select('sku').eq('status', 'stocked').range(from, to))
+      const map: Record<string, number> = {}
+      for (const r of rows) { const k = (r.sku || '').trim(); if (k) map[k] = (map[k] || 0) + 1 }
+      setStockBySku(map)
+    })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -2633,6 +2643,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           updating={updatingIds.has(order.id)}
                           daysLeftDisplay={displayDaysLeft(order)}
                           liveUrgencyTier={liveUrgency(order)}
+                          stockCount={order.barcode_sku ? (stockBySku[order.barcode_sku] ?? null) : null}
                           onSelect={toggleSelect}
                           onDecision={updateDecision}
                           onSchedule={scheduleOrder}
@@ -4202,10 +4213,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay, liveUrgencyTier }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay, liveUrgencyTier, stockCount }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   liveUrgencyTier: UrgencyTier | null
+  stockCount?: number | null
   onSelect: (id: string) => void
   onDecision: (id: string, d: PlanDecision) => void
   onSchedule: (id: string, date: string) => void
@@ -4263,7 +4275,16 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         </div>
       </td>
       <td style={{ padding: '8px 12px', maxWidth: 160 }}><span style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: 150 }}>{order.customer_name}</span></td>
-      <td style={{ padding: '8px 12px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
+      <td style={{ padding: '8px 12px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3 }}>
+          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, alignSelf: 'flex-start' as const }}>{order.barcode_sku || order.sku}</span>
+          {order.barcode_sku && stockCount !== null && stockCount !== undefined && (
+            <span style={{ fontFamily: 'DM Mono', fontSize: 10, fontWeight: 600, color: stockCount > 0 ? 'var(--dispatched)' : 'var(--critical)' }}>
+              {stockCount > 0 ? `${stockCount} in stock` : 'no stock'}
+            </span>
+          )}
+        </div>
+      </td>
       <td style={{ padding: '8px 12px' }}>
         <select
           value={order.courier}
