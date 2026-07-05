@@ -18,25 +18,58 @@ export interface TrackInput {
 
 export function normalizeBD(code: string, desc: string): { status: string; label: string } {
   const s = (code + ' ' + desc).toLowerCase()
-  if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
-  if (s.includes('out for delivery') || s.includes('ofd')) return { status: 'ofd', label: 'Out for Delivery' }
-  if (s.includes('ndr') || s.includes('delivery attempt') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
-  if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
+  // Order matters: every NEGATIVE / non-final case is checked BEFORE the bare
+  // "delivered" match, and "delivered" is matched as a real delivery event —
+  // never as a substring of "undelivered" / "not delivered", and never from an
+  // intermediate hub scan that merely mentions the word.
+  if (s.includes('undelivered') || s.includes('not delivered') || s.includes('could not be delivered')
+      || s.includes('delivery attempt') || s.includes('delivery failed') || s.includes('failed delivery')
+      || s.includes('delivery not done') || s.includes('ndr')) {
+    return { status: 'ndr', label: 'NDR' }
+  }
+  if (s.includes('out for delivery') || /\bofd\b/.test(s)) return { status: 'ofd', label: 'Out for Delivery' }
+  if (s.includes('rto') || s.includes('return to origin') || s.includes('returned to origin') || s.includes('return')) return { status: 'rto', label: 'RTO' }
+  // Positive delivery only: "shipment delivered" / "delivered to consignee" / a
+  // status literally "delivered", but NOT when preceded by un-/not-/cannot.
+  if (isDelivered(s)) return { status: 'delivered', label: 'Delivered' }
   if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
-  if (s.includes('transit') || s.includes('arrived') || s.includes('departed')) return { status: 'in_transit', label: 'In Transit' }
+  if (s.includes('transit') || s.includes('arrived') || s.includes('departed') || s.includes('in-transit')) return { status: 'in_transit', label: 'In Transit' }
   if (s.includes('booked') || s.includes('manifested')) return { status: 'booked', label: 'Booked' }
   return { status: 'unknown', label: desc || code || 'Unknown' }
 }
 
 export function normalizeDL(status: string): { status: string; label: string } {
   const s = (status || '').toLowerCase()
-  if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
+  // Same ordering discipline as normalizeBD: exclusions first, positive delivery last.
+  if (s.includes('undelivered') || s.includes('not delivered') || s.includes('could not be delivered')
+      || s.includes('failed delivery') || s.includes('delivery failed') || s.includes('delivery attempt')
+      || s.includes('ndr')) {
+    return { status: 'ndr', label: 'NDR' }
+  }
   if (s.includes('out for delivery')) return { status: 'ofd', label: 'Out for Delivery' }
-  if (s.includes('failed delivery') || s.includes('undelivered')) return { status: 'ndr', label: 'NDR' }
-  if (s.includes('rto') || s.includes('return')) return { status: 'rto', label: 'RTO' }
-  if (s.includes('transit')) return { status: 'in_transit', label: 'In Transit' }
+  if (s.includes('rto') || s.includes('return to origin') || s.includes('returned to origin') || s.includes('return')) return { status: 'rto', label: 'RTO' }
+  if (isDelivered(s)) return { status: 'delivered', label: 'Delivered' }
+  if (s.includes('transit') || s.includes('in-transit')) return { status: 'in_transit', label: 'In Transit' }
   if (s.includes('picked up') || s.includes('pickup')) return { status: 'picked_up', label: 'Picked Up' }
   return { status: 'booked', label: status || 'Booked' }
+}
+
+// True only for a genuine completed delivery — guards against "undelivered",
+// "not delivered", "cannot be delivered", etc. Requires the word "delivered"
+// with no negating token immediately before it.
+function isDelivered(s: string): boolean {
+  if (!s.includes('delivered')) return false
+  // Reject if any negation precedes a 'delivered' occurrence.
+  const NEG = ['un', 'not ', 'non', 'cannot', "can't", 'couldnt', "couldn't", 'could not', 'no ', 'failed', 'attempt', 'unable']
+  // Scan each 'delivered' occurrence; accept only if none are negated.
+  let idx = s.indexOf('delivered')
+  while (idx !== -1) {
+    const before = s.slice(Math.max(0, idx - 14), idx)
+    const negated = NEG.some(n => before.includes(n)) || (idx >= 2 && s.slice(idx - 2, idx) === 'un')
+    if (!negated) return true
+    idx = s.indexOf('delivered', idx + 1)
+  }
+  return false
 }
 
 // Fetch tracking for a set of AWBs across couriers. Returns results keyed by AWB.
