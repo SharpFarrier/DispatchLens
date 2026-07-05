@@ -1134,6 +1134,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // ── Computed ──
   const today = new Date().toISOString().split('T')[0]
   const activeOrders = useMemo(() => orders.filter(o => !o.is_cancelled && !o.is_dispatched), [orders])
+  // "Needed" per barcode-SKU = active, not-yet-dispatched orders competing for that SKU.
+  const neededBySku = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const o of activeOrders) { const k = (o.barcode_sku || '').trim(); if (k) m[k] = (m[k] || 0) + 1 }
+    return m
+  }, [activeOrders])
   const cancelledOrders = useMemo(() => orders.filter(o => o.is_cancelled), [orders])
 
   // Unique scheduled dates for dispatch date filter
@@ -2644,6 +2650,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           daysLeftDisplay={displayDaysLeft(order)}
                           liveUrgencyTier={liveUrgency(order)}
                           stockCount={order.barcode_sku ? (stockBySku[order.barcode_sku] ?? null) : null}
+                          neededCount={order.barcode_sku ? (neededBySku[order.barcode_sku] ?? null) : null}
                           onSelect={toggleSelect}
                           onDecision={updateDecision}
                           onSchedule={scheduleOrder}
@@ -4213,11 +4220,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay, liveUrgencyTier, stockCount }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay, liveUrgencyTier, stockCount, neededCount }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   liveUrgencyTier: UrgencyTier | null
   stockCount?: number | null
+  neededCount?: number | null
   onSelect: (id: string) => void
   onDecision: (id: string, d: PlanDecision) => void
   onSchedule: (id: string, date: string) => void
@@ -4278,11 +4286,20 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3 }}>
           <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, alignSelf: 'flex-start' as const }}>{order.barcode_sku || order.sku}</span>
-          {order.barcode_sku && stockCount !== null && stockCount !== undefined && (
-            <span style={{ fontFamily: 'DM Mono', fontSize: 10, fontWeight: 600, color: stockCount > 0 ? 'var(--dispatched)' : 'var(--critical)' }}>
-              {stockCount > 0 ? `${stockCount} in stock` : 'no stock'}
-            </span>
-          )}
+          {order.barcode_sku && stockCount !== null && stockCount !== undefined && (() => {
+            const need = neededCount ?? 0
+            const diff = stockCount - need
+            const short = diff < 0
+            const surplusColor = 'var(--dispatched)'  // enough
+            const shortColor = 'var(--critical)'       // short
+            return (
+              <span style={{ fontFamily: 'DM Mono', fontSize: 10, whiteSpace: 'nowrap' as const }}>
+                <span style={{ color: stockCount > 0 ? 'var(--text2)' : 'var(--critical)', fontWeight: 600 }}>{stockCount} stock</span>
+                <span style={{ color: 'var(--text3)' }}> · {need} needed</span>
+                <span style={{ color: short ? shortColor : surplusColor, fontWeight: 700 }}> · {short ? `short ${Math.abs(diff)}` : `+${diff}`}</span>
+              </span>
+            )
+          })()}
         </div>
       </td>
       <td style={{ padding: '8px 12px' }}>
