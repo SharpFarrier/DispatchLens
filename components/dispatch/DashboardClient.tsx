@@ -95,6 +95,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [stockGateSaving, setStockGateSaving] = useState(false)
   // Stocked finished-frame count per barcode-SKU (for the Plan tab availability badge).
   const [stockBySku, setStockBySku] = useState<Record<string, number>>({})
+  // Delivery-column filter (timeliness buckets) + sort toggle.
+  const [deliveryFilter, setDeliveryFilter] = useState<Set<string>>(new Set())
+  const [deliverySortDir, setDeliverySortDir] = useState<'none' | 'asc' | 'desc'>('none')
+  const [showDeliveryPopover, setShowDeliveryPopover] = useState(false)
+  useEffect(() => {
+    if (!showDeliveryPopover) return
+    const close = () => setShowDeliveryPopover(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [showDeliveryPopover])
   // When a scanned piece isn't in stock, owner can force-dispatch from this prompt.
   const [forcePrompt, setForcePrompt] = useState<{ scanned: string; seq: string | null; reason: string } | null>(null)
   // Gate-ON: piece is real but not in stock — offer move-to-stock or force (any scanning user).
@@ -1157,6 +1167,28 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     return o.days_left === null || o.days_left === undefined ? null : o.days_left - 1
   }
 
+  // Delivery-column timeliness: one source of truth for the cell, the sort, and the filter.
+  // bucket: 'early' | 'ontime' | 'late' | 'overdue' | 'inflight' | 'rto' | 'none'
+  // sortVal: higher = worse (most overdue/late at top when sorted desc).
+  const deliveryTimeliness = (o: DBOrder): { bucket: string; sortVal: number } => {
+    const liveStatus = (o.tracking_number && trackingData[o.tracking_number]?.status) || o.tracking_status || null
+    if (!o.promise_date) return { bucket: 'none', sortVal: -1e9 }
+    const promise = new Date(o.promise_date + 'T00:00:00').getTime()
+    if (liveStatus === 'rto') return { bucket: 'rto', sortVal: 1e8 }
+    if (liveStatus === 'delivered') {
+      const delivered = o.tracking_last_update ? new Date(o.tracking_last_update).getTime() : null
+      if (delivered === null) return { bucket: 'ontime', sortVal: 0 }
+      const lateDays = Math.round((delivered - promise) / 86400000)
+      if (lateDays < 0) return { bucket: 'early', sortVal: lateDays }   // negative → sorts low (best)
+      if (lateDays === 0) return { bucket: 'ontime', sortVal: 0 }
+      return { bucket: 'late', sortVal: 1000 + lateDays }               // late outranks in-flight
+    }
+    // Not yet delivered: in-flight; overdue if past promise.
+    const daysLeft = Math.round((promise - new Date(today + 'T00:00:00').getTime()) / 86400000)
+    if (daysLeft < 0) return { bucket: 'overdue', sortVal: 500 + Math.abs(daysLeft) }
+    return { bucket: 'inflight', sortVal: -daysLeft }
+  }
+
   // Active, still-undecided orders whose deadline has already passed (unplanned backlog).
   const overdueCount = useMemo(() =>
     activeOrders.filter(o => o.plan_decision !== 'hold' && o.plan_decision !== 'scheduled').filter(o => {
@@ -1274,7 +1306,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (dispatchedCourierFilter.size > 0) {
       list = list.filter(o => dispatchedCourierFilter.has(o.courier))
     }
-    if (dispatchedSortCol) {
+    if (deliveryFilter.size > 0) {
+      list = list.filter(o => deliveryFilter.has(deliveryTimeliness(o).bucket))
+    }
+    // Delivery-timeliness sort takes precedence when active (it's a computed value).
+    if (deliverySortDir !== 'none') {
+      list.sort((a, b) => {
+        const av = deliveryTimeliness(a).sortVal
+        const bv = deliveryTimeliness(b).sortVal
+        return deliverySortDir === 'asc' ? av - bv : bv - av
+      })
+    } else if (dispatchedSortCol) {
       list.sort((a, b) => {
         const av = (a as unknown as Record<string, unknown>)[dispatchedSortCol] ?? ''
         const bv = (b as unknown as Record<string, unknown>)[dispatchedSortCol] ?? ''
@@ -1283,7 +1325,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [dispWindowOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, trackingData])
+  }, [dispWindowOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, deliveryFilter, deliverySortDir, trackingData])
   // Reset to first page whenever the filtered set changes (search/filters/window).
   useEffect(() => { setDispPage(0) }, [dispatchedSearch, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, dispWindowOrders])
 
@@ -3366,7 +3408,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         { label: 'AWB', col: 'tracking_number' },
                         { label: 'Pincode · City', col: 'pincode' },
                         { label: 'Promise', col: 'promise_date' },
-                        { label: 'Delivery', col: null },
+                        { label: 'DELIVERY_SPECIAL', col: null },
                         { label: 'STATUS_FILTER_SPECIAL', col: null },
                         { label: '', col: null },
                       ] as { label: string; col: string | null }[]).map(({ label, col }) => {
@@ -3421,6 +3463,57 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           )
                         }
 
+                        if (label === 'DELIVERY_SPECIAL') {
+                          const DELIV_OPTS: { key: string; label: string }[] = [
+                            { key: 'early',    label: 'Delivered early' },
+                            { key: 'ontime',   label: 'Delivered on time' },
+                            { key: 'late',     label: 'Delivered late' },
+                            { key: 'overdue',  label: 'Overdue (not delivered)' },
+                            { key: 'inflight', label: 'In flight (on track)' },
+                            { key: 'rto',      label: 'RTO' },
+                            { key: 'none',     label: 'No promise date' },
+                          ]
+                          const delivCount = (key: string) => dispWindowOrders.filter(o => deliveryTimeliness(o).bucket === key).length
+                          return (
+                            <th key="delivery" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <button onClick={() => setDeliverySortDir(d => d === 'desc' ? 'asc' : d === 'asc' ? 'none' : 'desc')}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: deliverySortDir !== 'none' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                  Delivery {deliverySortDir === 'desc' ? '↓' : deliverySortDir === 'asc' ? '↑' : ''}
+                                </button>
+                                <button onClick={e => { e.stopPropagation(); setShowDeliveryPopover(v => !v) }} style={{
+                                  background: deliveryFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                  border: deliveryFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                  borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                  color: deliveryFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                }}>
+                                  {deliveryFilter.size > 0 ? `${deliveryFilter.size} ▾` : '▾'}
+                                </button>
+                                {deliveryFilter.size > 0 && <button onClick={() => setDeliveryFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
+                              </div>
+                              {showDeliveryPopover && (
+                                <div style={{ position: 'absolute' as const, top: '100%', left: 0, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 210, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', marginTop: 4 }} onClick={e => e.stopPropagation()}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DELIVERY</span>
+                                    <button onClick={() => { setDeliveryFilter(new Set()); setShowDeliveryPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                                  </div>
+                                  {DELIV_OPTS.map(opt => {
+                                    const on = deliveryFilter.has(opt.key)
+                                    const cnt = delivCount(opt.key)
+                                    return (
+                                      <button key={opt.key} onClick={() => setDeliveryFilter(prev => { const n = new Set(prev); n.has(opt.key) ? n.delete(opt.key) : n.add(opt.key); return n })}
+                                        style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, border: 'none', background: on ? 'var(--accent-bg)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text2)', fontSize: 12, cursor: 'pointer', fontWeight: on ? 600 : 400, textAlign: 'left' as const }}>
+                                        <span>{opt.label}</span>
+                                        <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{cnt}</span>
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </th>
+                          )
+                        }
                         if (label === 'STATUS_FILTER_SPECIAL') {
                           const STATUS_OPTS: { key: string; label: string }[] = [
                             { key: 'delivered', label: 'Delivered' },
@@ -3654,9 +3747,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               const delivered = order.tracking_last_update ? new Date(order.tracking_last_update).getTime() : null
                               if (!delivered) return <span style={{ fontSize: 11, color: 'var(--dispatched)' }}>Delivered</span>
                               const lateDays = Math.round((delivered - promise) / 86400000)
-                              return lateDays <= 0
-                                ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--dispatched)' }}>On time</span>
-                                : <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--today)' }}>{lateDays}d late</span>
+                              if (lateDays < 0) return <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--dispatched)' }}>{Math.abs(lateDays)}d early</span>
+                              if (lateDays === 0) return <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--dispatched)' }}>On time</span>
+                              return <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--today)' }}>{lateDays}d late</span>
                             }
                             if (liveStatus === 'rto') return <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--critical)' }}>RTO</span>
                             const daysLeft = Math.round((promise - new Date(today + 'T00:00:00').getTime()) / 86400000)
