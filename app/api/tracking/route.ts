@@ -3,12 +3,35 @@ import { createClient } from '@/lib/supabase/server'
 
 const WORKER = 'https://tracklens-proxy.adityaramnani91581.workers.dev'
 
+// True only for a genuine completed delivery. Guards against "undelivered",
+// "not delivered", "cannot be delivered", "failed delivery", etc. — the word
+// "delivered" only counts when NOT preceded by a negation.
+function isDelivered(s: string): boolean {
+  if (!s.includes('delivered')) return false
+  const NEG = ['un', 'not ', 'non', 'cannot', "can't", 'couldnt', "couldn't", 'could not', 'no ', 'failed', 'attempt', 'unable']
+  let idx = s.indexOf('delivered')
+  while (idx !== -1) {
+    const before = s.slice(Math.max(0, idx - 14), idx)
+    const negated = NEG.some(n => before.includes(n)) || (idx >= 2 && s.slice(idx - 2, idx) === 'un')
+    if (!negated) return true
+    idx = s.indexOf('delivered', idx + 1)
+  }
+  return false
+}
+
 function normalizeCargo(status: string): { status: string; label: string } {
   const s = (status || '').toLowerCase()
-  if (s.includes('delivered')) return { status: 'delivered', label: 'Delivered' }
+  // Order matters: every NEGATIVE / non-final case is checked BEFORE the bare
+  // "delivered" match. "undelivered"/"not delivered"/"failed delivery" contain
+  // the substring "delivered" and previously leaked through as Delivered.
+  if (s.includes('undelivered') || s.includes('not delivered') || s.includes('could not be delivered')
+      || s.includes('delivery failed') || s.includes('failed delivery') || s.includes('delivery attempt')
+      || s.includes('ndr') || s.includes('failed')) {
+    return { status: 'ndr', label: 'NDR' }
+  }
   if (s.includes('out_for_delivery') || s.includes('out for delivery')) return { status: 'ofd', label: 'Out for Delivery' }
-  if (s.includes('ndr') || s.includes('undelivered') || s.includes('failed')) return { status: 'ndr', label: 'NDR' }
   if (s.includes('rto')) return { status: 'rto', label: 'RTO' }
+  if (isDelivered(s)) return { status: 'delivered', label: 'Delivered' }
   if (s.includes('in_transit') || s.includes('transit') || s.includes('shipped')) return { status: 'in_transit', label: 'In Transit' }
   if (s.includes('pickup scheduled') || s.includes('pickup_scheduled') || s.includes('ready_to_ship') || s.includes('ready to ship') || s.includes('manifested') || s.includes('booked')) return { status: 'booked', label: 'Pickup Scheduled' }
   if (s.includes('picked_up') || s.includes('picked up') || s.includes('pickup complete')) return { status: 'picked_up', label: 'Picked Up' }
