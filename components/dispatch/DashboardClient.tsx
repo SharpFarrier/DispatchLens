@@ -1326,6 +1326,29 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }
     return list
   }, [dispWindowOrders, dispatchedSearch, dispatchedSortCol, dispatchedSortDir, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, deliveryFilter, deliverySortDir, trackingData])
+
+  // Facet counts: the visible set with all filters applied EXCEPT the one being
+  // counted (so a filter's own options stay selectable). 'except' names the filter to skip.
+  const facetSet = useCallback((except: 'search' | 'date' | 'status' | 'courier' | 'delivery') => {
+    let list = [...dispWindowOrders]
+    if (except !== 'search' && dispatchedSearch.trim().length >= 2) {
+      const q = dispatchedSearch.toLowerCase()
+      list = list.filter(o => o.order_id.toLowerCase().includes(q) || o.customer_name.toLowerCase().includes(q) || o.sku.toLowerCase().includes(q) || (o.tracking_number && o.tracking_number.toLowerCase().includes(q)))
+    }
+    if (except !== 'date' && dispatchedDateFilter.size > 0) {
+      list = list.filter(o => dispatchedDateFilter.has(o.dispatched_at ? o.dispatched_at.slice(0, 10) : 'unknown'))
+    }
+    if (except !== 'status' && dispatchedStatusFilter.size > 0) {
+      list = list.filter(o => { const ls = (o.tracking_number && trackingData[o.tracking_number]?.status) || o.tracking_status || 'none'; return dispatchedStatusFilter.has(ls) })
+    }
+    if (except !== 'courier' && dispatchedCourierFilter.size > 0) {
+      list = list.filter(o => dispatchedCourierFilter.has(o.courier))
+    }
+    if (except !== 'delivery' && deliveryFilter.size > 0) {
+      list = list.filter(o => deliveryFilter.has(deliveryTimeliness(o).bucket))
+    }
+    return list
+  }, [dispWindowOrders, dispatchedSearch, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, deliveryFilter, trackingData])
   // Reset to first page whenever the filtered set changes (search/filters/window).
   useEffect(() => { setDispPage(0) }, [dispatchedSearch, dispatchedDateFilter, dispatchedStatusFilter, dispatchedCourierFilter, dispWindowOrders])
 
@@ -3414,7 +3437,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       ] as { label: string; col: string | null }[]).map(({ label, col }) => {
                         if (label === 'COURIER_FILTER_SPECIAL') {
                           const COURIER_OPTS = ['Bluedart', 'Delhivery']
-                          const courierCount = (c: string) => dispWindowOrders.filter(o => o.courier === c).length
+                          const courierCount = (c: string) => facetSet('courier').filter(o => o.courier === c).length
                           return (
                             <th key="courier" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -3465,15 +3488,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
                         if (label === 'DELIVERY_SPECIAL') {
                           const DELIV_OPTS: { key: string; label: string }[] = [
-                            { key: 'early',    label: 'Delivered early' },
-                            { key: 'ontime',   label: 'Delivered on time' },
-                            { key: 'late',     label: 'Delivered late' },
-                            { key: 'overdue',  label: 'Overdue (not delivered)' },
-                            { key: 'inflight', label: 'In flight (on track)' },
+                            { key: 'early',    label: 'early' },
+                            { key: 'ontime',   label: 'on time' },
+                            { key: 'late',     label: 'late' },
+                            { key: 'inflight', label: 'left' },
+                            { key: 'overdue',  label: 'over' },
                             { key: 'rto',      label: 'RTO' },
-                            { key: 'none',     label: 'No promise date' },
+                            { key: 'none',     label: '—' },
                           ]
-                          const delivCount = (key: string) => dispWindowOrders.filter(o => deliveryTimeliness(o).bucket === key).length
+                          const delivCount = (key: string) => facetSet('delivery').filter(o => deliveryTimeliness(o).bucket === key).length
                           return (
                             <th key="delivery" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -3526,7 +3549,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             { key: 'unknown', label: 'Unknown' },
                             { key: 'none', label: 'Not Synced' },
                           ]
-                          const statusCount = (key: string) => dispWindowOrders.filter(o => {
+                          const statusCount = (key: string) => facetSet('status').filter(o => {
                             const ls = (o.tracking_number && trackingData[o.tracking_number]?.status) || o.tracking_status || 'none'
                             return ls === key
                           }).length
@@ -3632,7 +3655,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   {uniqueDispatchedDates.map(date => {
                                     const isSelected = dispatchedDateFilter.has(date)
                                     const label = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
-                                    const count = dispWindowOrders.filter(o => o.dispatched_at?.startsWith(date)).length
+                                    const count = facetSet('date').filter(o => o.dispatched_at?.startsWith(date)).length
                                     return (
                                       <button key={date} onClick={() => setDispatchedDateFilter(prev => { const n = new Set(prev); n.has(date) ? n.delete(date) : n.add(date); return n })}
                                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
