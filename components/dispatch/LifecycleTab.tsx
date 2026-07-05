@@ -59,7 +59,7 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
   const load = useCallback(async () => {
     setLoading(true)
     const rows = await fetchAllRows<PackedUnit>((from, to) =>
-      supabase.from('packed_units').select('*').order('created_at', { ascending: false }).range(from, to))
+      supabase.from('packed_units').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     setUnits(rows)
     setLoading(false)
   }, [supabase])

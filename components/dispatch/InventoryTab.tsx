@@ -37,7 +37,7 @@ export default function InventoryTab() {
     if (!skuBarcodes[sku]) {
       setLoadingSku(sku)
       const rows = await fetchAllRows<{ barcode: string; status: string }>((from, to) =>
-        supabase.from('packed_units').select('barcode, status').eq('sku', sku).order('seq').range(from, to))
+        supabase.from('packed_units').select('barcode, status').eq('sku', sku).order('seq').order('id', { ascending: false }).range(from, to))
       setSkuBarcodes(prev => ({ ...prev, [sku]: rows }))
       setLoadingSku(null)
     }
@@ -48,7 +48,7 @@ export default function InventoryTab() {
       setLoading(true)
       // packed_units can exceed Supabase's 1000-row cap — page through all rows.
       const allUnits = await fetchAllRows<PackedUnitRow>((from, to) =>
-        supabase.from('packed_units').select('sku, status').range(from, to))
+        supabase.from('packed_units').select('sku, status').order('id', { ascending: false }).range(from, to))
       const s = await supabase.from('packed_skus').select('sku, descr, product')
       setUnits(allUnits)
       setSkus((s.data as PackedSkuRow[]) || [])
@@ -97,7 +97,7 @@ export default function InventoryTab() {
   }
 
   const th = (label: string, k: SortKey, align: 'left' | 'right' = 'right') => (
-    <th onClick={() => toggleSort(k)} style={{ padding: '9px 12px', textAlign: align, color: sortKey === k ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }}>
+    <th onClick={() => toggleSort(k)} style={{ background: 'var(--bg2)', padding: '9px 12px', textAlign: align, color: sortKey === k ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }}>
       {label}{sortKey === k ? <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 4, opacity: 0.3 }}>↕</span>}
     </th>
   )
@@ -150,9 +150,9 @@ export default function InventoryTab() {
         </div>
       ) : (
         <div style={{ ...card, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' as const }}>
+          <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 360px)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 560 }}>
-              <thead>
+              <thead style={{ position: 'sticky' as const, top: 0, zIndex: 10 }}>
                 <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
                   {th('SKU / Product', 'descr', 'left')}
                   {th('Stocked', 'stocked')}

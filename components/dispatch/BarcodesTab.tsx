@@ -87,7 +87,7 @@ export default function BarcodesTab() {
     setLoading(true)
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400 * 1000).toISOString()
     const data = await fetchAllRows<Piece>((from, to) => {
-      let q = supabase.from('pieces').select('*').order('created_at', { ascending: false })
+      let q = supabase.from('pieces').select('*').order('created_at', { ascending: false }).order('id', { ascending: false })
       if (windowMode === '7d') q = q.gte('created_at', sevenDaysAgo)
       return q.range(from, to)
     })

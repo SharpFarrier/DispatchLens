@@ -48,7 +48,7 @@ export default function StockTab({ userId }: { userId: string }) {
   const loadShipments = useCallback(async () => {
     setIsLoading(true)
     const data = await fetchAllRows((from, to) =>
-      supabase.from('shipments').select('*, shipment_items(*)').neq('status', 'deleted').order('created_at', { ascending: false }).range(from, to))
+      supabase.from('shipments').select('*, shipment_items(*)').neq('status', 'deleted').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     setShipments((data as typeof shipments) || [])
     setIsLoading(false)
   }, [supabase])

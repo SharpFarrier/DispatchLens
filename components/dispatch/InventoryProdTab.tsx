@@ -171,10 +171,10 @@ export default function InventoryProdTab() {
     // Growable transactional tables are paged past the 1000-row cap; small
     // reference tables (bom_items, products_with_flags) stay single-shot.
     const [sl, cl, pk, os] = await Promise.all([
-      fetchAllRows((from, to) => supabase.from('shipment_items').select('*, shipments!inner(status,supplier)').neq('shipments.status', 'deleted').range(from, to)),
-      fetchAllRows((from, to) => supabase.from('coating_items').select('*, coating_trolleys!inner(status)').neq('coating_trolleys.status', 'deleted').range(from, to)),
-      fetchAllRows((from, to) => supabase.from('pick_items').select('*, pick_sessions!inner(status)').neq('pick_sessions.status', 'deleted').range(from, to)),
-      fetchAllRows((from, to) => supabase.from('opening_stock').select('*').range(from, to)),
+      fetchAllRows((from, to) => supabase.from('shipment_items').select('*, shipments!inner(status,supplier)').neq('shipments.status', 'deleted').order('id', { ascending: false }).range(from, to)),
+      fetchAllRows((from, to) => supabase.from('coating_items').select('*, coating_trolleys!inner(status)').neq('coating_trolleys.status', 'deleted').order('id', { ascending: false }).range(from, to)),
+      fetchAllRows((from, to) => supabase.from('pick_items').select('*, pick_sessions!inner(status)').neq('pick_sessions.status', 'deleted').order('id', { ascending: false }).range(from, to)),
+      fetchAllRows((from, to) => supabase.from('opening_stock').select('*').order('id', { ascending: false }).range(from, to)),
     ])
     setData({
       shipmentItems: sl || [], coatingItems: cl || [], pickItems: pk || [],

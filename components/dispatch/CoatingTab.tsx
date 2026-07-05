@@ -43,7 +43,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
   const loadTrolleys = useCallback(async () => {
     setIsFetching(true)
     const data = await fetchAllRows((from, to) =>
-      supabase.from('coating_trolleys').select('*, coating_items(*)').neq('status', 'deleted').order('created_at', { ascending: false }).range(from, to))
+      supabase.from('coating_trolleys').select('*, coating_items(*)').neq('status', 'deleted').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     setTrolleys((data as typeof trolleys) || [])
     setIsFetching(false)
   }, [supabase])

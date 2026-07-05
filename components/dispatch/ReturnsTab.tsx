@@ -74,7 +74,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
       supabase.from('dispatch_orders').select('*')
         .eq('is_dispatched', true).eq('is_cancelled', false)
         .eq('tracking_status', 'rto')
-        .order('dispatched_at', { ascending: false }).range(from, to))
+        .order('dispatched_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     setRtoOrders(rto.filter(o => !tracked.has(o.order_id)))
     setLoading(false)
   }, [supabase])
