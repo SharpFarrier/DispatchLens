@@ -253,7 +253,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const loadOrders = useCallback(async () => {
     setLoadingOrders(true)
-    const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).range(from, to))
+    const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     setOrders(data)
     setLoadingOrders(false)
     setSelectedIds(new Set())
@@ -262,7 +262,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Silent refresh — re-pull orders without a loading flash or clearing selections.
   // Used to keep the End-of-Day batch/courier counts live while another device dispatches.
   const silentRefreshOrders = useCallback(async () => {
-    const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).range(from, to))
+    const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     if (data.length) setOrders(data)
   }, [supabase])
 
@@ -1240,7 +1240,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const buildDispWindowQuery = useCallback((from: number, to: number) => {
     let q = supabase.from('dispatch_orders').select('*')
       .eq('is_dispatched', true).eq('is_cancelled', false)
-      .order('dispatched_at', { ascending: false })
+      .order('dispatched_at', { ascending: false }).order('id', { ascending: false })
     if (dispWindowRange.from) q = q.gte('dispatched_at', dispWindowRange.from)
     if (dispWindowRange.to) q = q.lte('dispatched_at', dispWindowRange.to)
     return q.range(from, to)
@@ -1263,7 +1263,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         .eq('is_dispatched', true).eq('is_cancelled', false)
         .or('tracking_status.is.null,tracking_status.not.in.("delivered","rto")')
         .not('tracking_number', 'is', null)
-        .order('dispatched_at', { ascending: false }).range(from, to))
+        .order('dispatched_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     setTrackOrders(rows)
   }, [supabase])
 
