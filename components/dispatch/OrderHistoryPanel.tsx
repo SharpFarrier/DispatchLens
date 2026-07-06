@@ -85,10 +85,10 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
   const [returnReason, setReturnReason] = useState<string>(RETURN_REASONS[0])
   const [returnNote, setReturnNote] = useState('')
   const [creatingReturn, setCreatingReturn] = useState(false)
-  // Reverse-tracking: default the reverse AWB to the forward AWB (RTO case), editable.
-  const [revSameAsForward, setRevSameAsForward] = useState(true)
-  const [reverseTrackingId, setReverseTrackingId] = useState('')
-  const [reverseCourier, setReverseCourier] = useState<'' | 'Bluedart' | 'Delhivery'>('')
+  // Return type chosen at marking time. Reverse tracking is NOT asked here — it's
+  // added later in the Returns tab (customer returns) or fetched via the forward
+  // AWB (RTO), because the pickup doesn't exist yet when the return is marked.
+  const [returnType, setReturnType] = useState<'' | 'customer' | 'rto'>('')
 
   useEffect(() => {
     fetchEvents()
@@ -136,11 +136,14 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
     const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('returns').upsert({
       order_id: order.order_id,
-      source: 'manual',
+      source: returnType === 'rto' ? 'rto' : 'manual',
+      return_type: returnType,
       reason: returnReason,
       barcode: order.scanned_barcode || null,
-      reverse_tracking_id: (revSameAsForward ? (order.tracking_number || null) : (reverseTrackingId.trim() || null)),
-      reverse_courier: reverseCourier || null,
+      // For RTO, seed the reverse tracker with the forward AWB (Bluedart re-tags RTO
+      // to it). For customer returns, left null — entered later in the Returns tab.
+      reverse_tracking_id: returnType === 'rto' ? (order.tracking_number || null) : null,
+      reverse_courier: returnType === 'rto' ? (order.courier || null) : null,
       notes: returnNote.trim() || null,
       created_by: user?.id ?? null,
       created_by_email: user?.email ?? null,
@@ -154,13 +157,14 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
         body: JSON.stringify({
           order_id: order.order_id,
           event_type: 'return',
-          title: `Marked as return · ${returnReason}`,
+          title: `Marked as ${returnType === 'rto' ? 'RTO' : 'customer return'} · ${returnReason}`,
           note: returnNote.trim() || null,
         }),
       })
       setAlreadyReturn(true)
       setShowReturnForm(false)
       setReturnNote('')
+      setReturnType('')
       fetchEvents()
       onReturnCreated?.()
     }
@@ -250,42 +254,54 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
 
             {/* Mark as Return */}
             {canMarkReturn && !showReturnForm && (
-              <button onClick={() => { setRevSameAsForward(true); setReverseTrackingId(order.tracking_number || ''); setReverseCourier(''); setShowReturnForm(true) }}
+              <button onClick={() => { setReturnType(''); setReturnReason(RETURN_REASONS[0]); setReturnNote(''); setShowReturnForm(true) }}
                 style={{ marginTop: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #fed7aa', background: 'var(--today-bg)', color: 'var(--today)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <RotateCcw size={12} /> Mark as Return
               </button>
             )}
             {showReturnForm && (
-              <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid #fed7aa', background: 'var(--today-bg)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid #fed7aa', background: 'var(--today-bg)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--today)' }}>NEW RETURN</span>
-                <select value={returnReason} onChange={e => setReturnReason(e.target.value)}
-                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
-                  {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
 
-                {/* Reverse tracking ID — same as forward AWB (RTO) or a new reverse-pickup ID */}
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={revSameAsForward}
-                    onChange={e => { setRevSameAsForward(e.target.checked); if (e.target.checked) setReverseTrackingId(order.tracking_number || '') }} />
-                  Reverse tracking same as forward AWB{order.tracking_number ? ` (${order.tracking_number})` : ''}
-                </label>
-                {!revSameAsForward && (
-                  <input value={reverseTrackingId} onChange={e => setReverseTrackingId(e.target.value)}
-                    placeholder="Reverse tracking / pickup ID…"
-                    style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono', outline: 'none', boxSizing: 'border-box' }} />
+                {/* Step 1: return type */}
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>Return type</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {([['customer', 'Customer return'], ['rto', 'RTO (courier)']] as const).map(([val, lbl]) => (
+                      <button key={val} onClick={() => setReturnType(val)}
+                        style={{ flex: 1, padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                          border: `1px solid ${returnType === val ? 'var(--today)' : 'var(--border)'}`,
+                          background: returnType === val ? 'var(--today)' : 'var(--surface)',
+                          color: returnType === val ? '#fff' : 'var(--text2)' }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Step 2: reason (required) + optional note — shown once a type is picked */}
+                {returnType && (
+                  <>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>Reason (required)</div>
+                      <select value={returnReason} onChange={e => setReturnReason(e.target.value)}
+                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
+                        {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                    <textarea value={returnNote} onChange={e => setReturnNote(e.target.value)} placeholder="Optional note…" rows={2}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Sans', resize: 'none', outline: 'none', boxSizing: 'border-box' as const }} />
+                    <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                      {returnType === 'rto'
+                        ? 'RTO tracks on the forward AWB — no reverse ID needed.'
+                        : 'Add the reverse pickup tracking ID later in the Returns tab, once the pickup is generated.'}
+                    </div>
+                  </>
                 )}
-                <select value={reverseCourier} onChange={e => setReverseCourier(e.target.value as '' | 'Bluedart' | 'Delhivery')}
-                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: `1px solid ${reverseCourier ? 'var(--border)' : '#fed7aa'}`, background: 'var(--surface)', color: reverseCourier ? 'var(--text)' : 'var(--text3)', fontSize: 12, cursor: 'pointer' }}>
-                  <option value="">— reverse courier (required) —</option>
-                  <option value="Bluedart">Bluedart</option>
-                  <option value="Delhivery">Delhivery</option>
-                </select>
 
-                <textarea value={returnNote} onChange={e => setReturnNote(e.target.value)} placeholder="Optional note…" rows={2}
-                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Sans', resize: 'none', outline: 'none' }} />
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={createReturn} disabled={creatingReturn || !reverseCourier || (!revSameAsForward && !reverseTrackingId.trim())}
-                    style={{ flex: 1, padding: '7px 12px', borderRadius: 6, border: 'none', background: (!reverseCourier || (!revSameAsForward && !reverseTrackingId.trim())) ? 'var(--border2)' : 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: (!reverseCourier || (!revSameAsForward && !reverseTrackingId.trim())) ? 'not-allowed' : 'pointer' }}>
+                  <button onClick={createReturn} disabled={creatingReturn || !returnType}
+                    style={{ flex: 1, padding: '7px 12px', borderRadius: 6, border: 'none', background: !returnType ? 'var(--border2)' : 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: !returnType ? 'not-allowed' : 'pointer' }}>
                     {creatingReturn ? 'Adding…' : 'Confirm Return'}
                   </button>
                   <button onClick={() => setShowReturnForm(false)}
