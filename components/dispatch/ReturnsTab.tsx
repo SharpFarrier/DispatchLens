@@ -19,10 +19,16 @@ export const RETURN_REASONS = [
 export interface ReturnRow {
   id: string
   order_id: string
-  source: 'manual' | 'rto_auto'
+  source: 'manual' | 'rto_auto' | 'rto'
+  return_type: 'customer' | 'rto' | null
   reason: string | null
   refund_status: 'pending' | 'refunded'
   refund_amount: number | null
+  refund_type: 'full' | 'partial' | null
+  refunded_at: string | null
+  invoice_amount: number | null
+  is_cancelled: boolean
+  cancelled_at: string | null
   barcode: string | null
   reverse_tracking_id: string | null
   reverse_courier: string | null
@@ -61,11 +67,13 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   const [revSyncing, setRevSyncing] = useState(false)
   const [revSyncMsg, setRevSyncMsg] = useState<string | null>(null)
   const [amountDraft, setAmountDraft] = useState<Record<string, string>>({})
+  // Draft reverse-tracking entry per row (customer returns, added after pickup is generated).
+  const [revDraft, setRevDraft] = useState<Record<string, { id: string; courier: string }>>({})
 
   // ── Load returns + courier-RTO orders not yet tracked ──
   const load = useCallback(async () => {
     setLoading(true)
-    const { data: ret } = await supabase.from('returns').select('*').order('created_at', { ascending: false })
+    const { data: ret } = await supabase.from('returns').select('*').order('created_at', { ascending: false }).order('id', { ascending: false })
     const rows = (ret || []) as ReturnRow[]
     setReturns(rows)
     // Auto-RTO candidates: dispatched orders the courier flagged rto, not already in returns.
@@ -292,16 +300,16 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 820 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
-                {['Order', 'SKU', 'Reason', 'Source', 'Reverse', 'Warehouse', 'Refund', ...(canSeeAmount ? ['Amount'] : []), 'Added'].map(h => (
-                  <th key={h} style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
+                {['Order', 'SKU', 'Reason', 'Type', 'Reverse', 'Warehouse', 'Refund', ...(canSeeAmount ? ['Amount'] : []), 'Added', ''].map((h, hi) => (
+                  <th key={hi} style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={canSeeAmount ? 9 : 8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</td></tr>
+                <tr><td colSpan={canSeeAmount ? 10 : 9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</td></tr>
               ) : returns.length === 0 ? (
-                <tr><td colSpan={canSeeAmount ? 9 : 8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns tracked yet. Add one above.</td></tr>
+                <tr><td colSpan={canSeeAmount ? 10 : 9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns tracked yet. Add one above.</td></tr>
               ) : returns.map((r, i) => (
                 <tr key={r.id} style={{ borderBottom: i < returns.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</td>
@@ -326,9 +334,14 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                     })()}
                   </td>
                   <td style={{ padding: '9px 12px' }}>
-                    <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: r.source === 'rto_auto' ? 'var(--today)' : 'var(--text3)', background: r.source === 'rto_auto' ? 'var(--today-bg)' : 'var(--bg2)', border: `1px solid ${r.source === 'rto_auto' ? '#fed7aa' : 'var(--border)'}`, padding: '2px 7px', borderRadius: 4 }}>
-                      {r.source === 'rto_auto' ? 'RTO' : 'MANUAL'}
-                    </span>
+                    {(() => {
+                      const isRto = r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto'
+                      return (
+                        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: isRto ? 'var(--today)' : 'var(--accent)', background: isRto ? 'var(--today-bg)' : 'var(--accent-bg)', border: `1px solid ${isRto ? '#fed7aa' : 'var(--border)'}`, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>
+                          {isRto ? 'RTO' : 'CUSTOMER'}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                     {r.reverse_tracking_id ? (
@@ -338,7 +351,38 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                           {r.reverse_courier || ''}{r.reverse_tracking_label ? ` · ${r.reverse_tracking_label}` : (r.reverse_tracking_status ? ` · ${r.reverse_tracking_status}` : ' · not synced')}
                         </span>
                       </div>
-                    ) : <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>}
+                    ) : (r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto') ? (
+                      // RTO tracks on the forward AWB (Bluedart re-tags) — no reverse ID entry.
+                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>tracks on forward AWB</span>
+                    ) : r.is_cancelled ? (
+                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>
+                    ) : (
+                      // Customer return, pickup generated → enter the reverse pickup ID now.
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          value={revDraft[r.id]?.id ?? ''}
+                          onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: e.target.value, courier: p[r.id]?.courier ?? '' } }))}
+                          placeholder="pickup ID…"
+                          style={{ width: 92, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'DM Mono', outline: 'none' }}
+                        />
+                        <select
+                          value={revDraft[r.id]?.courier ?? ''}
+                          onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: p[r.id]?.id ?? '', courier: e.target.value } }))}
+                          style={{ fontSize: 10, padding: '3px 4px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer' }}>
+                          <option value="">courier</option>
+                          <option value="Bluedart">BD</option>
+                          <option value="Delhivery">DL</option>
+                        </select>
+                        <button
+                          disabled={savingId === r.id || !(revDraft[r.id]?.id?.trim()) || !(revDraft[r.id]?.courier)}
+                          onClick={() => { const d = revDraft[r.id]; patchReturn(r.id, { reverse_tracking_id: d.id.trim(), reverse_courier: d.courier } as Partial<ReturnRow>); setRevDraft(p => { const n = { ...p }; delete n[r.id]; return n }) }}
+                          style={{ padding: '3px 7px', borderRadius: 5, border: 'none', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                            background: (revDraft[r.id]?.id?.trim() && revDraft[r.id]?.courier) ? 'var(--accent)' : 'var(--border2)',
+                            color: '#fff' }}>
+                          Add
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '9px 12px' }}>
                     {r.warehouse_received ? (
@@ -352,11 +396,33 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                     )}
                   </td>
                   <td style={{ padding: '9px 12px' }}>
-                    <button onClick={() => patchReturn(r.id, { refund_status: r.refund_status === 'pending' ? 'refunded' : 'pending' })}
-                      disabled={savingId === r.id}
-                      style={{ padding: '4px 10px', borderRadius: 6, border: `1px solid ${r.refund_status === 'refunded' ? '#bbf7d0' : '#fed7aa'}`, background: r.refund_status === 'refunded' ? 'var(--dispatched-bg)' : 'var(--today-bg)', color: r.refund_status === 'refunded' ? 'var(--dispatched)' : 'var(--today)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {r.refund_status === 'refunded' ? <><CheckCircle size={11} /> Refunded</> : <><Clock size={11} /> Pending</>}
-                    </button>
+                    {r.is_cancelled ? (
+                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>
+                    ) : (() => {
+                      const refunded = r.refund_status === 'refunded'
+                      // Derive full/partial from amount vs invoice when marking refunded.
+                      const markRefunded = () => {
+                        const amt = r.refund_amount
+                        const inv = r.invoice_amount
+                        const type: 'full' | 'partial' | null =
+                          amt != null && inv != null ? (amt >= inv ? 'full' : 'partial') : null
+                        patchReturn(r.id, { refund_status: 'refunded', refund_type: type, refunded_at: new Date().toISOString() } as Partial<ReturnRow>)
+                      }
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                          <button onClick={() => refunded ? patchReturn(r.id, { refund_status: 'pending', refund_type: null, refunded_at: null } as Partial<ReturnRow>) : markRefunded()}
+                            disabled={savingId === r.id}
+                            style={{ padding: '4px 10px', borderRadius: 6, border: `1px solid ${refunded ? '#bbf7d0' : '#fed7aa'}`, background: refunded ? 'var(--dispatched-bg)' : 'var(--today-bg)', color: refunded ? 'var(--dispatched)' : 'var(--today)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            {refunded ? <><CheckCircle size={11} /> Refunded</> : <><Clock size={11} /> Pending</>}
+                          </button>
+                          {refunded && r.refund_type && (
+                            <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 700, color: r.refund_type === 'partial' ? 'var(--today)' : 'var(--dispatched)' }}>
+                              {r.refund_type.toUpperCase()}{r.refund_type === 'partial' && r.invoice_amount ? ` ₹${r.refund_amount}/₹${r.invoice_amount}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </td>
                   {canSeeAmount && (
                     <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
@@ -375,6 +441,18 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                   )}
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>
                     {new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  </td>
+                  <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                    {r.is_cancelled ? (
+                      <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 4 }}>CANCELLED</span>
+                    ) : (r.return_type === 'customer' || r.source === 'manual') && !r.warehouse_received && r.refund_status !== 'refunded' ? (
+                      // Customer changed their mind — cancel the return request. Order stays normal.
+                      <button onClick={() => { if (confirm('Cancel this return request? The order stays delivered/normal.')) patchReturn(r.id, { is_cancelled: true, cancelled_at: new Date().toISOString() } as Partial<ReturnRow>) }}
+                        disabled={savingId === r.id}
+                        style={{ padding: '3px 9px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
+                        Cancel request
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ))}
