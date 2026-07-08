@@ -312,7 +312,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                 <tr><td colSpan={canSeeAmount ? 10 : 9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns tracked yet. Add one above.</td></tr>
               ) : returns.map((r, i) => (
                 <tr key={r.id} style={{ borderBottom: i < returns.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
-                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{r.order_id}</td>
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
                   <td style={{ padding: '9px 12px' }}>
                     {(() => {
