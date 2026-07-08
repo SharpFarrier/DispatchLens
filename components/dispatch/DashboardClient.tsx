@@ -4266,7 +4266,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ RETURNS ════ */}
         {tab === 'returns' && effectiveAccess.can_returns && (
           <ReturnsTab
-            canSeeAmount={effectiveAccess.can_users}
+            canSeeAmount={effectiveAccess.can_returns}
             onOpenOrder={order => setHistoryOrder(order)}
             reloadSignal={returnsReload}
           />
