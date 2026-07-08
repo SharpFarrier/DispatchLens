@@ -177,6 +177,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // AWB editing
   const [editingAwbId, setEditingAwbId] = useState<string | null>(null)
   const [editingAwbValue, setEditingAwbValue] = useState('')
+  const [editingLrId, setEditingLrId] = useState<string | null>(null)
+  const [editingLrValue, setEditingLrValue] = useState('')
   const [manualDispatchSku, setManualDispatchSku] = useState('')
   const [manualDispatching, setManualDispatching] = useState(false)
   // ⌘K focuses the global omnisearch.
@@ -518,6 +520,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, tracking_number: val || null } : o))
     setEditingAwbId(null)
     setEditingAwbValue('')
+  }
+
+  const saveLr = async (orderId: string) => {
+    const val = editingLrValue.trim()
+    await supabase.from('dispatch_orders').update({ lr_number: val || null, updated_at: new Date().toISOString() }).eq('id', orderId)
+    const order = orders.find(o => o.id === orderId)
+    if (order) logEvent(order.order_id, 'note', `LR number updated to: ${val || '(cleared)'}`)
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, lr_number: val || null } : o))
+    setEditingLrId(null)
+    setEditingLrValue('')
   }
 
   // ── Scan-out verification ──
@@ -2728,6 +2740,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           editingAwbValue={editingAwbValue}
                           onEditAwb={(id, val) => { setEditingAwbId(id); setEditingAwbValue(val) }}
                           onSaveAwb={saveAwb}
+                          editingLrId={editingLrId}
+                          editingLrValue={editingLrValue}
+                          onEditLr={(id, val) => { setEditingLrId(id); setEditingLrValue(val) }}
+                          onSaveLr={saveLr}
+                          onCancelLr={() => { setEditingLrId(null); setEditingLrValue('') }}
                           onCancelAwb={() => { setEditingAwbId(null); setEditingAwbValue('') }}
                         />
                       ))}
@@ -4336,7 +4353,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, daysLeftDisplay, liveUrgencyTier, stockCount, neededCount }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, editingLrId, editingLrValue, onEditLr, onSaveLr, onCancelLr, daysLeftDisplay, liveUrgencyTier, stockCount, neededCount }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   liveUrgencyTier: UrgencyTier | null
@@ -4355,6 +4372,11 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onEditAwb: (id: string, current: string) => void
   onSaveAwb: (id: string) => void
   onCancelAwb: () => void
+  editingLrId: string | null
+  editingLrValue: string
+  onEditLr: (id: string, current: string) => void
+  onSaveLr: (id: string) => void
+  onCancelLr: () => void
 }) {
   const [lrCopied, setLrCopied] = useState(false)
   const uc = {
@@ -4470,16 +4492,41 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
           </div>
         )}
       </td>
-      {/* LR / LTL — Delhivery only; click to copy */}
+      {/* LR / LTL — click to copy, pencil to edit */}
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
-        {order.lr_number
-          ? <span
-              onClick={() => { navigator.clipboard?.writeText(order.lr_number || ''); setLrCopied(true); setTimeout(() => setLrCopied(false), 1200) }}
-              title={lrCopied ? 'Copied' : 'Click to copy LR'}
-              style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, cursor: 'pointer', border: lrCopied ? '1px solid var(--dispatched)' : '1px solid var(--border)' }}
-            >{lrCopied ? '✓ copied' : order.lr_number}</span>
-          : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
-        }
+        {editingLrId === order.id ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              autoFocus
+              value={editingLrValue}
+              onChange={e => onEditLr(order.id, e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') onSaveLr(order.id); if (e.key === 'Escape') onCancelLr() }}
+              style={{ width: 110, padding: '3px 7px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, fontFamily: 'DM Mono', outline: 'none' }}
+            />
+            <button onClick={() => onSaveLr(order.id)} style={{ background: 'var(--dispatched)', border: 'none', borderRadius: 4, cursor: 'pointer', color: '#fff', fontSize: 10, padding: '3px 7px', fontWeight: 600 }}>✓</button>
+            <button onClick={onCancelLr} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '3px 6px' }}>✕</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {order.lr_number
+              ? <span
+                  onClick={() => { navigator.clipboard?.writeText(order.lr_number || ''); setLrCopied(true); setTimeout(() => setLrCopied(false), 1200) }}
+                  title={lrCopied ? 'Copied' : 'Click to copy LR'}
+                  style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, cursor: 'pointer', border: lrCopied ? '1px solid var(--dispatched)' : '1px solid var(--border)' }}
+                >{lrCopied ? '✓ copied' : order.lr_number}</span>
+              : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
+            }
+            <button
+              onClick={() => onEditLr(order.id, order.lr_number || '')}
+              title="Edit LR number"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, opacity: 0.5, display: 'flex', alignItems: 'center' }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}
+            >
+              <Pencil size={10} />
+            </button>
+          </div>
+        )}
       </td>
       <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
