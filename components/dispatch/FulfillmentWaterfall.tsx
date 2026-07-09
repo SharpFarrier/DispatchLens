@@ -178,14 +178,14 @@ export default function FulfillmentWaterfall() {
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 720 }}>
             <thead>
               <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-                {['Frame · size', 'Orders', 'Finished', 'Coated', 'Raw', 'Procure'].map((h, i) => (
+                {['Frame · size', 'Orders', 'Finished', 'Coated', 'Raw', 'To coat', 'Procure'].map((h, i) => (
                   <th key={i} style={{ padding: '9px 14px', textAlign: i === 0 ? 'left' as const : 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {shown.length === 0 ? (
-                <tr><td colSpan={6} style={{ padding: 32, textAlign: 'center' as const, color: 'var(--text3)' }}>{shortOnly ? 'No shortfalls — everything is fulfillable.' : 'No pending bed orders.'}</td></tr>
+                <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center' as const, color: 'var(--text3)' }}>{shortOnly ? 'No shortfalls — everything is fulfillable.' : 'No pending bed orders.'}</td></tr>
               ) : shown.map((r, i) => {
                 const short = r.procure > 0
                 return (
@@ -198,6 +198,7 @@ export default function FulfillmentWaterfall() {
                     <td style={{ padding: '9px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--dispatched)' }}>{r.finished}<span style={{ color: 'var(--text3)', fontSize: 10 }}> ·{r.fromFinished}</span></td>
                     <td style={{ padding: '9px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--accent)' }}>{r.coated}<span style={{ color: 'var(--text3)', fontSize: 10 }}> ·{r.fromCoated}</span></td>
                     <td style={{ padding: '9px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{r.raw}<span style={{ color: 'var(--text3)', fontSize: 10 }}> ·{r.fromRaw}</span></td>
+                    <td style={{ padding: '9px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 14, color: r.fromRaw > 0 ? 'var(--accent)' : 'var(--text3)' }}>{r.fromRaw > 0 ? r.fromRaw : '—'}</td>
                     <td style={{ padding: '9px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 14, color: short ? 'var(--critical)' : 'var(--dispatched)' }}>{short ? r.procure : '✓'}</td>
                   </tr>
                 )
@@ -211,6 +212,7 @@ export default function FulfillmentWaterfall() {
                   <td style={{ padding: '10px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--dispatched)' }}>{shown.reduce((s, r) => s + r.finished, 0)}</td>
                   <td style={{ padding: '10px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--accent)' }}>{shown.reduce((s, r) => s + r.coated, 0)}</td>
                   <td style={{ padding: '10px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text2)' }}>{shown.reduce((s, r) => s + r.raw, 0)}</td>
+                  <td style={{ padding: '10px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--accent)' }}>{shown.reduce((s, r) => s + r.fromRaw, 0)}</td>
                   <td style={{ padding: '10px 14px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--critical)' }}>{shown.reduce((s, r) => s + r.procure, 0)}</td>
                 </tr>
               </tfoot>
@@ -220,7 +222,7 @@ export default function FulfillmentWaterfall() {
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.6 }}>
-        Each row: pending orders drawn down finished → coated → raw. The small <span style={{ fontFamily: 'DM Mono' }}>·n</span> after each stock number is how much of it this demand consumes. <b>Procure</b> = orders still unmet after all three stages (raw frames to make/buy). Finished is SKU-exact; coated and raw are shared shape+size frame pools.
+        Each row: pending orders drawn down finished → coated → raw. The small <span style={{ fontFamily: 'DM Mono' }}>·n</span> after each stock number is how much of it this demand consumes. <b>To coat</b> = raw frames to pull into coating so they can be packed for orders (the raw this demand consumes). <b>Procure</b> = orders still unmet after all three stages (new raw frames to make/buy). Finished is SKU-exact; coated and raw are shared shape+size frame pools.
       </div>
     </div>
   )
