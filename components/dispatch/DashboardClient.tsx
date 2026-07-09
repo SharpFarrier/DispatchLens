@@ -2846,6 +2846,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                     {order.courier === 'Bluedart' ? 'BD' : 'DL'}
                                   </span>
                                 </td>
+                                <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
+                                  <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>
+                                  {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
+                                </td>
                                 <td style={{ padding: '10px 16px' }}>
                                   <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>
                                     {order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
@@ -2940,6 +2944,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 </td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed' }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span></td>
+                                <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>{order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}</td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
                                 <td style={{ padding: '10px 16px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span></td>
                                 <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
