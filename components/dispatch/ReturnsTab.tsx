@@ -69,6 +69,8 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   const [amountDraft, setAmountDraft] = useState<Record<string, string>>({})
   // Draft reverse-tracking entry per row (customer returns, added after pickup is generated).
   const [revDraft, setRevDraft] = useState<Record<string, { id: string; courier: string }>>({})
+  // Which customer-return row is currently editing its (existing) reverse tracking ID.
+  const [editingRevId, setEditingRevId] = useState<string | null>(null)
 
   // ── Load returns + courier-RTO orders not yet tracked ──
   const load = useCallback(async () => {
@@ -344,12 +346,53 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                     })()}
                   </td>
                   <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
-                    {r.reverse_tracking_id ? (
-                      <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
-                        <span style={{ fontFamily: 'DM Mono', fontSize: 10, color: 'var(--text2)' }}>{r.reverse_tracking_id}</span>
-                        <span style={{ fontSize: 10, color: r.reverse_tracking_status === 'delivered' ? 'var(--dispatched)' : r.reverse_tracking_status === 'rto' ? 'var(--critical)' : 'var(--text3)' }}>
-                          {r.reverse_courier || ''}{r.reverse_tracking_label ? ` · ${r.reverse_tracking_label}` : (r.reverse_tracking_status ? ` · ${r.reverse_tracking_status}` : ' · not synced')}
-                        </span>
+                    {r.reverse_tracking_id && editingRevId === r.id ? (
+                      // Editing an EXISTING reverse ID (customer returns — pickup IDs change across attempts).
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          value={revDraft[r.id]?.id ?? r.reverse_tracking_id ?? ''}
+                          onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: e.target.value, courier: p[r.id]?.courier ?? r.reverse_courier ?? '' } }))}
+                          style={{ width: 92, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'DM Mono', outline: 'none' }}
+                        />
+                        <select
+                          value={revDraft[r.id]?.courier ?? r.reverse_courier ?? ''}
+                          onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: p[r.id]?.id ?? r.reverse_tracking_id ?? '', courier: e.target.value } }))}
+                          style={{ fontSize: 10, padding: '3px 4px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer' }}>
+                          <option value="">courier</option>
+                          <option value="Bluedart">BD</option>
+                          <option value="Delhivery">DL</option>
+                        </select>
+                        <button
+                          disabled={savingId === r.id || !(revDraft[r.id]?.id?.trim() ?? r.reverse_tracking_id)}
+                          onClick={() => {
+                            const d = revDraft[r.id]
+                            const newId = (d?.id ?? r.reverse_tracking_id ?? '').trim()
+                            const newCourier = d?.courier ?? r.reverse_courier ?? ''
+                            // Changing the pickup ID resets the reverse tracking status (new AWB to sync).
+                            patchReturn(r.id, { reverse_tracking_id: newId, reverse_courier: newCourier, reverse_tracking_status: null, reverse_tracking_label: null } as Partial<ReturnRow>)
+                            setEditingRevId(null); setRevDraft(p => { const n = { ...p }; delete n[r.id]; return n })
+                          }}
+                          style={{ padding: '3px 7px', borderRadius: 5, border: 'none', fontSize: 10, fontWeight: 600, cursor: 'pointer', background: 'var(--dispatched)', color: '#fff' }}>✓</button>
+                        <button onClick={() => { setEditingRevId(null); setRevDraft(p => { const n = { ...p }; delete n[r.id]; return n }) }}
+                          style={{ padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text3)', fontSize: 10, cursor: 'pointer' }}>✕</button>
+                      </div>
+                    ) : r.reverse_tracking_id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                          <span style={{ fontFamily: 'DM Mono', fontSize: 10, color: 'var(--text2)' }}>{r.reverse_tracking_id}</span>
+                          <span style={{ fontSize: 10, color: r.reverse_tracking_status === 'delivered' ? 'var(--dispatched)' : r.reverse_tracking_status === 'rto' ? 'var(--critical)' : 'var(--text3)' }}>
+                            {r.reverse_courier || ''}{r.reverse_tracking_label ? ` · ${r.reverse_tracking_label}` : (r.reverse_tracking_status ? ` · ${r.reverse_tracking_status}` : ' · not synced')}
+                          </span>
+                        </div>
+                        {/* Customer returns: pickup ID changes across attempts — allow editing. RTO stays read-only. */}
+                        {!(r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto') && !r.is_cancelled && (
+                          <button onClick={() => setEditingRevId(r.id)} title="Edit reverse tracking ID"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, opacity: 0.5, display: 'flex', alignItems: 'center' }}
+                            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                            onMouseLeave={e => e.currentTarget.style.opacity = '0.5'}>
+                            <Pencil size={10} />
+                          </button>
+                        )}
                       </div>
                     ) : (r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto') ? (
                       // RTO tracks on the forward AWB (Bluedart re-tags) — no reverse ID entry.

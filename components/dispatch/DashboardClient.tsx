@@ -2807,7 +2807,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 <p>No unfulfillable orders. All orders have been planned.</p>
               </div>
             ) : (
-              <div style={{ overflowY: 'auto' as const, maxHeight: 'calc(100vh - 220px)', display: 'flex', flexDirection: 'column' as const, gap: 20, paddingRight: 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
                 {/* Group by reason */}
                 {UNFULFILLABLE_REASONS.map(reason => {
                   const group = unfulfillableOrders.filter(o => o.unfulfillable_reason === reason)
