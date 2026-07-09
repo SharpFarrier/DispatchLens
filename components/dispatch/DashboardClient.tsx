@@ -210,7 +210,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
   // Picklist print selection
-  const [selectedPrintDates, setSelectedPrintDates] = useState<Set<string>>(new Set())
   // Upcoming demand expanded weeks
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set())
   // Dispatch date filter (Plan tab)
@@ -1162,6 +1161,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     for (const o of activeOrders) { const k = (o.barcode_sku || '').trim(); if (k) m[k] = (m[k] || 0) + 1 }
     return m
   }, [activeOrders])
+
+  // Packed stock keyed by PLATFORM sku (the demand matrix uses platform sku).
+  // Resolve each platform sku to its barcode_sku via orders, then read stockBySku.
+  const stockByPlatformSku = useMemo(() => {
+    const platToBar: Record<string, string> = {}
+    for (const o of orders) { if (o.sku && o.barcode_sku) platToBar[o.sku] = o.barcode_sku }
+    const m: Record<string, number> = {}
+    for (const [plat, bar] of Object.entries(platToBar)) {
+      const st = stockBySku[bar]
+      if (st !== undefined) m[plat] = st
+    }
+    return m
+  }, [orders, stockBySku])
   const cancelledOrders = useMemo(() => orders.filter(o => o.is_cancelled), [orders])
 
   // Unique scheduled dates for dispatch date filter
@@ -1652,6 +1664,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }))
       }))
   }, [orders])
+
+  // Flattened picklist: one row per (date, courier, sku) for the consolidated table.
+  const flatPicklist = useMemo(() => {
+    const rows: { date: string; courier: Courier; sku: string; qty: number; count: number }[] = []
+    for (const { date, couriers } of picklist) {
+      for (const { courier, items } of couriers) {
+        for (const it of items) rows.push({ date, courier, sku: it.sku, qty: it.qty, count: it.count })
+      }
+    }
+    // Sort by date, then courier, then sku.
+    return rows.sort((a, b) =>
+      a.date.localeCompare(b.date) || a.courier.localeCompare(b.courier) || a.sku.localeCompare(b.sku))
+  }, [picklist])
 
   const allVisibleSelected = filteredActive.length > 0 && filteredActive.every(o => selectedIds.has(o.id))
   const toggleSelectAll = () => {
@@ -2996,158 +3021,71 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 {scheduledCount} orders scheduled · {picklist.reduce((s, g) => s + g.couriers.reduce((cs, c) => cs + c.items.reduce((is, i) => is + i.qty, 0), 0), 0)} pieces
               </span>
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-                {selectedPrintDates.size > 0 && (
-                  <button onClick={() => {
-                    // Store selected dates and trigger print
-                    window.dispatchEvent(new CustomEvent('printSelectedDates', { detail: Array.from(selectedPrintDates) }))
-                    window.print()
-                  }} style={{
-                    padding: '8px 16px', borderRadius: 7,
-                    background: 'var(--accent)', border: 'none',
-                    color: '#fff', fontSize: 13, cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600,
-                  }}>
-                    <Printer size={14} /> Print Selected ({selectedPrintDates.size})
-                  </button>
-                )}
-                <button onClick={() => {
-                  setSelectedPrintDates(new Set())
-                  window.print()
-                }} style={{
+                <button onClick={() => window.print()} className="no-print" style={{
                   padding: '8px 16px', borderRadius: 7,
-                  background: 'var(--surface)', border: '1px solid var(--border)',
-                  color: 'var(--text)', fontSize: 13, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500,
+                  background: 'var(--accent)', border: 'none',
+                  color: '#fff', fontSize: 13, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600,
                 }}>
-                  <Printer size={14} /> Print All
+                  <Printer size={14} /> Print
                 </button>
               </div>
             </div>
 
-            {picklist.length === 0 ? (
+            {flatPicklist.length === 0 ? (
               <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text2)' }}>
                 No orders scheduled yet. Go to Plan tab and assign dispatch dates.
               </div>
             ) : (
-              picklist.map(({ date, couriers: courierGroups }) => {
-                const isToday = date === today
-                const isFuture = date > today
-                const dateLabel = isToday
-                  ? `Today — ${new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}`
-                  : date === 'Unscheduled' ? 'No date set'
-                  : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
-                const totalOrders = courierGroups.reduce((s, c) => s + c.items.reduce((si, i) => si + i.count, 0), 0)
-                const totalPcs = courierGroups.reduce((s, c) => s + c.items.reduce((si, i) => si + i.qty, 0), 0)
-
-                return (
-                  <div key={date} style={{ display: selectedPrintDates.size > 0 && !selectedPrintDates.has(date) ? 'none' : 'block' }}
-                    className={selectedPrintDates.size > 0 && !selectedPrintDates.has(date) ? 'print-hide' : ''}>
-                    {/* Date header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }} className={`print-date-${date}`}>
-                      <input
-                        type="checkbox"
-                        checked={selectedPrintDates.has(date)}
-                        onChange={() => setSelectedPrintDates(prev => {
-                          const n = new Set(prev)
-                          n.has(date) ? n.delete(date) : n.add(date)
-                          return n
-                        })}
-                        style={{ width: 15, height: 15, cursor: 'pointer', accentColor: 'var(--accent)', flexShrink: 0 }}
-                        className="no-print"
-                      />
-                      <div style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '6px 14px', borderRadius: 20,
-                        background: isToday ? '#ecfdf5' : isFuture ? 'var(--hold-bg)' : 'var(--bg2)',
-                        border: `1px solid ${isToday ? '#6ee7b7' : isFuture ? '#bfdbfe' : 'var(--border)'}`,
-                      }}>
-                        <Calendar size={13} style={{ color: isToday ? '#059669' : isFuture ? 'var(--hold)' : 'var(--text3)' }} />
-                        <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: isToday ? '#059669' : isFuture ? 'var(--hold)' : 'var(--text2)' }}>
-                          {dateLabel}
-                        </span>
-                      </div>
-                      <span style={{ color: 'var(--text3)', fontSize: 13 }}>{totalOrders} orders · {totalPcs} pcs</span>
-                      <button
-                        onClick={() => {
-                          setSelectedPrintDates(new Set([date]))
-                          setTimeout(() => window.print(), 100)
-                        }}
-                        className="no-print"
-                        style={{
-                          marginLeft: 'auto',
-                          padding: '5px 12px', borderRadius: 6,
-                          background: 'var(--surface)', border: '1px solid var(--border)',
-                          color: 'var(--text2)', fontSize: 12, cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', gap: 5,
-                        }}
-                      >
-                        <Printer size={12} /> Print this date
-                      </button>
-                    </div>
-
-                    {/* Courier tables side by side */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                      {courierGroups.map(({ courier, items }) => {
-                        const totalQty = items.reduce((s, i) => s + i.qty, 0)
-                        const cc = courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
+              <div style={{ ...card, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 320px)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 720 }}>
+                    <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
+                      <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
+                        {['Date', 'Courier', 'SKU', 'Qty', 'Orders', 'Action'].map((h, hi) => (
+                          <th key={hi} style={{ padding: '9px 16px', textAlign: (h === 'Qty' || h === 'Orders') ? 'right' as const : 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {flatPicklist.map((row, i) => {
+                        const isToday = row.date === today
+                        const dateLabel = row.date === 'Unscheduled' ? 'No date'
+                          : new Date(row.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+                        const cc = row.courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
+                        const isUnfulfillable = orders.some(o => o.sku === row.sku && o.plan_decision === 'unfulfillable' && !o.is_cancelled)
                         return (
-                          <div key={courier} style={{ ...card, overflow: 'hidden' }}>
-                            <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <div style={{ width: 8, height: 8, borderRadius: '50%', background: cc }} />
-                              <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 13 }}>{courier}</span>
-                              <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 12 }}>{items.length} SKUs · {totalQty} pcs</span>
-                            </div>
-                            <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
-                              <thead>
-                                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                  {['SKU', 'ORDERS', 'QTY', 'ACTION'].map(h => (
-                                    <th key={h} style={{ padding: '7px 16px', textAlign: h === 'SKU' || h === 'ACTION' ? 'left' as const : 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {items.map((item, i) => {
-                                  const isUnfulfillable = orders.some(o => o.sku === item.sku && o.plan_decision === 'unfulfillable' && !o.is_cancelled)
-                                  return (
-                                    <tr key={item.sku} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--border)' : 'none', background: isUnfulfillable ? 'var(--critical-bg)' : 'transparent' }}>
-                                      <td style={{ padding: '9px 16px', fontFamily: 'DM Mono', fontSize: 12, color: isUnfulfillable ? 'var(--critical)' : 'var(--text)' }}>{item.sku}</td>
-                                      <td style={{ padding: '9px 16px', textAlign: 'right' as const, color: 'var(--text2)', fontSize: 13 }}>{item.count}</td>
-                                      <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, color: cc, fontSize: 14 }}>{item.qty}</td>
-                                      <td style={{ padding: '9px 16px' }}>
-                                        {!isUnfulfillable ? (
-                                          <button onClick={() => { setUnfulfillableSku(item.sku); setUnfulfillableReason('Not ready'); setUnfulfillableNote(''); setAvailableQty(''); setAllocationPreview(null) }}
-                                            style={{ padding: '3px 9px', borderRadius: 5, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
-                                            Unfulfillable
-                                          </button>
-                                        ) : (
-                                          <span style={{ fontSize: 11, color: 'var(--critical)', fontFamily: 'DM Mono', display: 'flex', alignItems: 'center', gap: 3 }}>
-                                            <AlertCircle size={11} />
-                                            {orders.find(o => o.sku === item.sku && o.unfulfillable_reason)?.unfulfillable_reason || 'Unfulfillable'}
-                                          </span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  )
-                                })}
-                              </tbody>
-                              <tfoot>
-                                <tr style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)' }}>
-                                  <td style={{ padding: '9px 16px', fontWeight: 600, fontSize: 13 }}>Total</td>
-                                  <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{items.reduce((s, i) => s + i.count, 0)}</td>
-                                  <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: cc, fontSize: 16 }}>{totalQty}</td>
-                                  <td />
-                                </tr>
-                              </tfoot>
-                            </table>
-                          </div>
+                          <tr key={`${row.date}__${row.courier}__${row.sku}`} style={{ borderBottom: '1px solid var(--border)', background: isUnfulfillable ? 'var(--critical-bg)' : (i % 2 === 0 ? 'transparent' : 'var(--bg2)') }}>
+                            <td style={{ padding: '9px 16px', whiteSpace: 'nowrap' as const }}>
+                              <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 600, color: isToday ? '#059669' : 'var(--text2)' }}>{isToday ? `Today · ${dateLabel}` : dateLabel}</span>
+                            </td>
+                            <td style={{ padding: '9px 16px', whiteSpace: 'nowrap' as const }}>
+                              <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: cc, background: row.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>{row.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
+                            </td>
+                            <td style={{ padding: '9px 16px', fontFamily: 'DM Mono', fontSize: 12, color: isUnfulfillable ? 'var(--critical)' : 'var(--text)' }}>{row.sku}</td>
+                            <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: cc, fontSize: 14 }}>{row.qty}</td>
+                            <td style={{ padding: '9px 16px', textAlign: 'right' as const, color: 'var(--text2)', fontSize: 13 }}>{row.count}</td>
+                            <td style={{ padding: '9px 16px', whiteSpace: 'nowrap' as const }}>
+                              {!isUnfulfillable ? (
+                                <button onClick={() => { setUnfulfillableSku(row.sku); setUnfulfillableReason('Not ready'); setUnfulfillableNote(''); setAvailableQty(''); setAllocationPreview(null) }}
+                                  className="no-print"
+                                  style={{ padding: '3px 9px', borderRadius: 5, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 11, cursor: 'pointer', fontWeight: 500 }}>
+                                  Unfulfillable
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--critical)', fontFamily: 'DM Mono', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                  <AlertCircle size={11} />
+                                  {orders.find(o => o.sku === row.sku && o.unfulfillable_reason)?.unfulfillable_reason || 'Unfulfillable'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
                         )
                       })}
-                      {/* Fill empty column if only one courier */}
-                      {courierGroups.length === 1 && <div />}
-                    </div>
-                  </div>
-                )
-              })
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
           {/* ════ UPCOMING DEMAND MATRIX ════ */}
           {upcomingDemand.totalOrders > 0 && (
@@ -3241,6 +3179,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
                           <th style={{ padding: '9px 16px', textAlign: 'left' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'sticky' as const, left: 0, background: 'var(--bg2)', zIndex: 1, minWidth: 160 }}>SKU</th>
                           <th style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const }}>Total</th>
+                          <th style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const }}>Stock</th>
                           {cols.map(col => (
                             <th key={col.key} style={{
                               padding: '9px 12px', textAlign: 'center' as const,
@@ -3266,6 +3205,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             <tr key={sku} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                               <td style={{ padding: '8px 16px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', fontWeight: 500, position: 'sticky' as const, left: 0, background: i % 2 === 0 ? 'var(--surface)' : 'var(--bg2)', zIndex: 1, whiteSpace: 'nowrap' as const }}>{sku}</td>
                               <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text)', fontSize: 13 }}>{rowTotal}</td>
+                              {(() => {
+                                const stk = stockByPlatformSku[sku]
+                                const covered = stk !== undefined && stk >= rowTotal
+                                return (
+                                  <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, fontSize: 12,
+                                    color: stk === undefined ? 'var(--text3)' : covered ? 'var(--dispatched)' : 'var(--critical)' }}>
+                                    {stk === undefined ? '—' : stk}
+                                  </td>
+                                )
+                              })()}
                               {cols.map(col => {
                                 const qty = getQty(sku, col.key)
                                 const orderCount = getOrders(sku, col.key)
