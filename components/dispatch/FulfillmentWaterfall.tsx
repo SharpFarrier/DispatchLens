@@ -17,6 +17,23 @@ const SIZE_MAP: Record<string, string> = {
   '6x6.25': 'King 6ft',
 }
 
+// Product family (packed_skus.product, a marketing name) → frame shape.
+// products.name is shape-named ("Element Bed"), so it can't be joined to the
+// marketing product name directly — this is the authoritative bridge.
+const PRODUCT_SHAPE: Record<string, string> = {
+  'Nova': 'Element',
+  'Jasper': 'Headboard',
+  'Atlas': 'Round',
+  'Aura': 'Round',
+  'Nexon': 'Square',
+  'Avon': 'Metal',
+  'Oslo': 'Oslo',
+  'Boston': 'Golden',
+  'Base': 'Base',
+  'Luvo': 'Wooden',
+  'Elvo': 'Wooden',
+}
+
 interface OrderRow { barcode_sku: string | null; plan_decision: string; is_dispatched: boolean; is_cancelled: boolean; qty: number | null }
 interface SkuMeta { sku: string; product: string; size: string | null; mattress: string | null }
 interface ProductShape { product_id: string; name: string; shape: string }
@@ -50,28 +67,15 @@ export default function FulfillmentWaterfall() {
       const skuMeta: Record<string, SkuMeta> = {}
       for (const s of (skuRes.data as SkuMeta[]) || []) skuMeta[s.sku] = s
 
-      // 3. product name → shape (1:1), via pieces joined to products.
-      //    pieces carry shape + product_id; products carry name.
-      const prodRes = await supabase.from('products').select('id, name')
-      const prodName: Record<string, string> = {}
-      for (const p of (prodRes.data as { id: string; name: string }[]) || []) prodName[p.id] = p.name
-      const shapeRows = await fetchAllRows<{ product_id: string; shape: string }>((from, to) =>
-        supabase.from('pieces').select('product_id, shape').order('id', { ascending: false }).range(from, to))
-      const productToShape: Record<string, string> = {}
-      for (const r of shapeRows) {
-        const nm = prodName[r.product_id]
-        if (nm && r.shape && !productToShape[nm]) productToShape[nm] = r.shape
-      }
-
-      // 4. Finished stock — stocked packed_units, per SKU → resolve to shape+size.
+      // 3. Finished stock — stocked packed_units, per SKU → resolve to shape+size.
       const units = await fetchAllRows<{ sku: string; status: string }>((from, to) =>
         supabase.from('packed_units').select('sku, status').order('id', { ascending: false }).range(from, to))
 
-      // 5. Coated pool — pieces status=coated, per shape+size (already supply-vocab size).
+      // 4. Coated pool — pieces status=coated, per shape+size (already supply-vocab size).
       const coated = await fetchAllRows<{ shape: string; size: string | null }>((from, to) =>
         supabase.from('pieces').select('shape, size').eq('status', 'coated').order('id', { ascending: false }).range(from, to))
 
-      // 6. Raw pool — opening_stock raw entries, per shape+size (net of coated already).
+      // 5. Raw pool — opening_stock raw entries, per shape+size (net of coated already).
       const rawRes = await supabase.from('opening_stock').select('entry_type, shape, size, pieces')
       const rawList = ((rawRes.data as { entry_type: string; shape: string; size: string | null; pieces: number }[]) || [])
         .filter(r => r.entry_type === 'raw')
@@ -87,7 +91,7 @@ export default function FulfillmentWaterfall() {
         if (o.plan_decision !== 'undecided' && o.plan_decision !== 'scheduled') continue
         const meta = skuMeta[(o.barcode_sku || '').trim()]
         if (!meta || !meta.size) continue
-        const shape = productToShape[meta.product]
+        const shape = PRODUCT_SHAPE[meta.product]
         const size = SIZE_MAP[meta.size]
         if (!shape || !size) continue   // non-bed or unmapped → excluded
         demand[keyOf(shape, size)] = (demand[keyOf(shape, size)] || 0) + (o.qty || 1)
@@ -98,7 +102,7 @@ export default function FulfillmentWaterfall() {
         if (u.status !== 'stocked') continue
         const meta = skuMeta[(u.sku || '').trim()]
         if (!meta || !meta.size) continue
-        const shape = productToShape[meta.product]
+        const shape = PRODUCT_SHAPE[meta.product]
         const size = SIZE_MAP[meta.size]
         if (!shape || !size) continue
         finished[keyOf(shape, size)] = (finished[keyOf(shape, size)] || 0) + 1
