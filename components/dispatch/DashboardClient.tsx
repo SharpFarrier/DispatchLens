@@ -871,7 +871,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   .sign .box { flex: 1; }
   .sign .line { border-top: 1px solid #111; margin-top: 44px; padding-top: 6px; font-size: 11px; color: #555; }
   .sign .field { font-size: 11px; color: #555; margin-top: 10px; }
-  @media print { body { margin: 12mm; } button { display: none; } .no-print { display: none !important; } .pick-scroll { max-height: none !important; overflow: visible !important; } .pick-print-area { overflow: visible !important; } thead { display: table-header-group; } tr { break-inside: avoid; } }
+  @media print { body { margin: 12mm; } button { display: none; } }
   .printbtn { position: fixed; top: 12px; right: 12px; padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
 </style></head>
 <body>
@@ -2069,6 +2069,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }
         .dl-nav { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .dl-nav::-webkit-scrollbar { display: none; }
+        @media print {
+          body { margin: 10mm; }
+          button, .no-print { display: none !important; }
+          html, body, .pick-print-area, .pick-scroll {
+            max-height: none !important; height: auto !important; overflow: visible !important;
+          }
+          thead { display: table-header-group; }
+          tr, td, th { page-break-inside: avoid; }
+          table { page-break-inside: auto; width: 100% !important; }
+        }
       `}</style>
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
