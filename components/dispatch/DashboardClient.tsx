@@ -871,7 +871,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   .sign .box { flex: 1; }
   .sign .line { border-top: 1px solid #111; margin-top: 44px; padding-top: 6px; font-size: 11px; color: #555; }
   .sign .field { font-size: 11px; color: #555; margin-top: 10px; }
-  @media print { body { margin: 12mm; } button { display: none; } }
+  @media print { body { margin: 12mm; } button { display: none; } .no-print { display: none !important; } }
   .printbtn { position: fixed; top: 12px; right: 12px; padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
 </style></head>
 <body>
@@ -3089,7 +3089,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             )}
           {/* ════ UPCOMING DEMAND MATRIX ════ */}
           {upcomingDemand.totalOrders > 0 && (
-            <div style={{ marginTop: 8 }}>
+            <div style={{ marginTop: 8 }} className="no-print">
               {/* Header row */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' as const }}>
                 <h2 style={{ fontSize: 16, fontWeight: 600 }}>Upcoming Demand</h2>
