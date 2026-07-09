@@ -2076,6 +2076,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             max-height: none !important; height: auto !important; overflow: visible !important;
           }
           thead { display: table-header-group; }
+          tfoot { display: table-row-group; }
+          .pick-total-row { position: static !important; }
           tr, td, th { page-break-inside: avoid; }
           table { page-break-inside: auto; width: 100% !important; }
         }
@@ -3111,6 +3113,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         )
                       })}
                     </tbody>
+                    <tfoot>
+                      <tr className="pick-total-row" style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)', position: 'sticky' as const, bottom: 0 }}>
+                        <td style={{ padding: '10px 16px', fontWeight: 700, fontSize: 13 }} colSpan={3}>
+                          Total{pickCourierFilter !== 'all' ? ` · ${pickCourierFilter === 'Bluedart' ? 'BD' : 'DL'}` : ''} · {shownPicklist.length} lines
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
+                          {shownPicklist.reduce((sum, r) => sum + r.qty, 0)}
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 14, color: 'var(--text2)' }}>
+                          {shownPicklist.reduce((sum, r) => sum + r.count, 0)}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
