@@ -871,7 +871,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   .sign .box { flex: 1; }
   .sign .line { border-top: 1px solid #111; margin-top: 44px; padding-top: 6px; font-size: 11px; color: #555; }
   .sign .field { font-size: 11px; color: #555; margin-top: 10px; }
-  @media print { body { margin: 12mm; } button { display: none; } .no-print { display: none !important; } }
+  @media print { body { margin: 12mm; } button { display: none; } .no-print { display: none !important; } .pick-scroll { max-height: none !important; overflow: visible !important; } .pick-print-area { overflow: visible !important; } thead { display: table-header-group; } tr { break-inside: avoid; } }
   .printbtn { position: fixed; top: 12px; right: 12px; padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
 </style></head>
 <body>
@@ -1436,6 +1436,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // ── Upcoming demand matrix (undecided orders: SKU rows × day columns) ──
   const [demandView, setDemandView] = useState<'weekly' | 'daily'>('weekly')
+  const [pickCourierFilter, setPickCourierFilter] = useState<'all' | 'Bluedart' | 'Delhivery'>('all')
   const [demandSkuFilter, setDemandSkuFilter] = useState<Set<string>>(new Set())
   const [showDemandSkuPopover, setShowDemandSkuPopover] = useState(false)
   const [demandSkuSearch, setDemandSkuSearch] = useState('')
@@ -1677,6 +1678,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     return rows.sort((a, b) =>
       a.date.localeCompare(b.date) || a.courier.localeCompare(b.courier) || a.sku.localeCompare(b.sku))
   }, [picklist])
+
+  // Courier-filtered view of the picklist — this is what's shown AND printed.
+  const shownPicklist = useMemo(
+    () => pickCourierFilter === 'all' ? flatPicklist : flatPicklist.filter(r => r.courier === pickCourierFilter),
+    [flatPicklist, pickCourierFilter])
 
   const allVisibleSelected = filteredActive.length > 0 && filteredActive.every(o => selectedIds.has(o.id))
   const toggleSelectAll = () => {
@@ -3020,25 +3026,37 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               <span style={{ color: 'var(--text3)', fontSize: 14 }}>
                 {scheduledCount} orders scheduled · {picklist.reduce((s, g) => s + g.couriers.reduce((cs, c) => cs + c.items.reduce((is, i) => is + i.qty, 0), 0), 0)} pieces
               </span>
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div className="no-print" style={{ display: 'flex', gap: 4, background: 'var(--bg2)', padding: 3, borderRadius: 7 }}>
+                  {([['all', 'All'], ['Bluedart', 'BD'], ['Delhivery', 'DL']] as const).map(([val, lbl]) => (
+                    <button key={val} onClick={() => setPickCourierFilter(val)}
+                      style={{ padding: '5px 12px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                        fontFamily: 'DM Mono',
+                        background: pickCourierFilter === val ? 'var(--surface)' : 'transparent',
+                        color: pickCourierFilter === val ? (val === 'Bluedart' ? '#2563eb' : val === 'Delhivery' ? '#7c3aed' : 'var(--text)') : 'var(--text3)',
+                        boxShadow: pickCourierFilter === val ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
                 <button onClick={() => window.print()} className="no-print" style={{
                   padding: '8px 16px', borderRadius: 7,
                   background: 'var(--accent)', border: 'none',
                   color: '#fff', fontSize: 13, cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600,
                 }}>
-                  <Printer size={14} /> Print
+                  <Printer size={14} /> Print{pickCourierFilter !== 'all' ? ` (${pickCourierFilter === 'Bluedart' ? 'BD' : 'DL'})` : ''}
                 </button>
               </div>
             </div>
 
-            {flatPicklist.length === 0 ? (
+            {shownPicklist.length === 0 ? (
               <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text2)' }}>
                 No orders scheduled yet. Go to Plan tab and assign dispatch dates.
               </div>
             ) : (
-              <div style={{ ...card, overflow: 'hidden' }}>
-                <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 320px)' }}>
+              <div style={{ ...card, overflow: 'hidden' }} className="pick-print-area">
+                <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 320px)' }} className="pick-scroll">
                   <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 720 }}>
                     <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
                       <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
@@ -3048,7 +3066,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       </tr>
                     </thead>
                     <tbody>
-                      {flatPicklist.map((row, i) => {
+                      {shownPicklist.map((row, i) => {
                         const isToday = row.date === today
                         const dateLabel = row.date === 'Unscheduled' ? 'No date'
                           : new Date(row.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
