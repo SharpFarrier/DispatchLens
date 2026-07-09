@@ -2818,7 +2818,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 13, color: 'var(--critical)' }}>{reason}</span>
                         <span style={{ fontSize: 12, color: 'var(--text3)' }}>{group.length} order{group.length !== 1 ? 's' : ''}</span>
                       </div>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
+                      <div style={{ overflowX: 'auto' as const }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 900 }}>
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--border)' }}>
                             {['Customer', 'SKU', 'Courier', 'Promise', 'Days Left', 'Urgency', 'Note', 'Target Dispatch Date', 'Action'].map(h => (
@@ -2902,6 +2903,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           })}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   )
                 })}
@@ -2916,7 +2918,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 13, color: 'var(--text2)' }}>No reason assigned</span>
                         <span style={{ fontSize: 12, color: 'var(--text3)' }}>{noReason.length} order{noReason.length !== 1 ? 's' : ''}</span>
                       </div>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
+                      <div style={{ overflowX: 'auto' as const }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 900 }}>
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--border)' }}>
                             {['Customer', 'SKU', 'Courier', 'Promise', 'Days Left', 'Target Dispatch Date', 'Action'].map(h => (
@@ -2970,6 +2973,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           })}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   )
                 })()}
