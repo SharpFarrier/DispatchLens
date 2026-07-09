@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { Package, Search, AlertTriangle } from 'lucide-react'
+import FulfillmentWaterfall from './FulfillmentWaterfall'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -228,6 +229,11 @@ export default function InventoryTab() {
           </div>
         </div>
       )}
+
+      {/* ── Fulfillment waterfall: pending orders vs frame supply ── */}
+      <div style={{ marginTop: 12, borderTop: '2px solid var(--border2)', paddingTop: 20 }}>
+        <FulfillmentWaterfall />
+      </div>
     </div>
   )
 }
