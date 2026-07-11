@@ -307,8 +307,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const updatedOrders = allParsed.filter(o => {
       const existing = existingMap.get(o.order_id)
       if (!existing) return false
-      // Update if new import has a tracking number that differs from stored value
-      return o.tracking_number && o.tracking_number !== existing.tracking_number
+      // Update if tracking number changed, OR if the import now carries invoice/contact
+      // data the stored row is missing (lets a re-import backfill the new columns).
+      const trackingChanged = !!o.tracking_number && o.tracking_number !== existing.tracking_number
+      const invoiceAppeared =
+        (o.contact_number && !existing.contact_number) ||
+        (o.taxable_value != null && existing.taxable_value == null) ||
+        (o.ship_address && !existing.ship_address)
+      return trackingChanged || invoiceAppeared
     })
 
     // Apply tracking number updates to existing orders
@@ -318,6 +324,18 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         await supabase.from('dispatch_orders').update({
           tracking_number: o.tracking_number,
           lr_number: o.lr_number ?? existing.lr_number ?? null,
+          // Refresh invoice/contact tail on re-import (only overwrite when present).
+          contact_number: o.contact_number ?? existing.contact_number ?? null,
+          unit_price: o.unit_price ?? existing.unit_price ?? null,
+          taxable_value: o.taxable_value ?? existing.taxable_value ?? null,
+          tax_amount: o.tax_amount ?? existing.tax_amount ?? null,
+          shipping_charge: o.shipping_charge ?? existing.shipping_charge ?? null,
+          shipping_taxable: o.shipping_taxable ?? existing.shipping_taxable ?? null,
+          shipping_tax: o.shipping_tax ?? existing.shipping_tax ?? null,
+          igst: o.igst ?? existing.igst ?? null,
+          sgst: o.sgst ?? existing.sgst ?? null,
+          cgst: o.cgst ?? existing.cgst ?? null,
+          ship_address: o.ship_address ?? existing.ship_address ?? null,
           updated_at: new Date().toISOString(),
         }).eq('id', existing.id)
         logEvent(o.order_id, 'note', `Tracking number updated via re-import: ${o.tracking_number}`)

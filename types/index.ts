@@ -68,6 +68,18 @@ export interface ParsedOrder {
   is_cancelled: boolean
   is_dispatched: boolean
   is_priority: boolean
+  // ── Invoice + contact tail (new import columns; both goals: comms + QuickShip) ──
+  contact_number: string | null
+  unit_price: number | null
+  taxable_value: number | null
+  tax_amount: number | null
+  shipping_charge: number | null
+  shipping_taxable: number | null
+  shipping_tax: number | null
+  igst: number | null
+  sgst: number | null
+  cgst: number | null
+  ship_address: string | null
 }
 export interface DBOrder {
   id: string
@@ -111,6 +123,18 @@ export interface DBOrder {
   target_dispatch_date: string | null
   manual_cancelled: boolean
   manual_cancelled_at: string | null
+  // ── Invoice + contact tail (import) ──
+  contact_number: string | null
+  unit_price: number | null
+  taxable_value: number | null
+  tax_amount: number | null
+  shipping_charge: number | null
+  shipping_taxable: number | null
+  shipping_tax: number | null
+  igst: number | null
+  sgst: number | null
+  cgst: number | null
+  ship_address: string | null
   created_at: string
   updated_at: string
 }

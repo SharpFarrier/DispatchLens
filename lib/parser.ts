@@ -96,8 +96,37 @@ function mapHeaders(headers: string[]): Record<string, number> {
     if (norm === 'city' || norm === '') {
       if (!map['city']) map['city'] = i
     }
+    // ── Invoice/contact tail. Distinct headers map by name; the ambiguous
+    //    Taxable/Tax/Shipping block is resolved by OFFSET from 'contact #' below. ──
+    if (norm.includes('contact')) map['contact'] = i
+    if (norm.includes('unit price')) map['unit_price'] = i
+    if (norm.includes('igst')) map['igst'] = i
+    if (norm.includes('sgst')) map['sgst'] = i
+    if (norm.includes('cgst')) map['cgst'] = i
+    if (norm.includes('address')) map['address'] = i
   })
+  // The tail block Taxable/Tax/Shipping/Taxable/Tax/Tax repeats headers, so map
+  // by fixed offset from Contact #. Layout (both couriers, verified):
+  //   Contact(+0) UnitPrice(+1) Taxable(+2) Tax(+3) Shipping(+4)
+  //   ShipTaxable(+5) ShipTax(+6) Tax3(+7) IGST(+8) SGST(+9) CGST(+10) Address(+11)
+  if (map['contact'] !== undefined) {
+    const c = map['contact']
+    map['taxable_value'] = c + 2
+    map['tax_amount'] = c + 3
+    map['shipping_charge'] = c + 4
+    map['shipping_taxable'] = c + 5
+    map['shipping_tax'] = c + 6
+  }
   return map
+}
+
+// Parse a money/number cell → number | null (handles blank, commas, #N/A).
+function parseNum(raw: string): number | null {
+  if (!raw) return null
+  const s = raw.replace(/,/g, '').trim()
+  if (s === '' || s === '#N/A' || s === '#REF!') return null
+  const n = parseFloat(s)
+  return isNaN(n) ? null : n
 }
 
 export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
@@ -168,6 +197,18 @@ export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
       is_cancelled: isCancelledStatus(rawStatus) || isCancelledStatus(skuRaw),
       is_dispatched: isDispatchedStatus(rawStatus),
       is_priority: false,
+      // ── Invoice + contact tail ──
+      contact_number: get('contact') || null,
+      unit_price: parseNum(get('unit_price')),
+      taxable_value: parseNum(get('taxable_value')),
+      tax_amount: parseNum(get('tax_amount')),
+      shipping_charge: parseNum(get('shipping_charge')),
+      shipping_taxable: parseNum(get('shipping_taxable')),
+      shipping_tax: parseNum(get('shipping_tax')),
+      igst: parseNum(get('igst')),
+      sgst: parseNum(get('sgst')),
+      cgst: parseNum(get('cgst')),
+      ship_address: get('address') || null,
     }
 
     results.push(order)
