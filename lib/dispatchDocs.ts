@@ -360,7 +360,7 @@ export async function mergePdfs(list: Uint8Array[]): Promise<Uint8Array> {
 }
 
 export function downloadBytes(bytes: Uint8Array, filename: string) {
-  const blob = new Blob([bytes], { type: 'application/pdf' })
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
