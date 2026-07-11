@@ -1,5 +1,5 @@
 'use client'
-import { useState, useMemo, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useMemo, useEffect, useCallback, Fragment, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { format } from 'date-fns'
@@ -51,7 +51,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
   useEffect(() => { if (tab === 'log') void loadTrolleys() }, [tab, loadTrolleys])
 
   const flatItems: CoatingItem[] = useMemo(() => trolleys.flatMap(t =>
-    (t.coating_items || []).map(i => ({ ...i, trolley_label: t.label, created_at: t.created_at }))
+    (t.coating_items || []).map(i => ({ ...i, trolley_id: t.id, trolley_label: t.label, created_at: t.created_at }))
   ), [trolleys])
 
   const { sorted, sortKey, sortDir, toggleSort } = useSort(flatItems, 'created_at', 'desc')
@@ -295,7 +295,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
         <LogTable isFetching={isFetching} hasData={!!sorted.length} viewMode={viewMode} setViewMode={setViewMode}
           allCollapsed={allCollapsed()} toggleAllDays={toggleAllDays} tableHead={tableHead}
           sorted={sorted} dayGroups={dayGroups} collapsedDays={collapsedDays} toggleDay={toggleDay}
-          renderRow={renderRow} totalPcs={totalPcs} colCount={COL_COUNT} emptyIcon="🎨" emptyMsg="No coating entries yet" />
+          renderRow={renderRow} totalPcs={totalPcs} colCount={COL_COUNT} emptyIcon="🎨" emptyMsg="No coating entries yet" groupByTrolley />
       )}
     </div>
   )
@@ -304,14 +304,14 @@ export default function CoatingTab({ userId }: { userId: string }) {
 // Shared log-table renderer (also used by Picks)
 export function LogTable<T extends { id?: string; pieces: number; created_at: string }>({
   isFetching, hasData, viewMode, setViewMode, allCollapsed, toggleAllDays, tableHead,
-  sorted, dayGroups, collapsedDays, toggleDay, renderRow, totalPcs, colCount, emptyIcon, emptyMsg,
+  sorted, dayGroups, collapsedDays, toggleDay, renderRow, totalPcs, colCount, emptyIcon, emptyMsg, groupByTrolley,
 }: {
   isFetching: boolean; hasData: boolean; viewMode: 'all' | 'day'; setViewMode: (v: 'all' | 'day') => void
   allCollapsed: boolean; toggleAllDays: () => void; tableHead: ReactNode
   sorted: T[]; dayGroups: Array<{ dateKey: string; items: T[]; total: number }>
   collapsedDays: Record<string, boolean>; toggleDay: (k: string) => void
   renderRow: (item: T, i: number) => ReactNode; totalPcs: number; colCount: number
-  emptyIcon: string; emptyMsg: string
+  emptyIcon: string; emptyMsg: string; groupByTrolley?: boolean
 }) {
   if (isFetching && !hasData) return <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><Spinner size="lg" /></div>
   if (!hasData) return <EmptyState icon={emptyIcon} message={emptyMsg} />
@@ -353,7 +353,7 @@ export function LogTable<T extends { id?: string; pieces: number; created_at: st
             <>
               <tbody>
                 {dayGroups.map(group => (
-                  <DayRows key={group.dateKey} group={group} collapsed={!!collapsedDays[group.dateKey]} onToggle={() => toggleDay(group.dateKey)} renderRow={renderRow} colCount={colCount} />
+                  <DayRows key={group.dateKey} group={group} collapsed={!!collapsedDays[group.dateKey]} onToggle={() => toggleDay(group.dateKey)} renderRow={renderRow} colCount={colCount} groupByTrolley={groupByTrolley} />
                 ))}
               </tbody>
               <tfoot style={{ background: 'var(--bg2)', borderTop: '2px solid var(--border)' }}>
@@ -370,10 +370,24 @@ export function LogTable<T extends { id?: string; pieces: number; created_at: st
   )
 }
 
-function DayRows<T>({ group, collapsed, onToggle, renderRow, colCount }: {
+function DayRows<T extends { trolley_id?: string; trolley_label?: string | null; pieces?: number }>({ group, collapsed, onToggle, renderRow, colCount, groupByTrolley }: {
   group: { dateKey: string; items: T[]; total: number }; collapsed: boolean; onToggle: () => void
-  renderRow: (item: T, i: number) => ReactNode; colCount: number
+  renderRow: (item: T, i: number) => ReactNode; colCount: number; groupByTrolley?: boolean
 }) {
+  // Segregate the day's items by trolley, preserving order of first appearance.
+  const trolleyGroups = (() => {
+    if (!groupByTrolley) return null
+    const order: string[] = []
+    const map: Record<string, { label: string | null; items: T[]; total: number }> = {}
+    group.items.forEach(it => {
+      const tid = it.trolley_id || '—'
+      if (!map[tid]) { map[tid] = { label: it.trolley_label ?? null, items: [], total: 0 }; order.push(tid) }
+      map[tid].items.push(it)
+      map[tid].total += it.pieces || 0
+    })
+    return order.map((tid, idx) => ({ tid, idx, ...map[tid] }))
+  })()
+
   return (
     <>
       <tr onClick={onToggle} style={{ background: 'var(--bg2)', borderTop: '2px solid var(--border)', cursor: 'pointer', userSelect: 'none' }}>
@@ -382,13 +396,32 @@ function DayRows<T>({ group, collapsed, onToggle, renderRow, colCount }: {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text3)', width: 12 }}>{collapsed ? '▶' : '▼'}</span>
               <span style={{ fontWeight: 700, color: 'var(--text2)', fontSize: 12 }}>{group.dateKey}</span>
-              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{group.items.length} rows</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{group.items.length} rows{trolleyGroups ? ` · ${trolleyGroups.length} ${trolleyGroups.length === 1 ? 'trolley' : 'trolleys'}` : ''}</span>
             </div>
             <span style={{ fontWeight: 800, color: 'var(--accent)', fontSize: 14 }}>{group.total} pcs</span>
           </div>
         </td>
       </tr>
-      {!collapsed && group.items.map((item, i) => renderRow(item, i))}
+      {!collapsed && (
+        trolleyGroups
+          ? trolleyGroups.map(tg => (
+              <Fragment key={tg.tid}>
+                <tr style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)' }}>
+                  <td colSpan={colCount} style={{ padding: '6px 12px 6px 28px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        🛒 Trolley {tg.idx + 1}{tg.label ? ` · ${tg.label}` : ''}
+                        <span style={{ color: 'var(--text3)', fontWeight: 500 }}>({tg.items.length} {tg.items.length === 1 ? 'frame' : 'frames'})</span>
+                      </span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)' }}>{tg.total} pcs</span>
+                    </div>
+                  </td>
+                </tr>
+                {tg.items.map((item, i) => renderRow(item, i))}
+              </Fragment>
+            ))
+          : group.items.map((item, i) => renderRow(item, i))
+      )}
     </>
   )
 }
