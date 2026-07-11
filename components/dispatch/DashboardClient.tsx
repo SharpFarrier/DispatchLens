@@ -1745,9 +1745,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'),
         loadScript('https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js'),
       ])
-      // Cargo token from app_config.
+      // Cargo token + e-signature from app_config.
       const { data: cfg } = await supabase.from('app_config').select('value').eq('key', 'cargo_token').maybeSingle()
       const token = (cfg?.value as string) || ''
+      const { data: sigCfg } = await supabase.from('app_config').select('value').eq('key', 'invoice_signature').maybeSingle()
+      const signatureDataUrl = (sigCfg?.value as string) || null
 
       const labelParts: Uint8Array[] = []
       const invoiceParts: Uint8Array[] = []
@@ -1757,7 +1759,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         done++
         setGenProgress(`Order ${done}/${base.length} — ${o.order_id}`)
         // Invoice for every order (uses imported invoice fields).
-        try { invoiceParts.push(await invoicePdfBytes(o)) }
+        try { invoiceParts.push(await invoicePdfBytes(o, { signatureDataUrl })) }
         catch (e) { failed.push(`${o.order_id} invoice: ${(e as Error).message}`) }
         // Label only for Cargo-fetchable (skip Bluedart).
         if (!isBluedart(o) && o.tracking_number) {

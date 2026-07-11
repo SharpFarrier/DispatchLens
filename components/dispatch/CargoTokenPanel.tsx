@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { Key, CheckCircle, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Clock } from 'lucide-react'
+import { Key, CheckCircle, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Clock, PenLine } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 interface Meta {
   hasToken: boolean
@@ -20,6 +21,44 @@ export default function CargoTokenPanel() {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const supabase = createClient()
+  const [signature, setSignature] = useState<string | null>(null)
+  const [sigMsg, setSigMsg] = useState<string | null>(null)
+  const [sigSaving, setSigSaving] = useState(false)
+
+  const loadSignature = useCallback(async () => {
+    try {
+      const { data } = await supabase.from('app_config').select('value').eq('key', 'invoice_signature').maybeSingle()
+      setSignature((data?.value as string) || null)
+    } catch { /* ignore */ }
+  }, [supabase])
+  useEffect(() => { loadSignature() }, [loadSignature])
+
+  const onSignatureFile = async (file: File | null) => {
+    if (!file) return
+    if (!/^image\/(png|jpe?g)$/.test(file.type)) { setSigMsg('PNG or JPG only'); return }
+    if (file.size > 500 * 1024) { setSigMsg('Image too large (max 500KB) — crop/compress it'); return }
+    setSigSaving(true); setSigMsg(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader(); r.onload = () => resolve(r.result as string); r.onerror = () => reject(new Error('read failed')); r.readAsDataURL(file)
+      })
+      const { error } = await supabase.from('app_config').upsert({ key: 'invoice_signature', value: dataUrl }, { onConflict: 'key' })
+      if (error) { setSigMsg('Save failed: ' + error.message) }
+      else { setSignature(dataUrl); setSigMsg('Signature saved.') }
+    } catch (e) { setSigMsg(String(e)) }
+    setSigSaving(false)
+  }
+
+  const clearSignature = async () => {
+    if (!confirm('Remove the saved signature? Invoices will generate without it.')) return
+    setSigSaving(true); setSigMsg(null)
+    try {
+      await supabase.from('app_config').delete().eq('key', 'invoice_signature')
+      setSignature(null); setSigMsg('Signature removed.')
+    } catch (e) { setSigMsg(String(e)) }
+    setSigSaving(false)
+  }
 
   const loadMeta = useCallback(async () => {
     try { const r = await fetch('/api/cargo-token'); if (r.ok) setMeta(await r.json()) } catch { /* ignore */ }
@@ -109,6 +148,35 @@ export default function CargoTokenPanel() {
               Last updated {new Date(meta.setAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{meta.updatedBy ? ` by ${meta.updatedBy}` : ''}
             </span>
           )}
+
+          {/* ── Invoice e-signature ── */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+              <PenLine size={14} style={{ color: 'var(--accent)' }} /> Invoice signature
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0, lineHeight: 1.5 }}>
+              PNG or JPG (max 500KB). Appears above &quot;Partner&quot; on every generated invoice. Set once — all invoices use it.
+            </p>
+            {signature && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, padding: 10, background: '#fdfbf7', border: '1px solid var(--border)', borderRadius: 7, alignSelf: 'flex-start' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={signature} alt="signature" style={{ maxHeight: 48, maxWidth: 160, objectFit: 'contain' as const }} />
+                <span style={{ fontSize: 11, color: 'var(--dispatched)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle size={12} /> saved</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+              <label style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500, cursor: sigSaving ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <PenLine size={13} /> {sigSaving ? 'Saving…' : signature ? 'Replace signature' : 'Upload signature'}
+                <input type="file" accept="image/png,image/jpeg" disabled={sigSaving} onChange={e => onSignatureFile(e.target.files?.[0] ?? null)} style={{ display: 'none' }} />
+              </label>
+              {signature && (
+                <button onClick={clearSignature} disabled={sigSaving} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                  Remove
+                </button>
+              )}
+              {sigMsg && <span style={{ fontSize: 12, fontWeight: 500, color: sigMsg.includes('saved') || sigMsg.includes('removed') ? 'var(--dispatched)' : 'var(--critical)' }}>{sigMsg}</span>}
+            </div>
+          </div>
         </div>
       )}
     </div>
