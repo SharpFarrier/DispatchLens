@@ -2,7 +2,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { DBOrder } from '@/types'
-import { X, Clock, Send, Package, Calendar, Ban, AlertTriangle, CheckCircle, Upload, RotateCcw, MessageSquare, Truck } from 'lucide-react'
+import { X, Clock, Send, Package, Calendar, Ban, AlertTriangle, CheckCircle, Upload, RotateCcw, MessageSquare, Truck, FileText } from 'lucide-react'
+import { invoicePdfBytes, downloadBytes } from '@/lib/dispatchDocs'
 
 const RETURN_REASONS = [
   'In-transit Damage',
@@ -89,6 +90,33 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
   // added later in the Returns tab (customer returns) or fetched via the forward
   // AWB (RTO), because the pickup doesn't exist yet when the return is marked.
   const [returnType, setReturnType] = useState<'' | 'customer' | 'rto'>('')
+
+  // ── On-demand invoice download (any user; regenerates from stored order data) ──
+  const [invoicing, setInvoicing] = useState(false)
+  const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve()
+    const el = document.createElement('script'); el.src = src
+    el.onload = () => resolve(); el.onerror = () => reject(new Error('load ' + src))
+    document.head.appendChild(el)
+  })
+  const downloadInvoice = async () => {
+    setInvoicing(true)
+    try {
+      await Promise.all([
+        loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'),
+        loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'),
+        loadScript('https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js'),
+      ])
+      const { data: sigCfg } = await supabase.from('app_config').select('value').eq('key', 'invoice_signature').maybeSingle()
+      const signatureDataUrl = (sigCfg?.value as string) || null
+      const bytes = await invoicePdfBytes(order, { signatureDataUrl })
+      downloadBytes(bytes, `invoice-${order.order_id}.pdf`)
+    } catch (e) {
+      alert('Could not generate invoice: ' + (e as Error).message)
+    } finally {
+      setInvoicing(false)
+    }
+  }
 
   useEffect(() => {
     fetchEvents()
@@ -252,13 +280,20 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
               ))}
             </div>
 
-            {/* Mark as Return */}
-            {canMarkReturn && !showReturnForm && (
-              <button onClick={() => { setReturnType(''); setReturnReason(RETURN_REASONS[0]); setReturnNote(''); setShowReturnForm(true) }}
-                style={{ marginTop: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #fed7aa', background: 'var(--today-bg)', color: 'var(--today)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <RotateCcw size={12} /> Mark as Return
+            {/* Download invoice (any user) + Mark as Return */}
+            <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 8, marginTop: 12 }}>
+              <button onClick={downloadInvoice} disabled={invoicing}
+                title="Generate and download this order's GST invoice"
+                style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: invoicing ? 'var(--text3)' : 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: invoicing ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <FileText size={12} /> {invoicing ? 'Generating…' : 'Download invoice'}
               </button>
-            )}
+              {canMarkReturn && !showReturnForm && (
+                <button onClick={() => { setReturnType(''); setReturnReason(RETURN_REASONS[0]); setReturnNote(''); setShowReturnForm(true) }}
+                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #fed7aa', background: 'var(--today-bg)', color: 'var(--today)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <RotateCcw size={12} /> Mark as Return
+                </button>
+              )}
+            </div>
             {showReturnForm && (
               <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid #fed7aa', background: 'var(--today-bg)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--today)' }}>NEW RETURN</span>
