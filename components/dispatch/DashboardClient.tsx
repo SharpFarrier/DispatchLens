@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
+import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart } from '@/lib/dispatchDocs'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
@@ -144,6 +145,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispPage, setDispPage] = useState(0)
   const DISP_PAGE_SIZE = 100
   const [dispExporting, setDispExporting] = useState(false)
+  const [genDocs, setGenDocs] = useState(false)
+  const [genProgress, setGenProgress] = useState('')
   // Tracking source — decoupled from the view window: everything not delivered/RTO, any age.
   const [trackOrders, setTrackOrders] = useState<DBOrder[]>([])
   // Tracking
@@ -1721,6 +1724,62 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }[u || ''] || { color: 'var(--text3)', bg: 'var(--bg2)', border: 'var(--border)' })
 
   // ── Export Plan orders to Excel (.xlsx via SpreadsheetML, no dependency) ──
+  // ── Generate Dispatch Docs: Cargo labels (Bluedart skipped) + GST invoices ──
+  // Runs on selected orders, or the whole filtered view if none selected.
+  const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve()
+    const el = document.createElement('script'); el.src = src
+    el.onload = () => resolve(); el.onerror = () => reject(new Error('load ' + src))
+    document.head.appendChild(el)
+  })
+
+  const generateDispatchDocs = async () => {
+    const base = selectedIds.size > 0 ? filteredActive.filter(o => selectedIds.has(o.id)) : filteredActive
+    if (base.length === 0) { alert('No orders to generate.'); return }
+    if (base.length > 200 && !confirm(`Generate docs for ${base.length} orders? This can take a while.`)) return
+    setGenDocs(true); setGenProgress('Loading libraries…')
+    try {
+      await Promise.all([
+        loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'),
+        loadScript('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'),
+        loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'),
+        loadScript('https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js'),
+      ])
+      // Cargo token from app_config.
+      const { data: cfg } = await supabase.from('app_config').select('value').eq('key', 'cargo_token').maybeSingle()
+      const token = (cfg?.value as string) || ''
+
+      const labelParts: Uint8Array[] = []
+      const invoiceParts: Uint8Array[] = []
+      const failed: string[] = []
+      let done = 0
+      for (const o of base) {
+        done++
+        setGenProgress(`Order ${done}/${base.length} — ${o.order_id}`)
+        // Invoice for every order (uses imported invoice fields).
+        try { invoiceParts.push(await invoicePdfBytes(o)) }
+        catch (e) { failed.push(`${o.order_id} invoice: ${(e as Error).message}`) }
+        // Label only for Cargo-fetchable (skip Bluedart).
+        if (!isBluedart(o) && o.tracking_number) {
+          if (!token) { failed.push(`${o.order_id} label: no Cargo token set`); continue }
+          try {
+            const raw = await fetchLabelBytes(o.tracking_number, token)
+            labelParts.push(await stripAdPage(raw))
+          } catch (e) { failed.push(`${o.order_id} label: ${(e as Error).message}`) }
+        }
+      }
+      const stamp = new Date().toISOString().slice(0, 10)
+      if (labelParts.length) { setGenProgress('Merging labels…'); downloadBytes(await mergePdfs(labelParts), `labels-${stamp}.pdf`) }
+      if (invoiceParts.length) { setGenProgress('Merging invoices…'); downloadBytes(await mergePdfs(invoiceParts), `invoices-${stamp}.pdf`) }
+      const msg = `Done. ${labelParts.length} labels, ${invoiceParts.length} invoices.` + (failed.length ? `\n\n${failed.length} issue(s):\n` + failed.slice(0, 12).join('\n') + (failed.length > 12 ? `\n…and ${failed.length - 12} more` : '') : '')
+      alert(msg)
+    } catch (e) {
+      alert('Generation failed: ' + (e as Error).message)
+    } finally {
+      setGenDocs(false); setGenProgress('')
+    }
+  }
+
   const exportPlanXlsx = () => {
     const rowsData = filteredActive
     const decisionLabel = (o: DBOrder) =>
@@ -2391,6 +2450,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 </button>
                 <button onClick={exportPlanXlsx} disabled={filteredActive.length === 0} title="Download current view as Excel" style={{ background: filteredActive.length === 0 ? 'var(--bg2)' : 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: filteredActive.length === 0 ? 'var(--text3)' : 'var(--text2)', cursor: filteredActive.length === 0 ? 'not-allowed' : 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500 }}>
                   <Download size={12} /> Export
+                </button>
+                <button onClick={generateDispatchDocs} disabled={genDocs || filteredActive.length === 0}
+                  title={selectedIds.size > 0 ? `Generate labels + invoices for ${selectedIds.size} selected` : 'Generate labels + invoices for the current view'}
+                  style={{ background: genDocs ? 'var(--bg2)' : 'var(--accent)', border: 'none', borderRadius: 6, color: genDocs ? 'var(--text3)' : '#fff', cursor: genDocs ? 'wait' : 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600 }}>
+                  <Printer size={12} /> {genDocs ? (genProgress || 'Generating…') : `Generate Dispatch${selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}`}
                 </button>
               </div>
             </div>
