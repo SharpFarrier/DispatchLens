@@ -1710,7 +1710,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       : o.plan_decision === 'hold' ? 'On Hold'
       : o.plan_decision === 'unfulfillable' ? 'Unfulfillable'
       : 'Undecided'
-    const headers = ['Urgency', 'Order ID', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'Pincode', 'City', 'ODA', 'AWB', 'Transit (d)', 'Promise', 'Dispatch By', 'Days Left', 'Decision', 'Scheduled Date']
+    const headers = ['Urgency', 'Order ID', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'Pincode', 'City', 'ODA', 'AWB', 'LR', 'Transit (d)', 'Promise', 'Dispatch By', 'Days Left', 'Decision', 'Scheduled Date']
     const rows = rowsData.map(o => [
       liveUrgency(o) || '',
       o.order_id,
@@ -1722,6 +1722,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       o.city || '',
       o.oda === 'ODA' ? 'ODA' : '',
       o.tracking_number || '',
+      o.lr_number || '',
       o.transit_days,
       o.promise_date || '',
       o.dispatch_by_date || '',
