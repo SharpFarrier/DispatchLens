@@ -61,8 +61,9 @@ export default function AllOrdersTab({ orders }: { orders: DBOrder[] }) {
   }, [orders, q, statusFilter, platformFilter])
 
   const exportCsv = () => {
-    const headers = ['Order ID', 'Platform', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'AWB', 'LR', 'Status', 'Pincode', 'City', 'Promise', 'Dispatched', 'Contact', 'Order Value', 'Created']
+    const headers = ['Order Date', 'Dispatch By', 'Order ID', 'Platform', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'AWB', 'LR', 'Status', 'Pincode', 'City', 'Promise', 'Dispatched', 'Contact', 'Order Value', 'Created']
     const lines = rows.map(({ o, platform, status }) => [
+      o.order_date || '', o.dispatch_by_date || '',
       o.order_id, platform, o.customer_name, o.sku, o.barcode_sku || '', o.courier, o.tracking_number || '', o.lr_number || '',
       status.label, o.pincode || '', o.city || '',
       o.promise_date || '', o.dispatched_at ? new Date(o.dispatched_at).toISOString().slice(0, 10) : '',
@@ -120,18 +121,20 @@ export default function AllOrdersTab({ orders }: { orders: DBOrder[] }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 1400 }}>
             <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
               <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-                {['Order ID', 'Platform', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'AWB', 'LR', 'Status', 'Pincode · City', 'Promise', 'Dispatched', 'Contact', 'Value', 'Created'].map((h, i) => (
+                {['Order Date', 'Dispatch By', 'Order ID', 'Platform', 'Customer', 'SKU', 'Barcode SKU', 'Courier', 'AWB', 'LR', 'Status', 'Pincode · City', 'Promise', 'Dispatched', 'Contact', 'Value', 'Created'].map((h, i) => (
                   <th key={i} style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={15} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No orders match.</td></tr>
+                <tr><td colSpan={17} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No orders match.</td></tr>
               ) : rows.map(({ o, platform, status }, i) => {
                 const ps = PLATFORM_STYLE[platform]
                 return (
                   <tr key={o.id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
+                    <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{fmtDate(o.order_date)}</td>
+                    <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{fmtDate(o.dispatch_by_date)}</td>
                     <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', whiteSpace: 'nowrap' as const }}>{o.order_id}</td>
                     <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
                       <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: ps.fg, background: ps.bg, border: `1px solid ${ps.bd}`, padding: '2px 7px', borderRadius: 4 }}>{platform}</span>
