@@ -1,7 +1,9 @@
 'use client'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { DBOrder } from '@/types'
-import { Search, Download, ArrowUp, ArrowDown, Filter, X } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from './fetchAll'
+import { Search, Download, ArrowUp, ArrowDown, Filter, X, Calendar } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -50,13 +52,44 @@ interface Col {
   align?: 'left' | 'right'
 }
 
-export default function AllOrdersTab({ orders }: { orders: DBOrder[] }) {
+export default function AllOrdersTab() {
+  const supabase = createClient()
+  const [orders, setOrders] = useState<DBOrder[]>([])
+  const [loading, setLoading] = useState(true)
+  const [win, setWin] = useState<'7d' | '30d' | 'custom'>('7d')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+
+  const range = useMemo<{ from: string | null; to: string | null }>(() => {
+    const now = new Date()
+    const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
+    if (win === '7d') return { from: startOfDay(new Date(now.getTime() - 6 * 86400000)).toISOString().slice(0, 10), to: null }
+    if (win === '30d') return { from: startOfDay(new Date(now.getTime() - 29 * 86400000)).toISOString().slice(0, 10), to: null }
+    return { from: customFrom || null, to: customTo || null }   // custom
+  }, [win, customFrom, customTo])
+
+  useEffect(() => {
+    if (win === 'custom' && (!customFrom || !customTo)) { setOrders([]); setLoading(false); return }
+    setLoading(true)
+    ;(async () => {
+      const rows = await fetchAllRows<DBOrder>((from, to) => {
+        let q = supabase.from('dispatch_orders').select('*')
+        // Window on order_date (when the order came in).
+        if (range.from) q = q.gte('order_date', range.from)
+        if (range.to) q = q.lte('order_date', range.to)
+        return q.order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to)
+      })
+      setOrders(rows)
+      setLoading(false)
+    })()
+  }, [supabase, win, range.from, range.to, customFrom, customTo])
+
   const [globalQ, setGlobalQ] = useState('')
   const [sortKey, setSortKey] = useState<string>('created')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [textFilters, setTextFilters] = useState<Record<string, string>>({})
-  const [catFilters, setCatFilters] = useState<Record<string, Set<string>>>({})
+  const [catFilters, setCatFilters] = useState<Record<string, string[]>>({})
   const popRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -113,10 +146,12 @@ export default function AllOrdersTab({ orders }: { orders: DBOrder[] }) {
         const col = colByKey[key]; if (!col) continue
         if (!String(col.get(r)).toLowerCase().includes(val.toLowerCase())) return false
       }
-      for (const [key, allowed] of Object.entries(catFilters)) {
-        if (!allowed || allowed.size === 0) continue
+      for (const key in catFilters) {
+        const allowed = catFilters[key]
+        if (!allowed || allowed.length === 0) continue
         const col = colByKey[key]; if (!col) continue
-        if (!allowed.has(String(col.get(r)) || '(blank)')) return false
+        const v = String(col.get(r)) || '(blank)'
+        if (!allowed.includes(v)) return false
       }
       return true
     })
@@ -137,9 +172,9 @@ export default function AllOrdersTab({ orders }: { orders: DBOrder[] }) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
   }
-  const hasFilter = (key: string) => !!textFilters[key] || (catFilters[key]?.size ?? 0) > 0
+  const hasFilter = (key: string) => !!textFilters[key] || (catFilters[key]?.length ?? 0) > 0
   const clearAll = () => { setTextFilters({}); setCatFilters({}); setGlobalQ('') }
-  const anyFilter = globalQ || Object.values(textFilters).some(Boolean) || Object.values(catFilters).some(s => s?.size)
+  const anyFilter = globalQ || Object.values(textFilters).some(Boolean) || Object.values(catFilters).some(a => a?.length)
 
   const exportCsv = () => {
     const headers = COLS.map(c => c.label)
@@ -155,8 +190,31 @@ export default function AllOrdersTab({ orders }: { orders: DBOrder[] }) {
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>All Orders</h1>
-        <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{rows.length} of {orders.length}</span>
-        <div style={{ position: 'relative' as const, minWidth: 240, flex: '0 1 320px' }}>
+        <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} of ${orders.length}`}</span>
+
+        {/* Date window (on Order Date) */}
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', padding: 3, borderRadius: 7, alignItems: 'center' }}>
+          <Calendar size={13} style={{ color: 'var(--text3)', margin: '0 4px' }} />
+          {(['7d', '30d', 'custom'] as const).map(w => (
+            <button key={w} onClick={() => setWin(w)}
+              style={{ padding: '5px 11px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'DM Mono',
+                background: win === w ? 'var(--surface)' : 'transparent', color: win === w ? 'var(--accent)' : 'var(--text3)',
+                boxShadow: win === w ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>
+              {w === '7d' ? '7 days' : w === '30d' ? '30 days' : 'Custom'}
+            </button>
+          ))}
+        </div>
+        {win === 'custom' && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono' }} />
+            <span style={{ color: 'var(--text3)', fontSize: 12 }}>→</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono' }} />
+          </div>
+        )}
+
+        <div style={{ position: 'relative' as const, minWidth: 220, flex: '0 1 280px' }}>
           <Search size={13} style={{ position: 'absolute' as const, left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
           <input value={globalQ} onChange={e => setGlobalQ(e.target.value)} placeholder="Search all columns…"
             style={{ width: '100%', padding: '7px 10px 7px 30px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, outline: 'none', boxSizing: 'border-box' as const }} />
@@ -193,19 +251,19 @@ export default function AllOrdersTab({ orders }: { orders: DBOrder[] }) {
                         {col.type === 'category' ? (
                           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3, maxHeight: 220, overflowY: 'auto' as const }}>
                             {(catOptions[col.key] || []).map(opt => {
-                              const set = catFilters[col.key] || new Set<string>()
-                              const on = set.has(opt)
+                              const cur = catFilters[col.key] || []
+                              const on = cur.includes(opt)
                               return (
                                 <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text2)', cursor: 'pointer', padding: '2px 0' }}>
                                   <input type="checkbox" checked={on} onChange={() => {
-                                    setCatFilters(prev => { const next = new Set(prev[col.key] || []); if (on) next.delete(opt); else next.add(opt); return { ...prev, [col.key]: next } })
+                                    setCatFilters(prev => { const cur = prev[col.key] || []; const next = cur.includes(opt) ? cur.filter(x => x !== opt) : [...cur, opt]; return { ...prev, [col.key]: next } })
                                   }} />
                                   {opt}
                                 </label>
                               )
                             })}
-                            {(catFilters[col.key]?.size ?? 0) > 0 && (
-                              <button onClick={() => setCatFilters(prev => ({ ...prev, [col.key]: new Set() }))} style={{ marginTop: 4, fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' as const, padding: 0 }}>clear</button>
+                            {(catFilters[col.key]?.length ?? 0) > 0 && (
+                              <button onClick={() => setCatFilters(prev => ({ ...prev, [col.key]: [] }))} style={{ marginTop: 4, fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' as const, padding: 0 }}>clear</button>
                             )}
                           </div>
                         ) : (

@@ -3953,7 +3953,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {/* ════ EOD ════ */}
         {tab === 'allorders' && effectiveAccess.can_dispatched && (
-          <AllOrdersTab orders={orders} />
+          <AllOrdersTab />
         )}
 
         {tab === 'eod' && (
