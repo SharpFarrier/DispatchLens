@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
+import AllOrdersTab from './AllOrdersTab'
 import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart } from '@/lib/dispatchDocs'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
@@ -21,7 +22,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'returns' | 'skumap' | 'warehouse' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'returns' | 'skumap' | 'warehouse' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -2202,6 +2203,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           {/* Non-pipeline cluster */}
           {([
             { key: 'returns', label: 'Returns', show: effectiveAccess.can_returns },
+            { key: 'allorders', label: 'All Orders', show: effectiveAccess.can_dispatched },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
@@ -3950,6 +3952,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ EOD ════ */}
+        {tab === 'allorders' && effectiveAccess.can_dispatched && (
+          <AllOrdersTab orders={orders} />
+        )}
+
         {tab === 'eod' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24, maxWidth: 700 }}>
             <h1 style={{ fontSize: 18, fontWeight: 600 }}>End of Day — {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</h1>
