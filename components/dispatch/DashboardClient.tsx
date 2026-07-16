@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
 import AllOrdersTab from './AllOrdersTab'
+import CallLensTab from './CallLensTab'
 import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart } from '@/lib/dispatchDocs'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
@@ -22,7 +23,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'returns' | 'skumap' | 'warehouse' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -359,13 +360,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       if (session) {
         // Resolve each order's platform SKU to the canonical barcode (Master) SKU
         const lookup = buildSkuLookup(skuMaps)
-        const rows = newOrders.map(o => {
+        const rows = newOrders.map((o, idx) => {
           const barcode = resolveBarcodeSku(o.order_id, o.sku, lookup)
           return {
             session_id: session.id, ...o,
             barcode_sku: barcode,
             sku_mapped: !!barcode,
             plan_decision: o.is_dispatched ? 'scheduled' : 'undecided',
+            // Round-robin split between the two callers per import batch.
+            assigned_caller: idx % 2 === 0 ? 'Vishaka' : 'Priyanka',
           }
         })
         await supabase.from('dispatch_orders').insert(rows)
@@ -2204,6 +2207,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           {([
             { key: 'returns', label: 'Returns', show: effectiveAccess.can_returns },
             { key: 'allorders', label: 'All Orders', show: effectiveAccess.can_dispatched },
+            { key: 'calllens', label: 'CallLens', show: effectiveAccess.can_returns },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
@@ -3954,6 +3958,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ EOD ════ */}
         {tab === 'allorders' && effectiveAccess.can_dispatched && (
           <AllOrdersTab />
+        )}
+
+        {tab === 'calllens' && effectiveAccess.can_returns && (
+          <CallLensTab currentUserEmail={user.email || ''} />
         )}
 
         {tab === 'eod' && (
