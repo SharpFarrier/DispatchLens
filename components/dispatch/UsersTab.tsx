@@ -11,6 +11,8 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
   { key: 'can_eod',      label: 'EOD',      desc: 'Upload Shypassist, confirm dispatch' },
   { key: 'can_dispatched', label: 'Dispatched', desc: 'View dispatched orders, sync tracking' },
   { key: 'can_returns',  label: 'Returns',  desc: 'Returns tracker & refunds' },
+  { key: 'can_allorders', label: 'All Orders', desc: 'All orders view (every status + platform)' },
+  { key: 'can_calllens', label: 'CallLens', desc: 'Call center: confirm & delay queues' },
   { key: 'can_users',    label: 'Users',    desc: 'Manage user access (admin only)' },
 ]
 
@@ -37,6 +39,8 @@ const ROLE_PRESETS: { label: string; desc: string; keys: (keyof UserAccess)[] }[
     keys: ['can_import', 'can_plan', 'can_review', 'can_picklist', 'can_eod', 'can_dispatched'] },
   { label: 'Returns Manager', desc: 'Returns tracker + dispatched view',
     keys: ['can_returns', 'can_dispatched'] },
+  { label: 'Caller', desc: 'CallLens queues + all-orders view',
+    keys: ['can_calllens', 'can_allorders'] },
   { label: 'Warehouse Operator', desc: 'Stock, coating, picking, inventory, barcodes',
     keys: ['can_wh_stock', 'can_wh_coating', 'can_wh_picking', 'can_wh_inventory', 'can_wh_barcodes'] },
   { label: 'Packing Operator', desc: 'All packing sub-tabs',

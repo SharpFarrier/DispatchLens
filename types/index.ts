@@ -16,6 +16,8 @@ export interface UserAccess {
   can_eod: boolean
   can_dispatched: boolean
   can_returns: boolean
+  can_allorders: boolean
+  can_calllens: boolean
   can_users: boolean
   can_warehouse: boolean
   can_wh_stock: boolean
