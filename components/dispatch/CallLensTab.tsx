@@ -13,6 +13,14 @@ const DELAY_DISPOSITIONS = ['Okay with delay', 'Wants to cancel', 'No answer', '
 
 interface CallLog { id: string; order_id: string; queue: string; channel: string; disposition: string | null; note: string | null; caller: string | null; created_at: string }
 
+// Days left to promised delivery (promise_date − today). Negative = overdue.
+function deliveryDaysLeft(o: DBOrder): number | null {
+  if (!o.promise_date) return null
+  const promise = new Date(o.promise_date + 'T00:00:00').getTime()
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  return Math.round((promise - today.getTime()) / 86400000)
+}
+
 function statusOf(o: DBOrder): { label: string; fg: string; bg: string } {
   if (o.is_cancelled) return { label: 'Cancelled', fg: 'var(--critical)', bg: 'var(--critical-bg)' }
   if (o.tracking_status === 'delivered') return { label: 'Delivered', fg: 'var(--dispatched)', bg: 'var(--dispatched-bg)' }
@@ -124,6 +132,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   }
 
   const fmtTime = (d: string) => new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  const fmtDate = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
@@ -151,16 +160,19 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 1100 }}>
             <thead style={{ position: 'sticky' as const, top: 0, zIndex: 10 }}>
               <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-                {['Order', 'Customer', 'Contact', 'Status', 'Caller', 'WA', 'Disposition', ''].map((h, i) => (
+                {(queue === 'delay'
+                  ? ['Order', 'Customer', 'Contact', 'Status', 'Promise', 'Dispatched', 'Delivery', 'Caller', 'WA', 'Disposition', '']
+                  : ['Order', 'Customer', 'Contact', 'Status', 'Caller', 'WA', 'Disposition', '']
+                ).map((h, i) => (
                   <th key={i} style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</td></tr>
+                <tr><td colSpan={queue === 'delay' ? 11 : 8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</td></tr>
               ) : queued.length === 0 ? (
-                <tr><td colSpan={8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No orders in this queue.</td></tr>
+                <tr><td colSpan={queue === 'delay' ? 11 : 8} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No orders in this queue.</td></tr>
               ) : queued.map((o, i) => {
                 const st = statusOf(o)
                 const draft = dispDraft[o.order_id] || { disp: '', note: '' }
@@ -176,6 +188,20 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
                         <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: st.fg, background: st.bg, padding: '2px 7px', borderRadius: 4 }}>{st.label}</span>
                       </td>
+                      {queue === 'delay' && (() => {
+                        const dl = deliveryDaysLeft(o)
+                        const dlColor = dl === null ? 'var(--text3)' : dl < 0 ? 'var(--critical)' : dl <= 1 ? 'var(--today)' : 'var(--dispatched)'
+                        const dlText = dl === null ? '—' : dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'due today' : `${dl}d left`
+                        return (
+                          <>
+                            <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{fmtDate(o.promise_date)}</td>
+                            <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{fmtDate(o.dispatched_at)}</td>
+                            <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
+                              <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 700, color: dlColor }}>{dlText}</span>
+                            </td>
+                          </>
+                        )
+                      })()}
                       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
                         <select value={o.assigned_caller || ''} onChange={e => setCaller(o, e.target.value)}
                           style={{ fontSize: 11, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer' }}>
@@ -216,7 +242,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                     </tr>
                     {open && (
                       <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg2)' }}>
-                        <td colSpan={8} style={{ padding: '4px 12px 14px 34px' }}>
+                        <td colSpan={queue === 'delay' ? 11 : 8} style={{ padding: '4px 12px 14px 34px' }}>
                           {!logs[o.order_id] ? (
                             <span style={{ fontSize: 12, color: 'var(--text3)' }}>Loading history…</span>
                           ) : logs[o.order_id].length === 0 ? (
