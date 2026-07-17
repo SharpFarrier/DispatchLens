@@ -135,6 +135,12 @@ export interface DBOrder {
   sgst: number | null
   cgst: number | null
   ship_address: string | null
+  // ── CallLens (call-center) ──
+  assigned_caller: string | null
+  whatsapp_sent: boolean
+  whatsapp_sent_at: string | null
+  last_disposition: string | null
+  last_disposition_at: string | null
   created_at: string
   updated_at: string
 }
