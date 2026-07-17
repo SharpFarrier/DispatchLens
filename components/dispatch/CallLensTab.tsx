@@ -57,17 +57,24 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   // - predispatch: not dispatched, not cancelled (imported / scheduled / hold)
   // - delay: dispatched, not delivered (running check)
   const queued = useMemo(() => {
+    // Statuses that mean the parcel is NOT heading forward to the customer
+    // (returning, undelivered-terminal, or already delivered) — excluded from
+    // the delay queue, which is only for shipments in transit toward delivery.
+    const notInTransit = new Set(['delivered', 'rto', 'returned', 'return to origin', 'rto delivered', 'rto initiated', 'cancelled', 'lost'])
     return orders.filter(o => {
       if (queue === 'predispatch') return !o.is_dispatched && !o.is_cancelled
-      return o.is_dispatched && o.tracking_status !== 'delivered'
+      // delay: dispatched, still in transit toward the customer (not RTO/returned/delivered)
+      const status = (o.tracking_status || '').toLowerCase()
+      return o.is_dispatched && !notInTransit.has(status)
     }).filter(o => callerFilter === 'All' ? true : o.assigned_caller === callerFilter)
   }, [orders, queue, callerFilter])
 
   const dispositions = queue === 'predispatch' ? PREDISPATCH_DISPOSITIONS : DELAY_DISPOSITIONS
 
   const counts = useMemo(() => {
+    const notInTransit = new Set(['delivered', 'rto', 'returned', 'return to origin', 'rto delivered', 'rto initiated', 'cancelled', 'lost'])
     const pre = orders.filter(o => !o.is_dispatched && !o.is_cancelled)
-    const del = orders.filter(o => o.is_dispatched && o.tracking_status !== 'delivered')
+    const del = orders.filter(o => o.is_dispatched && !notInTransit.has((o.tracking_status || '').toLowerCase()))
     const byCaller = (list: DBOrder[], c: string) => list.filter(o => o.assigned_caller === c).length
     return { pre: pre.length, del: del.length,
       v: byCaller(queue === 'predispatch' ? pre : del, 'Vishaka'),
