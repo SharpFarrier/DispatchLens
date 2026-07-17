@@ -82,6 +82,7 @@ export interface ParsedOrder {
   sgst: number | null
   cgst: number | null
   ship_address: string | null
+  assigned_caller: string | null
 }
 export interface DBOrder {
   id: string

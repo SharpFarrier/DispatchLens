@@ -104,6 +104,7 @@ function mapHeaders(headers: string[]): Record<string, number> {
     if (norm.includes('sgst')) map['sgst'] = i
     if (norm.includes('cgst')) map['cgst'] = i
     if (norm.includes('address')) map['address'] = i
+    if (norm === 'assigned' || norm.includes('assigned')) map['assigned'] = i
   })
   // The tail block Taxable/Tax/Shipping/Taxable/Tax/Tax repeats headers, so map
   // by fixed offset from Contact #. Layout (both couriers, verified):
@@ -209,6 +210,7 @@ export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
       sgst: parseNum(get('sgst')),
       cgst: parseNum(get('cgst')),
       ship_address: get('address') || null,
+      assigned_caller: get('assigned') || null,
     }
 
     results.push(order)

@@ -318,7 +318,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const invoiceAppeared =
         (o.contact_number && !existing.contact_number) ||
         (o.taxable_value != null && existing.taxable_value == null) ||
-        (o.ship_address && !existing.ship_address)
+        (o.ship_address && !existing.ship_address) ||
+        (o.assigned_caller && !existing.assigned_caller)
       return trackingChanged || invoiceAppeared
     })
 
@@ -341,6 +342,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           sgst: o.sgst ?? existing.sgst ?? null,
           cgst: o.cgst ?? existing.cgst ?? null,
           ship_address: o.ship_address ?? existing.ship_address ?? null,
+          assigned_caller: o.assigned_caller ?? existing.assigned_caller ?? null,
           updated_at: new Date().toISOString(),
         }).eq('id', existing.id)
         logEvent(o.order_id, 'note', `Tracking number updated via re-import: ${o.tracking_number}`)
@@ -360,15 +362,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       if (session) {
         // Resolve each order's platform SKU to the canonical barcode (Master) SKU
         const lookup = buildSkuLookup(skuMaps)
-        const rows = newOrders.map((o, idx) => {
+        const rows = newOrders.map(o => {
           const barcode = resolveBarcodeSku(o.order_id, o.sku, lookup)
           return {
             session_id: session.id, ...o,
             barcode_sku: barcode,
             sku_mapped: !!barcode,
             plan_decision: o.is_dispatched ? 'scheduled' : 'undecided',
-            // Round-robin split between the two callers per import batch.
-            assigned_caller: idx % 2 === 0 ? 'Vishaka' : 'Priyanka',
+            // assigned_caller comes straight from the sheet's "Assigned" column (via ...o).
           }
         })
         await supabase.from('dispatch_orders').insert(rows)
