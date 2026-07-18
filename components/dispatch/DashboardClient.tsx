@@ -353,16 +353,51 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       }))
     }
 
+    let insertedOrders: typeof newOrders = []
     if (newOrders.length > 0) {
+      // GUARD: the in-memory `orders` array is windowed, so an already-existing
+      // (esp. dispatched) order can look "new". Before inserting, check the DB
+      // for every order_id in this batch. Any order_id that already exists in the
+      // database — in ANY state — is NOT new. Critically, a dispatched order must
+      // NEVER be re-inserted (that would resurrect it as a ghost in the Plan tab).
+      const candidateIds = newOrders.map(o => o.order_id)
+      const existingInDb = new Set<string>()
+      const dispatchedInDb = new Set<string>()
+      for (let i = 0; i < candidateIds.length; i += 300) {
+        const chunk = candidateIds.slice(i, i + 300)
+        const { data: dbRows } = await supabase
+          .from('dispatch_orders')
+          .select('order_id, is_dispatched')
+          .in('order_id', chunk)
+        for (const r of (dbRows || [])) {
+          existingInDb.add(r.order_id)
+          if (r.is_dispatched) dispatchedInDb.add(r.order_id)
+        }
+      }
+      // Only truly-absent order_ids proceed. (Dispatched-in-DB are a subset of
+      // existingInDb, so they're excluded too — belt and suspenders.)
+      const trulyNew = newOrders.filter(o => !existingInDb.has(o.order_id) && !dispatchedInDb.has(o.order_id))
+      insertedOrders = trulyNew
+      const skippedExisting = newOrders.length - trulyNew.length
+      if (skippedExisting > 0) {
+        console.warn(`[import] skipped ${skippedExisting} order(s) already present in DB (not re-inserted)`) 
+      }
+      if (trulyNew.length === 0) {
+        // Nothing genuinely new to insert; updates (above) may still have applied.
+        setImporting(false)
+        setImportResult({ added: 0, updated: updatedOrders.length, skipped: skippedExisting, unmapped: 0, unmappedSkus: [] })
+        await loadOrders()
+        return
+      }
       // Use a placeholder session_id (create a batch record for tracking)
       const batchLabel = `Import ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
       const { data: session } = await supabase.from('dispatch_sessions')
-        .insert({ created_by: user.id, session_date: new Date().toISOString().split('T')[0], label: batchLabel, total_orders: newOrders.length })
+        .insert({ created_by: user.id, session_date: new Date().toISOString().split('T')[0], label: batchLabel, total_orders: trulyNew.length })
         .select().single()
       if (session) {
         // Resolve each order's platform SKU to the canonical barcode (Master) SKU
         const lookup = buildSkuLookup(skuMaps)
-        const rows = newOrders.map(o => {
+        const rows = trulyNew.map(o => {
           const barcode = resolveBarcodeSku(o.order_id, o.sku, lookup)
           return {
             session_id: session.id, ...o,
@@ -374,22 +409,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         })
         await supabase.from('dispatch_orders').insert(rows)
         await loadOrders()
-        // Log import events
-        for (const o of newOrders) {
+        // Log import events (only for orders actually inserted)
+        for (const o of trulyNew) {
           logEvent(o.order_id, 'import', `Imported · ${o.courier} · ${o.sku}`)
         }
       }
     }
     const lookupForCount = buildSkuLookup(skuMaps)
-    const unmappedOrders = newOrders.filter(o => !resolveBarcodeSku(o.order_id, o.sku, lookupForCount))
+    const unmappedOrders = insertedOrders.filter(o => !resolveBarcodeSku(o.order_id, o.sku, lookupForCount))
     const unmappedBySku = new Map<string, number>()
     unmappedOrders.forEach(o => unmappedBySku.set(o.sku || '(blank)', (unmappedBySku.get(o.sku || '(blank)') || 0) + 1))
     const unmappedSkuList = Array.from(unmappedBySku.entries()).map(([sku, count]) => ({ sku, count })).sort((a, b) => b.count - a.count)
-    setImportResult({ added: newOrders.length, updated: updatedOrders.length, skipped: allParsed.length - newOrders.length - updatedOrders.length, unmapped: unmappedOrders.length, unmappedSkus: unmappedSkuList })
+    setImportResult({ added: insertedOrders.length, updated: updatedOrders.length, skipped: allParsed.length - insertedOrders.length - updatedOrders.length, unmapped: unmappedOrders.length, unmappedSkus: unmappedSkuList })
     setImporting(false)
     setDelhiveryText('')
     setBluedartText('')
-    if (newOrders.length > 0) setTab('plan')
+    if (insertedOrders.length > 0) setTab('plan')
   }
 
   // ── Single decision ──
