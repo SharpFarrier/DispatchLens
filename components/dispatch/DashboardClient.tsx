@@ -1202,6 +1202,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }, [orders, stockBySku])
   const cancelledOrders = useMemo(() => orders.filter(o => o.is_cancelled), [orders])
 
+  // Qty of each platform SKU committed in the picklist (scheduled + manager-dated
+  // unfulfillable). Used to net down the Upcoming Demand stock column so it shows
+  // stock REMAINING after the picklist is fulfilled.
+  const picklistCommittedBySku = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const o of orders) {
+      if (o.is_cancelled || o.is_dispatched) continue
+      const inPicklist = (o.plan_decision === 'scheduled' && !!o.scheduled_date) ||
+        (o.plan_decision === 'unfulfillable' && o.target_dispatch_date)
+      if (inPicklist) m[o.sku] = (m[o.sku] || 0) + o.qty
+    }
+    return m
+  }, [orders])
+
   // Unique scheduled dates for dispatch date filter
   // Live days-left to the effective dispatch deadline:
   //   (promise_date − today) − transit_days − 1-day buffer.
@@ -3312,7 +3326,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
                           <th style={{ padding: '9px 16px', textAlign: 'left' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'sticky' as const, left: 0, background: 'var(--bg2)', zIndex: 1, minWidth: 160 }}>SKU</th>
                           <th style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const }}>Total</th>
-                          <th style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const }}>Stock</th>
+                          <th style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const }} title="Stock remaining after the picklist is fulfilled (stock − committed to picklist)">Stock avail.</th>
                           {cols.map(col => (
                             <th key={col.key} style={{
                               padding: '9px 12px', textAlign: 'center' as const,
@@ -3340,11 +3354,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text)', fontSize: 13 }}>{rowTotal}</td>
                               {(() => {
                                 const stk = stockByPlatformSku[sku]
-                                const covered = stk !== undefined && stk >= rowTotal
+                                const committed = picklistCommittedBySku[sku] || 0
+                                const remaining = stk === undefined ? undefined : stk - committed
+                                const covered = remaining !== undefined && remaining >= rowTotal
                                 return (
                                   <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, fontSize: 12,
-                                    color: stk === undefined ? 'var(--text3)' : covered ? 'var(--dispatched)' : 'var(--critical)' }}>
-                                    {stk === undefined ? '—' : stk}
+                                    color: remaining === undefined ? 'var(--text3)' : covered ? 'var(--dispatched)' : 'var(--critical)' }}
+                                    title={stk !== undefined && committed > 0 ? `${stk} in stock − ${committed} committed to picklist = ${remaining} available` : undefined}>
+                                    {remaining === undefined ? '—' : remaining}
+                                    {committed > 0 && stk !== undefined && (
+                                      <span style={{ fontSize: 9, color: 'var(--text3)', fontWeight: 400, marginLeft: 3 }}>({stk}−{committed})</span>
+                                    )}
                                   </td>
                                 )
                               })()}
