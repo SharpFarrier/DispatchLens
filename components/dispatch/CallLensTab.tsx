@@ -143,6 +143,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     { key: 'dispatched', label: 'Dispatched', type: 'date', queues: ['delay'], get: r => r.o.dispatched_at || '', render: r => fmtDate(r.o.dispatched_at) },
     { key: 'delivery', label: 'Delivery', type: 'number', queues: ['delay'], get: r => { const d = deliveryDaysLeft(r.o); return d === null ? 9999 : d }, render: r => { const dl = deliveryDaysLeft(r.o); if (dl === null) return '—'; const c = dl < 0 ? 'var(--critical)' : dl <= 1 ? 'var(--today)' : 'var(--dispatched)'; const t = dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'due today' : `${dl}d left`; return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: c }}>{t}</span> } },
     { key: 'caller', label: 'Caller', type: 'category', get: r => r.o.assigned_caller || '(none)' },
+    { key: 'last_disposition', label: 'Last disp.', type: 'category', get: r => r.o.last_disposition || '(none)', render: r => r.o.last_disposition ? <span style={{ fontSize: 11, color: 'var(--text2)' }}>{r.o.last_disposition}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
   ], [])
 
   const activeCols = useMemo(() => COLS.filter(c => !c.queues || c.queues.includes(queue)), [COLS, queue])
