@@ -1654,19 +1654,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   const picklist = useMemo(() => {
-    // Include scheduled orders AND unfulfillable orders that have been given a target date by manager
+    // Include scheduled orders AND unfulfillable orders that have been given a target date by manager.
+    // Guard: a 'scheduled' order MUST have a scheduled_date to appear (a dateless
+    // 'scheduled' order is an invalid/stale state — it goes back to the Plan tab, not the picklist).
     const scheduled = orders.filter(o =>
       !o.is_cancelled && !o.is_dispatched && (
-        o.plan_decision === 'scheduled' ||
+        (o.plan_decision === 'scheduled' && !!o.scheduled_date) ||
         (o.plan_decision === 'unfulfillable' && o.target_dispatch_date)
       )
     )
     // Use target_dispatch_date for unfulfillable orders, scheduled_date for scheduled
-    scheduled.forEach(o => {
-      if (o.plan_decision === 'unfulfillable' && o.target_dispatch_date && !o.scheduled_date) {
-        o = { ...o, scheduled_date: o.target_dispatch_date }
-      }
-    })
     // Group by date -> courier -> sku
     const dateMap: Record<string, Record<string, Record<string, { sku: string; courier: Courier; qty: number; count: number; orders: DBOrder[] }>>> = {}
     scheduled.forEach(o => {
