@@ -144,6 +144,14 @@ export interface DBOrder {
   whatsapp_sent_at: string | null
   last_disposition: string | null
   last_disposition_at: string | null
+  // CallLens redesign — confirmation dimension (decoupled from plan_decision)
+  confirmation_status: string | null
+  confirmation_at: string | null
+  callback_date: string | null
+  cancellation_requested: boolean
+  cancellation_requested_at: string | null
+  escalated: boolean
+  escalated_at: string | null
   created_at: string
   updated_at: string
 }
