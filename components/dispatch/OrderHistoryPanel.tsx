@@ -93,6 +93,10 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
 
   // ── On-demand invoice download (any user; regenerates from stored order data) ──
   const [invoicing, setInvoicing] = useState(false)
+  const [showCancelForm, setShowCancelForm] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const [isCancelled, setIsCancelled] = useState(order.is_cancelled)
   const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) return resolve()
     const el = document.createElement('script'); el.src = src
@@ -199,6 +203,29 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
     setCreatingReturn(false)
   }
 
+  // Cancel the order — reason mandatory. Sets is_cancelled + manual_cancelled and
+  // logs to the order timeline. Blocked once dispatched (can't cancel in-transit).
+  const cancelOrder = async () => {
+    const reason = cancelReason.trim()
+    if (!reason || cancelling) return
+    setCancelling(true)
+    try {
+      const now = new Date().toISOString()
+      const { error } = await supabase.from('dispatch_orders').update({
+        is_cancelled: true, manual_cancelled: true, manual_cancelled_at: now, updated_at: now,
+      }).eq('order_id', order.order_id)
+      if (!error) {
+        await fetch('/api/events', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: order.order_id, event_type: 'cancel', title: `Order cancelled · ${reason}`, note: null }),
+        })
+        setIsCancelled(true); setShowCancelForm(false); setCancelReason('')
+        fetchEvents()
+        onReturnCreated?.()  // reuse the parent refresh hook if present
+      }
+    } finally { setCancelling(false) }
+  }
+
   const urgencyColors: Record<string, string> = {
     CRITICAL: 'var(--critical)', TODAY: 'var(--today)',
     PLAN: 'var(--plan)', HOLD: 'var(--hold)',
@@ -293,7 +320,37 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
                   <RotateCcw size={12} /> Mark as Return
                 </button>
               )}
+              {!isCancelled && !order.is_dispatched && !showCancelForm && (
+                <button onClick={() => { setCancelReason(''); setShowCancelForm(true) }}
+                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Ban size={12} /> Cancel order
+                </button>
+              )}
+              {isCancelled && (
+                <span style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <Ban size={12} /> Cancelled
+                </span>
+              )}
             </div>
+            {showCancelForm && (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid #fecaca', background: 'var(--critical-bg)', display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+                <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)' }}>CANCEL ORDER</span>
+                <span style={{ fontSize: 12, color: 'var(--text2)' }}>This marks the order cancelled. A reason is required and is logged to the order history.</span>
+                <input autoFocus value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+                  placeholder="Reason for cancellation (required)…"
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: `1px solid ${cancelReason.trim() ? 'var(--border)' : '#fecaca'}`, background: 'var(--surface)', color: 'var(--text)', fontSize: 13, outline: 'none', boxSizing: 'border-box' as const }} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={cancelOrder} disabled={cancelling || !cancelReason.trim()}
+                    style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: cancelReason.trim() ? 'var(--critical)' : 'var(--bg2)', color: cancelReason.trim() ? '#fff' : 'var(--text3)', fontSize: 13, fontWeight: 700, cursor: cancelReason.trim() ? 'pointer' : 'not-allowed' }}>
+                    {cancelling ? 'Cancelling…' : 'Confirm cancel'}
+                  </button>
+                  <button onClick={() => { setShowCancelForm(false); setCancelReason('') }} disabled={cancelling}
+                    style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                    Back
+                  </button>
+                </div>
+              </div>
+            )}
             {showReturnForm && (
               <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid #fed7aa', background: 'var(--today-bg)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--today)' }}>NEW RETURN</span>
