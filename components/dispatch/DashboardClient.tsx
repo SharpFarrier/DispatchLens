@@ -431,22 +431,32 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // ── Single decision ──
   const updateDecision = async (orderId: string, decision: PlanDecision, scheduledDate?: string) => {
     setUpdatingIds(prev => new Set(prev).add(orderId))
-    const update: Record<string, string | null> = {
+    const order = orders.find(o => o.id === orderId)
+    const update: Record<string, string | boolean | null> = {
       plan_decision: decision,
       updated_at: new Date().toISOString(),
     }
     if (decision === 'scheduled') update.scheduled_date = scheduledDate || null
     if (decision === 'hold' || decision === 'undecided' || decision === 'unfulfillable') update.scheduled_date = null
+    // Rescheduling a HELD order (individual action) clears the hold and flags it as
+    // rescheduled-from-hold, so the factory knows it was on hold but is now cleared to ship.
+    const wasHeld = order && (order.confirmation_status === 'hold' || order.plan_decision === 'hold')
+    if (decision === 'scheduled' && wasHeld) {
+      update.confirmation_status = null
+      update.rescheduled_from_hold = true
+    }
     await supabase.from('dispatch_orders').update(update).eq('id', orderId)
-    const order = orders.find(o => o.id === orderId)
     if (order) {
       if (decision === 'hold') logEvent(order.order_id, 'hold', 'Marked On Hold')
       if (decision === 'unfulfillable') logEvent(order.order_id, 'unfulfillable', 'Marked Unfulfillable')
       if (decision === 'undecided') logEvent(order.order_id, 'hold', 'Decision cleared')
+      if (decision === 'scheduled' && wasHeld) logEvent(order.order_id, 'rescheduled', 'Rescheduled out of hold — cleared to dispatch')
     }
     setOrders(prev => prev.map(o => o.id === orderId ? {
       ...o, plan_decision: decision,
-      scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
+      scheduled_date: update.scheduled_date !== undefined ? (update.scheduled_date as string | null) : o.scheduled_date,
+      confirmation_status: update.confirmation_status !== undefined ? (update.confirmation_status as string | null) : o.confirmation_status,
+      rescheduled_from_hold: update.rescheduled_from_hold !== undefined ? (update.rescheduled_from_hold as boolean) : o.rescheduled_from_hold,
     } : o))
     setUpdatingIds(prev => { const n = new Set(prev); n.delete(orderId); return n })
   }
@@ -473,7 +483,18 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const handleBulkConfirm = async () => {
     if (!bulkDecision || selectedIds.size === 0) return
-    const ids = Array.from(selectedIds)
+    // Bulk SCHEDULE must never touch held orders (customer or supply hold). Held orders
+    // are resolved individually. Other bulk decisions apply to all selected.
+    const allIds = Array.from(selectedIds)
+    const ids = bulkDecision === 'scheduled'
+      ? allIds.filter(id => { const o = orders.find(x => x.id === id); return o ? !isHeld(o) : true })
+      : allIds
+    const skippedHeld = allIds.length - ids.length
+    if (ids.length === 0) {
+      showToast('All selected orders are on hold — bulk scheduling skips held orders. Reschedule them individually.', 'error')
+      setShowBulkConfirm(false); setBulkDecision(''); setBulkScheduleDate('')
+      return
+    }
     ids.forEach(id => setUpdatingIds(prev => new Set(prev).add(id)))
     const update: Record<string, string | null> = {
       plan_decision: bulkDecision,
@@ -482,12 +503,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (bulkDecision === 'scheduled') update.scheduled_date = bulkScheduleDate || new Date().toISOString().split('T')[0]
     else update.scheduled_date = null
     await supabase.from('dispatch_orders').update(update).in('id', ids)
-    setOrders(prev => prev.map(o => selectedIds.has(o.id) ? {
+    const idSet = new Set(ids)
+    setOrders(prev => prev.map(o => idSet.has(o.id) ? {
       ...o, plan_decision: bulkDecision as PlanDecision,
       scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
     } : o))
     // Log bulk events
-    const bulkOrders = orders.filter(o => selectedIds.has(o.id))
+    const bulkOrders = orders.filter(o => idSet.has(o.id))
     for (const o of bulkOrders) {
       if (bulkDecision === 'scheduled') {
         const dateLabel = bulkScheduleDate ? new Date(bulkScheduleDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''
@@ -503,6 +525,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setBulkDecision('')
     setBulkScheduleDate('')
     setShowBulkConfirm(false)
+    if (skippedHeld > 0) showToast(`Scheduled ${ids.length}. Skipped ${skippedHeld} held order(s) — reschedule those individually.`, 'success')
   }
 
   // ── Priority ──
@@ -548,7 +571,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     // Same hard blocks as the scanner — no dispatching held / cancelled / already-dispatched orders.
     if (manualDispatchOrder.is_dispatched) { beepError(); showToast(`${manualDispatchOrder.order_id} is already dispatched — not dispatching again.`, 'error'); setManualDispatchOrder(null); return }
     if (manualDispatchOrder.is_cancelled) { beepError(); showToast(`${manualDispatchOrder.order_id} is cancelled — not dispatching. Un-cancel it in Plan first if this is wrong.`, 'error'); setManualDispatchOrder(null); return }
-    if (manualDispatchOrder.plan_decision === 'hold') { beepError(); showToast(`${manualDispatchOrder.order_id} is On Hold — release it from hold in the Plan tab before dispatching.`, 'error'); setManualDispatchOrder(null); return }
+    if (isHeld(manualDispatchOrder)) { beepError(); showToast(`${manualDispatchOrder.order_id} is On Hold — release it from hold in the Plan tab before dispatching.`, 'error'); setManualDispatchOrder(null); return }
     setManualDispatching(true)
     const now = new Date().toISOString()
     await supabase.from('dispatch_orders').update({
@@ -655,7 +678,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
     // 3) On hold — must be released from hold in the Plan tab before it can ship.
-    const holdMatch = awbOrders.find(o => o.plan_decision === 'hold' && !o.is_cancelled && !o.is_dispatched)
+    const holdMatch = awbOrders.find(o => isHeld(o))
     if (holdMatch) {
       beepError()
       setScanError(`AWB ${awb} is On Hold — release it from hold in the Plan tab before dispatching.`)
@@ -1216,6 +1239,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // ── Computed ──
   const today = new Date().toISOString().split('T')[0]
+  // An order is HELD if either the plan decision OR the customer confirmation says hold.
+  // Unifies supply-hold (plan_decision) and customer-hold (confirmation_status) so a held
+  // order behaves consistently — shown as Hold, blocked from dispatch — regardless of which
+  // flag carries it (guards against drift between the two, e.g. a CallLens hold whose
+  // plan_decision later got reset to scheduled by a reschedule/import).
+  const isHeld = useCallback((o: DBOrder) => (o.plan_decision === 'hold' || o.confirmation_status === 'hold') && !o.is_cancelled && !o.is_dispatched, [])
   const activeOrders = useMemo(() => orders.filter(o => !o.is_cancelled && !o.is_dispatched), [orders])
   // "Needed" per barcode-SKU = active, not-yet-dispatched orders competing for that SKU.
   const neededBySku = useMemo(() => {
@@ -1311,7 +1340,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     let base = [...activeOrders]
     if (activeFilter === 'scheduled_today') base = base.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
     else if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
-    else if (activeFilter === 'hold') base = base.filter(o => o.plan_decision === 'hold')
+    else if (activeFilter === 'hold') base = base.filter(o => isHeld(o))
     else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter !== 'ALL') base = base.filter(o => liveUrgency(o) === (activeFilter as string))
@@ -1498,7 +1527,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const dispatchTodayCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
   const slippedCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today && !o.is_cancelled && !o.is_dispatched).length, [orders, today])
   const unmappedCount = useMemo(() => activeOrders.filter(o => !o.barcode_sku).length, [activeOrders])
-  const holdCount = useMemo(() => orders.filter(o => o.plan_decision === 'hold' && !o.is_cancelled).length, [orders])
+  const holdCount = useMemo(() => orders.filter(o => isHeld(o)).length, [orders, isHeld])
   const unfulfillableCount = useMemo(() => unfulfillableOrders.length, [unfulfillableOrders])
   const undecidedCount = useMemo(() => activeOrders.filter(o => o.plan_decision === 'undecided').length, [activeOrders])
 
@@ -1619,7 +1648,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (activeFilter === 'scheduled') list = list.filter(o => o.plan_decision === 'scheduled')
     else if (activeFilter === 'scheduled_today') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
     else if (activeFilter === 'slipped') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today)
-    else if (activeFilter === 'hold') list = list.filter(o => o.plan_decision === 'hold')
+    else if (activeFilter === 'hold') list = list.filter(o => isHeld(o))
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
@@ -1671,7 +1700,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (activeFilter === 'scheduled') list = list.filter(o => o.plan_decision === 'scheduled')
     else if (activeFilter === 'scheduled_today') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
     else if (activeFilter === 'slipped') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today)
-    else if (activeFilter === 'hold') list = list.filter(o => o.plan_decision === 'hold')
+    else if (activeFilter === 'hold') list = list.filter(o => isHeld(o))
     else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
@@ -1686,7 +1715,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     let baseList = [...activeOrders]
     if (activeFilter === 'scheduled_today') baseList = baseList.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
     else if (activeFilter === 'scheduled') baseList = baseList.filter(o => o.plan_decision === 'scheduled')
-    else if (activeFilter === 'hold') baseList = baseList.filter(o => o.plan_decision === 'hold')
+    else if (activeFilter === 'hold') baseList = baseList.filter(o => isHeld(o))
     else if (activeFilter === 'unfulfillable') baseList = baseList.filter(o => o.plan_decision === 'unfulfillable')
     else if (activeFilter === 'undecided') baseList = baseList.filter(o => o.plan_decision === 'undecided')
     else if (activeFilter !== 'ALL') baseList = baseList.filter(o => liveUrgency(o) === activeFilter)
@@ -2840,7 +2869,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                         {(() => {
                                         let base = [...activeOrders]
                                         if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
-                                        else if (activeFilter === 'hold') base = base.filter(o => o.plan_decision === 'hold')
+                                        else if (activeFilter === 'hold') base = base.filter(o => isHeld(o))
                                         else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
                                         else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
                                         else if (activeFilter !== 'ALL' && activeFilter !== 'scheduled_today') base = base.filter(o => liveUrgency(o) === activeFilter)
@@ -3929,7 +3958,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <tr key={order.id} style={{ borderBottom: i < pagedDispatched.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', whiteSpace: 'nowrap' as const }}>{dispDate}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
-                          <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}</td>
+                          <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}{order.rescheduled_from_hold && <span title="Rescheduled out of hold — cleared to dispatch" style={{ marginLeft: 6, fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600, color: '#7c3aed', background: '#f5f3ff', padding: '1px 5px', borderRadius: 4 }}>↻ resched</span>}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{order.sku}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: order.scanned_barcode ? 'var(--text2)' : 'var(--text3)' }}>{order.scanned_barcode || '—'}</td>
                           <td style={{ padding: '9px 12px' }}>

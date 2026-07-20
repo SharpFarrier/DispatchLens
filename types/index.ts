@@ -152,6 +152,7 @@ export interface DBOrder {
   cancellation_requested_at: string | null
   escalated: boolean
   escalated_at: string | null
+  rescheduled_from_hold: boolean
   dispatch_generated_at: string | null
   dispatch_gen_status: string | null
   dispatch_gen_error: string | null
