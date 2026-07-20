@@ -219,6 +219,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set())
   // Dispatch date filter (Plan tab)
   const [dispatchDateFilter, setDispatchDateFilter] = useState<Set<string>>(new Set())
+  const [genFilter, setGenFilter] = useState<'ALL' | 'generated' | 'not'>('ALL')
   const [showDispatchDatePopover, setShowDispatchDatePopover] = useState(false)
   const [dispatchDatePopoverPos, setDispatchDatePopoverPos] = useState({ top: 0, left: 0 })
 
@@ -1632,6 +1633,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (courierFilter.size > 0) list = list.filter(o => courierFilter.has(o.courier))
     if (skuFilter.size > 0) list = list.filter(o => skuFilter.has(o.sku))
     if (dispatchDateFilter.size > 0) list = list.filter(o => dispatchDateFilter.has(o.scheduled_date || 'none'))
+    if (genFilter === 'generated') list = list.filter(o => !!o.dispatch_generated_at)
+    else if (genFilter === 'not') list = list.filter(o => !o.dispatch_generated_at)
     // Sort
     const to: Record<string, number> = { CRITICAL: 0, TODAY: 1, PLAN: 2, HOLD: 3 }
     if (sortCol) {
@@ -1659,7 +1662,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [activeOrders, activeFilter, daysFilter, courierFilter, skuFilter, dispatchDateFilter, sortCol, sortDir])
+  }, [activeOrders, activeFilter, daysFilter, courierFilter, skuFilter, dispatchDateFilter, genFilter, sortCol, sortDir])
 
   // Orders matching ONLY the active KPI/urgency card (no courier/days/sku sub-filters).
   // Used so sub-filter dropdowns (courier, days) show counts scoped to the selected card.
@@ -1805,22 +1808,51 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const labelParts: Uint8Array[] = []
       const invoiceParts: Uint8Array[] = []
       const failed: string[] = []
+      // Per-order generation outcome (order_id -> { status, error }).
+      const genOutcome: Record<string, { status: 'ok' | 'failed'; error: string | null }> = {}
       let done = 0
       for (const o of base) {
         done++
         setGenProgress(`Order ${done}/${base.length} — ${o.order_id}`)
+        const issues: string[] = []
         // Invoice for every order (uses imported invoice fields).
         try { invoiceParts.push(await invoicePdfBytes(o, { signatureDataUrl })) }
-        catch (e) { failed.push(`${o.order_id} invoice: ${(e as Error).message}`) }
-        // Label only for Cargo-fetchable (skip Bluedart).
+        catch (e) { failed.push(`${o.order_id} invoice: ${(e as Error).message}`); issues.push('invoice failed') }
+        // Label only for Cargo-fetchable (skip Bluedart — BD labels come from elsewhere, NOT a failure).
         if (!isBluedart(o) && o.tracking_number) {
-          if (!token) { failed.push(`${o.order_id} label: no Cargo token set`); continue }
-          try {
-            const raw = await fetchLabelBytes(o.tracking_number, token)
-            labelParts.push(await stripAdPage(raw))
-          } catch (e) { failed.push(`${o.order_id} label: ${(e as Error).message}`) }
+          if (!token) { failed.push(`${o.order_id} label: no Cargo token set`); issues.push('label failed (no token)') }
+          else {
+            try {
+              const raw = await fetchLabelBytes(o.tracking_number, token)
+              labelParts.push(await stripAdPage(raw))
+            } catch (e) { failed.push(`${o.order_id} label: ${(e as Error).message}`); issues.push('label failed') }
+          }
         }
+        genOutcome[o.order_id] = issues.length
+          ? { status: 'failed', error: issues.join(' · ') }
+          : { status: 'ok', error: null }
       }
+      // Persist generation status on every processed order (chunked).
+      setGenProgress('Saving generation status…')
+      const nowIso = new Date().toISOString()
+      const okIds = base.filter(o => genOutcome[o.order_id]?.status === 'ok').map(o => o.order_id)
+      const failedEntries = base.filter(o => genOutcome[o.order_id]?.status === 'failed')
+      for (let i = 0; i < okIds.length; i += 200) {
+        const chunk = okIds.slice(i, i + 200)
+        await supabase.from('dispatch_orders')
+          .update({ dispatch_generated_at: nowIso, dispatch_gen_status: 'ok', dispatch_gen_error: null, updated_at: nowIso })
+          .in('order_id', chunk)
+      }
+      // Failed ones carry their specific error, so update individually.
+      for (const o of failedEntries) {
+        await supabase.from('dispatch_orders')
+          .update({ dispatch_generated_at: nowIso, dispatch_gen_status: 'failed', dispatch_gen_error: genOutcome[o.order_id].error, updated_at: nowIso })
+          .eq('order_id', o.order_id)
+      }
+      // Reflect in local state so the Plan badges/filter update without a reload.
+      setOrders(prev => prev.map(x => genOutcome[x.order_id]
+        ? { ...x, dispatch_generated_at: nowIso, dispatch_gen_status: genOutcome[x.order_id].status, dispatch_gen_error: genOutcome[x.order_id].error } as DBOrder
+        : x))
       const stamp = new Date().toISOString().slice(0, 10)
       if (labelParts.length) { setGenProgress('Merging labels…'); downloadBytes(await mergePdfs(labelParts), `labels-${stamp}.pdf`) }
       if (invoiceParts.length) { setGenProgress('Merging invoices…'); downloadBytes(await mergePdfs(invoiceParts), `invoices-${stamp}.pdf`) }
@@ -2500,6 +2532,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     </button>
                   )
                 })}
+                <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', padding: 2, borderRadius: 6 }} title="Filter by dispatch-doc generation">
+                  {([['ALL', 'All'], ['not', 'Not generated'], ['generated', 'Generated']] as const).map(([val, label]) => (
+                    <button key={val} onClick={() => setGenFilter(val)}
+                      style={{ padding: '4px 9px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                        background: genFilter === val ? 'var(--surface)' : 'transparent', color: genFilter === val ? 'var(--text)' : 'var(--text3)',
+                        boxShadow: genFilter === val ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <button onClick={() => loadOrders()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
                   <RefreshCw size={12} />
                 </button>
@@ -3125,7 +3167,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 </td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed' }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span></td>
-                                <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>{order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}</td>
+                                <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>{order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}{order.dispatch_generated_at && (order.dispatch_gen_status === 'failed'
+                                  ? <span title={`Dispatch doc issue: ${order.dispatch_gen_error || 'failed'}`} style={{ marginLeft: 8, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '1px 6px', borderRadius: 4 }}>⚠ gen: {order.dispatch_gen_error || 'failed'}</span>
+                                  : <span title={`Dispatch generated ${new Date(order.dispatch_generated_at).toLocaleString('en-IN')}`} style={{ marginLeft: 8, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '1px 6px', borderRadius: 4 }}>✓ gen</span>
+                                )}</td>
                                 <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
                                 <td style={{ padding: '10px 16px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span></td>
                                 <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
