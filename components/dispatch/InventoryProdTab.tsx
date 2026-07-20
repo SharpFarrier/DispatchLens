@@ -29,123 +29,6 @@ const thStyle: React.CSSProperties = { padding: '8px 12px', textAlign: 'left', f
 
 const DRILL_TABS = ['received', 'coated', 'picked', 'packed', 'dispatched'] as const
 
-// ── Run rate & 20-day target ──────────────────────────────────────────────
-// Daily run rate per SKU from the last 30 days of dispatches, and a target
-// stock level. A calendar date only counts as a "dispatch day" if at least
-// `threshold` orders were dispatched that day — this filters out cleanup days
-// where a couple of back-dated orders were added (which would otherwise deflate
-// the run rate). Pieces (qty) from ALL days count toward the numerator; only
-// real dispatch days count in the denominator.
-function RunRateSection() {
-  const supabase = createClient()
-  const [raw, setRaw] = useState<{ disp: Row[]; stockBySku: Record<string, number> } | null>(null)
-  const [threshold, setThreshold] = useState(10)
-  const [targetDays, setTargetDays] = useState(20)
-  const [loading, setLoading] = useState(true)
-  const [sortKey, setSortKey] = useState<'target' | 'stock' | 'rate' | 'gap'>('gap')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const since = new Date(); since.setDate(since.getDate() - 30); since.setHours(0, 0, 0, 0)
-    const disp = await fetchAllRows((from, to) =>
-      supabase.from('dispatch_orders')
-        .select('barcode_sku, sku, qty, dispatched_at')
-        .eq('is_dispatched', true)
-        .gte('dispatched_at', since.toISOString())
-        .order('id', { ascending: false }).range(from, to))
-    const stocked = await fetchAllRows((from, to) =>
-      supabase.from('packed_units').select('sku').eq('status', 'stocked').range(from, to))
-    const stockBySku: Record<string, number> = {}
-    for (const u of (stocked || [])) stockBySku[u.sku] = (stockBySku[u.sku] || 0) + 1
-    setRaw({ disp: disp || [], stockBySku })
-    setLoading(false)
-  }, [supabase])
-  useEffect(() => { void load() }, [load])
-
-  const { computed, dispatchDays } = useMemo(() => {
-    if (!raw) return { computed: [] as Row[], dispatchDays: 0 }
-    const ordersPerDate: Record<string, number> = {}
-    const piecesBySku: Record<string, number> = {}
-    for (const o of raw.disp) {
-      const sku = o.barcode_sku || o.sku
-      if (!sku) continue
-      const d = (o.dispatched_at || '').slice(0, 10)
-      if (!d) continue
-      ordersPerDate[d] = (ordersPerDate[d] || 0) + 1
-      piecesBySku[sku] = (piecesBySku[sku] || 0) + (o.qty || 1)
-    }
-    const realDays = Object.values(ordersPerDate).filter(c => c >= threshold).length || 1
-    const allSkus = new Set<string>([...Object.keys(piecesBySku), ...Object.keys(raw.stockBySku)])
-    const out = Array.from(allSkus).map(sku => {
-      const dispatched = piecesBySku[sku] || 0
-      const stock = raw.stockBySku[sku] || 0
-      const rate = dispatched / realDays
-      const target = Math.ceil(rate * targetDays)
-      return { sku, dispatched, stock, rate, target, gap: target - stock }
-    }).filter(r => r.dispatched > 0 || r.stock > 0)
-      .sort((a, b) =>
-        sortKey === 'target' ? b.target - a.target :
-        sortKey === 'stock' ? b.stock - a.stock :
-        sortKey === 'rate' ? b.rate - a.rate :
-        b.gap - a.gap)
-    return { computed: out, dispatchDays: realDays }
-  }, [raw, threshold, targetDays, sortKey])
-
-  const th: React.CSSProperties = { padding: '8px 12px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'var(--text3)', cursor: 'pointer', whiteSpace: 'nowrap' }
-  const thR: React.CSSProperties = { ...th, textAlign: 'right' }
-
-  return (
-    <div style={{ ...cardBase, border: '1px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div>
-          <h3 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', margin: 0 }}>Run rate & {targetDays}-day target</h3>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
-            {loading ? 'loading…' : `Last 30 days · ${dispatchDays} real dispatch day${dispatchDays === 1 ? '' : 's'} (≥ ${threshold} orders/day)`}
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <label style={{ fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 6 }}>Min orders/day
-            <input type="number" min={1} value={threshold} onChange={e => setThreshold(Math.max(1, Number(e.target.value) || 1))}
-              style={{ width: 56, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
-          </label>
-          <label style={{ fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 6 }}>Target days
-            <input type="number" min={1} value={targetDays} onChange={e => setTargetDays(Math.max(1, Number(e.target.value) || 1))}
-              style={{ width: 56, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
-          </label>
-          <button onClick={() => load()} disabled={loading} style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}>↻</button>
-        </div>
-      </div>
-      <div style={{ overflow: 'auto' }}>
-        <table style={{ width: '100%', fontSize: 14, minWidth: 620, borderCollapse: 'collapse' }}>
-          <thead style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-            <tr>
-              <th style={th}>SKU</th>
-              <th style={thR} onClick={() => setSortKey('rate')}>Run rate/day{sortKey === 'rate' ? ' ↓' : ''}</th>
-              <th style={thR} onClick={() => setSortKey('stock')}>Current stock{sortKey === 'stock' ? ' ↓' : ''}</th>
-              <th style={thR} onClick={() => setSortKey('target')}>{targetDays}-day target{sortKey === 'target' ? ' ↓' : ''}</th>
-              <th style={thR} onClick={() => setSortKey('gap')}>Shortfall{sortKey === 'gap' ? ' ↓' : ''}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: 'var(--text3)' }}>Loading…</td></tr>
-            ) : computed.length === 0 ? (
-              <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: 'var(--text3)' }}>No dispatch or stock data.</td></tr>
-            ) : computed.map((r: Row) => (
-              <tr key={r.sku} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>{r.sku}</td>
-                <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text2)' }}>{r.rate.toFixed(1)}</td>
-                <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text)' }}>{r.stock}</td>
-                <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--accent)' }}>{r.target}</td>
-                <td style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'DM Mono', fontWeight: 800, color: r.gap > 0 ? 'var(--critical)' : 'var(--dispatched)' }}>{r.gap > 0 ? `▲ ${r.gap}` : '✓'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
 
 function DrilldownOverlay({ row, data, onClose }: { row: Row; data: Row; onClose: () => void }) {
   const [tab, setTab] = useState<typeof DRILL_TABS[number]>('received')
@@ -462,7 +345,6 @@ export default function InventoryProdTab() {
         </button>
       </div>
 
-      <RunRateSection />
 
       {!hasOpeningStock && <Alert type="warning" message="Opening stock not set. Numbers may be inaccurate until opening stock is added." />}
 
