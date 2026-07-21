@@ -6,6 +6,7 @@ import { Package, Search, AlertTriangle } from 'lucide-react'
 import FulfillmentWaterfall from './FulfillmentWaterfall'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
+const OWNER_EMAIL = 'adityaramnani91581@gmail.com'
 
 interface PackedUnitRow { sku: string; status: string }
 interface PackedSkuRow { sku: string; descr: string | null; product: string }
@@ -27,6 +28,8 @@ export default function InventoryTab() {
   const [rrThreshold, setRrThreshold] = useState(10)
   const [targetDays, setTargetDays] = useState(20)
   const [dispatch30d, setDispatch30d] = useState<{ sku: string; qty: number; date: string }[]>([])
+  // Rate/day is sensitive — only users with the 'Users' (can_users) admin permission see it.
+  const [isAdmin, setIsAdmin] = useState(false)
   const [search, setSearch] = useState('')
   const [lowOnly, setLowOnly] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('stocked')
@@ -64,6 +67,16 @@ export default function InventoryTab() {
       setDispatch30d((disp || []).map(o => ({ sku: o.barcode_sku || o.sku, qty: o.qty || 1, date: (o.dispatched_at || '').slice(0, 10) })).filter(o => o.sku && o.date))
       setUnits(allUnits)
       setSkus((s.data as PackedSkuRow[]) || [])
+      // Determine admin (can_users) to gate the Rate/day column.
+      const { data: auth } = await supabase.auth.getUser()
+      const email = auth?.user?.email
+      if (email) {
+        if (email.toLowerCase() === OWNER_EMAIL.toLowerCase()) setIsAdmin(true)
+        else {
+          const { data: acc } = await supabase.from('dispatch_user_access').select('can_users').eq('email', email).maybeSingle()
+          setIsAdmin(!!acc?.can_users)
+        }
+      }
       setLoading(false)
     })()
   }, [supabase])
@@ -164,11 +177,11 @@ export default function InventoryTab() {
           <input type="number" min={0} value={threshold} onChange={e => setThreshold(Math.max(0, parseInt(e.target.value) || 0))}
             style={{ width: 44, textAlign: 'center' as const, fontWeight: 600, color: 'var(--text)', background: 'transparent', border: 'none', outline: 'none', fontFamily: 'DM Mono' }} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 12px' }} title="A date counts as a real dispatch day only if at least this many orders were dispatched that day (filters out back-dated cleanup days).">
+        {isAdmin && <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 12px' }} title="A date counts as a real dispatch day only if at least this many orders were dispatched that day (filters out back-dated cleanup days).">
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>Min orders/day</span>
           <input type="number" min={1} value={rrThreshold} onChange={e => setRrThreshold(Math.max(1, parseInt(e.target.value) || 1))}
             style={{ width: 44, textAlign: 'center' as const, fontWeight: 600, color: 'var(--text)', background: 'transparent', border: 'none', outline: 'none', fontFamily: 'DM Mono' }} />
-        </div>
+        </div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 12px' }} title="Days of cover the target stock should hold, based on the run rate.">
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>Target days</span>
           <input type="number" min={1} value={targetDays} onChange={e => setTargetDays(Math.max(1, parseInt(e.target.value) || 1))}
@@ -193,7 +206,7 @@ export default function InventoryTab() {
                 <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
                   {th('SKU / Product', 'descr', 'left')}
                   {th('Stocked', 'stocked')}
-                  <th style={{ background: 'var(--bg2)', padding: '9px 12px', textAlign: 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>Rate/day</th>
+                  {isAdmin && <th style={{ background: 'var(--bg2)', padding: '9px 12px', textAlign: 'right' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>Rate/day</th>}
                   <th style={{ background: 'var(--bg2)', padding: '9px 12px', textAlign: 'right' as const, color: 'var(--accent)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{targetDays}d target</th>
                   {th('Packed', 'packed')}
                   {th('In-Disp', 'in_dispatch')}
@@ -219,7 +232,7 @@ export default function InventoryTab() {
                       const target = Math.ceil(rate * targetDays)
                       const short = target > r.stocked
                       return (<>
-                        <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: rate > 0 ? 'var(--text2)' : 'var(--text3)' }}>{rate > 0 ? rate.toFixed(1) : '—'}</td>
+                        {isAdmin && <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: rate > 0 ? 'var(--text2)' : 'var(--text3)' }}>{rate > 0 ? rate.toFixed(1) : '—'}</td>}
                         <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: target === 0 ? 'var(--text3)' : short ? 'var(--critical)' : 'var(--dispatched)' }} title={target > 0 ? `${short ? `short ${target - r.stocked}` : 'covered'} · ${targetDays}-day target ${target}, ${r.stocked} in stock` : undefined}>{target > 0 ? target : '—'}{short && target > 0 && <span style={{ fontSize: 9, marginLeft: 3 }}>▲</span>}</td>
                       </>)
                     })()}
@@ -230,7 +243,7 @@ export default function InventoryTab() {
                   </tr>
                   {expanded === r.sku && (
                     <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg2)' }}>
-                      <td colSpan={8} style={{ padding: '4px 12px 14px 31px' }}>
+                      <td colSpan={isAdmin ? 8 : 7} style={{ padding: '4px 12px 14px 31px' }}>
                         {loadingSku === r.sku ? (
                           <div style={{ fontSize: 12, color: 'var(--text3)', padding: '8px 0' }}>Loading barcodes…</div>
                         ) : (() => {
@@ -266,7 +279,7 @@ export default function InventoryTab() {
                 <tr style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)' }}>
                   <td style={{ padding: '9px 12px', fontWeight: 600, fontSize: 12, color: 'var(--text2)' }}>Total ({filtered.length} SKUs)</td>
                   <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--dispatched)' }}>{filtered.reduce((s, r) => s + r.stocked, 0)}</td>
-                  <td /><td />
+                  {isAdmin && <td />}<td />
                   <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--accent)' }}>{filtered.reduce((s, r) => s + r.packed, 0)}</td>
                   <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text2)' }}>{filtered.reduce((s, r) => s + r.in_dispatch, 0)}</td>
                   <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text2)' }}>{filtered.reduce((s, r) => s + r.dispatched, 0)}</td>
