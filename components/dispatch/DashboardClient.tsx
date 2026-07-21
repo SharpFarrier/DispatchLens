@@ -6,7 +6,7 @@ import { parseOrders } from '@/lib/parser'
 import AllOrdersTab from './AllOrdersTab'
 import CallLensTab from './CallLensTab'
 import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart } from '@/lib/dispatchDocs'
-import { fetchTracking } from '@/lib/tracking'
+import { fetchTracking, type TrackResult } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
 import SkuMapTab from './SkuMapTab'
@@ -152,7 +152,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Tracking source — decoupled from the view window: everything not delivered/RTO, any age.
   const [trackOrders, setTrackOrders] = useState<DBOrder[]>([])
   // Tracking
-  const [trackingData, setTrackingData] = useState<Record<string, { status: string; label: string; lastUpdate: string }>>({})
+  const [trackingData, setTrackingData] = useState<Record<string, TrackResult>>({})
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [trackingProgress, setTrackingProgress] = useState<{ done: number; total: number } | null>(null)
   const [trackingLastSync, setTrackingLastSync] = useState<Date | null>(null)
@@ -1002,7 +1002,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (!toTrack.length) { setTrackingLastSync(new Date()); return }
     setTrackingLoading(true)
     setTrackingProgress({ done: 0, total: toTrack.length })
-    let results: Record<string, { status: string; label: string; lastUpdate: string }> = {}
+    let results: Record<string, TrackResult> = {}
 
     try {
       results = await fetchTracking(
