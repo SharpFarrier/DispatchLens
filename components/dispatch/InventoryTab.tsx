@@ -22,6 +22,8 @@ export default function InventoryTab() {
   const supabase = createClient()
   const [units, setUnits] = useState<PackedUnitRow[]>([])
   const [skus, setSkus] = useState<PackedSkuRow[]>([])
+  // Product image thumbnails: product_shapes.name (lowercased) -> image_url.
+  const [imgByProduct, setImgByProduct] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [threshold, setThreshold] = useState(5)
   // Run-rate config: min orders/day to count a real dispatch day, and target-days horizon.
@@ -58,6 +60,13 @@ export default function InventoryTab() {
       const allUnits = await fetchAllRows<PackedUnitRow>((from, to) =>
         supabase.from('packed_units').select('sku, status').order('id', { ascending: false }).range(from, to))
       const s = await supabase.from('packed_skus').select('sku, descr, product')
+      // Product thumbnails from product_shapes (name -> image_url), matched by product.
+      const shapes = await supabase.from('product_shapes').select('name, image_url')
+      const imgMap: Record<string, string> = {}
+      for (const sh of ((shapes.data as { name: string; image_url: string | null }[]) || [])) {
+        if (sh.name && sh.image_url) imgMap[sh.name.toLowerCase()] = sh.image_url
+      }
+      setImgByProduct(imgMap)
       // Trailing 30 days of dispatches for the run-rate calc.
       const since = new Date(); since.setDate(since.getDate() - 30); since.setHours(0, 0, 0, 0)
       const disp = await fetchAllRows<{ barcode_sku: string; sku: string; qty: number; dispatched_at: string }>((from, to) =>
@@ -221,10 +230,20 @@ export default function InventoryTab() {
                     <td style={{ padding: '9px 12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 11, color: 'var(--text3)', transform: expanded === r.sku ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+                        {(() => {
+                          const img = imgByProduct[(r.product || '').toLowerCase()]
+                          return (
+                            <span style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'var(--bg2)', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {img
+                                ? <img src={img} alt={r.product || r.sku} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                                : <span style={{ fontSize: 14, color: 'var(--text3)' }}>▧</span>}
+                            </span>
+                          )
+                        })()}
                         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.descr}</span>
                         {r.low && (r.stocked + r.packed) > 0 && <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '1px 5px', borderRadius: 3 }}>LOW</span>}
                       </div>
-                      <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', marginTop: 2, marginLeft: 19 }}>{r.sku}</div>
+                      <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', marginTop: 2, marginLeft: 67 }}>{r.sku}</div>
                     </td>
                     <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: r.stocked > 0 ? 'var(--dispatched)' : 'var(--text3)' }}>{r.stocked}</td>
                     {(() => {
