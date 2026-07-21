@@ -8,6 +8,19 @@ import FulfillmentWaterfall from './FulfillmentWaterfall'
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 const OWNER_EMAIL = 'adityaramnani91581@gmail.com'
 
+// Product images hosted in the barcode-picker repo (raw GitHub) — same source as
+// the Generate-barcodes picker, so thumbnails match everywhere. Filenames are the
+// product name, Capitalized except base/oslo which are lowercase. Products absent
+// here (Linea Grey, Rollease, Spacio) fall back to a placeholder tile.
+const IMG_BASE = 'https://raw.githubusercontent.com/SharpFarrier/barcode-picker/main/images'
+const LOWER_IMG = ['Base', 'Oslo']
+const KNOWN_IMG = ['Atlas', 'Aura', 'Avon', 'Base', 'Boston', 'Duke', 'Elvo', 'Eva', 'Jasper', 'Lizon', 'Luvo', 'Nesto', 'Nexon', 'Nova', 'Oslo', 'Xyra']
+function productImage(product: string): string | null {
+  if (!KNOWN_IMG.includes(product)) return null
+  const file = LOWER_IMG.includes(product) ? product.toLowerCase() : product
+  return `${IMG_BASE}/${encodeURIComponent(file)}.png`
+}
+
 interface PackedUnitRow { sku: string; status: string }
 interface PackedSkuRow { sku: string; descr: string | null; product: string }
 interface InvRow {
@@ -22,8 +35,6 @@ export default function InventoryTab() {
   const supabase = createClient()
   const [units, setUnits] = useState<PackedUnitRow[]>([])
   const [skus, setSkus] = useState<PackedSkuRow[]>([])
-  // Product image thumbnails: product_shapes.name (lowercased) -> image_url.
-  const [imgByProduct, setImgByProduct] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [threshold, setThreshold] = useState(5)
   // Run-rate config: min orders/day to count a real dispatch day, and target-days horizon.
@@ -60,13 +71,6 @@ export default function InventoryTab() {
       const allUnits = await fetchAllRows<PackedUnitRow>((from, to) =>
         supabase.from('packed_units').select('sku, status').order('id', { ascending: false }).range(from, to))
       const s = await supabase.from('packed_skus').select('sku, descr, product')
-      // Product thumbnails from product_shapes (name -> image_url), matched by product.
-      const shapes = await supabase.from('product_shapes').select('name, image_url')
-      const imgMap: Record<string, string> = {}
-      for (const sh of ((shapes.data as { name: string; image_url: string | null }[]) || [])) {
-        if (sh.name && sh.image_url) imgMap[sh.name.toLowerCase()] = sh.image_url
-      }
-      setImgByProduct(imgMap)
       // Trailing 30 days of dispatches for the run-rate calc.
       const since = new Date(); since.setDate(since.getDate() - 30); since.setHours(0, 0, 0, 0)
       const disp = await fetchAllRows<{ barcode_sku: string; sku: string; qty: number; dispatched_at: string }>((from, to) =>
@@ -231,7 +235,7 @@ export default function InventoryTab() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ fontSize: 11, color: 'var(--text3)', transform: expanded === r.sku ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
                         {(() => {
-                          const img = imgByProduct[(r.product || '').toLowerCase()]
+                          const img = productImage(r.product || '')
                           return (
                             <span style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'var(--bg2)', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                               {img
