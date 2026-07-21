@@ -144,9 +144,41 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
     }).eq('id', u.id)
     if (error) { flash('Error: ' + error.message, 'error'); setBusy(null); return }
     await logEvent(u, u.status, 'dispatched_in_error', errorReason.trim())
+
+    // Order-side reversal: the barcode was flagged dispatched in error, so the
+    // order it dispatched must go back to Plan to be re-dispatched. Find orders
+    // linked by scanned_barcode and un-dispatch them (history stays — same row).
+    const { data: linkedOrders } = await supabase.from('dispatch_orders')
+      .select('id, order_id, tracking_number')
+      .eq('scanned_barcode', u.barcode)
+      .eq('is_dispatched', true)
+    let reversedCount = 0
+    for (const o of (linkedOrders || [])) {
+      const { error: revErr } = await supabase.from('dispatch_orders').update({
+        is_dispatched: false, dispatched_at: null,
+        scan_verified: false, scan_verified_at: null, scanned_barcode: null,
+        plan_decision: 'undecided', scheduled_date: null,
+        tracking_number: null, lr_number: null, tracking_status: null,
+        dispatch_generated_at: null, dispatch_gen_status: null, dispatch_gen_error: null,
+        updated_at: now,
+      }).eq('id', o.id)
+      if (!revErr) {
+        reversedCount++
+        // Log to the order timeline so the reversal is traceable.
+        try {
+          await fetch('/api/events', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order_id: o.order_id, event_type: 'dispatch_error', title: `Un-dispatched — barcode ${u.barcode} marked dispatched-in-error · ${errorReason.trim()}`, note: null }),
+          })
+        } catch { /* event logging is best-effort */ }
+      }
+    }
+
     setUnits(prev => prev.map(x => x.id === u.id ? { ...x, status: 'dispatched_in_error' } : x))
     setEvents(prev => { const c = { ...prev }; delete c[u.id]; return c })
-    flash(`${u.barcode} marked dispatched-in-error`)
+    flash(reversedCount > 0
+      ? `${u.barcode} marked dispatched-in-error · ${reversedCount} order${reversedCount === 1 ? '' : 's'} moved back to Plan`
+      : `${u.barcode} marked dispatched-in-error (no linked order found)`)
     setErrorModal(null); setErrorReason(''); setBusy(null)
   }
 
