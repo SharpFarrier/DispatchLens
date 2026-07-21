@@ -1029,6 +1029,29 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         if (order.tracking_status !== t.status) {
           logEvent(order.order_id, 'tracking', t.label, `${order.courier} · ${t.lastUpdate || 'updated'}`)
         }
+        // Auto-capture the Bluedart reverse AWB: when a forward AWB is RTO and the
+        // response carried a NewWaybillNo, upsert a return row pre-filled with the
+        // reverse tracking id so the reverse leg auto-tracks (no manual entry).
+        if (t.status === 'rto' && t.reverseAwb) {
+          const { data: existing } = await supabase.from('returns')
+            .select('id, reverse_tracking_id').eq('order_id', order.order_id).maybeSingle()
+          if (!existing) {
+            await supabase.from('returns').insert({
+              order_id: order.order_id, source: 'rto_auto', return_type: 'rto',
+              reason: 'Returned to origin (courier RTO)',
+              barcode: order.scanned_barcode || null,
+              reverse_tracking_id: t.reverseAwb, reverse_courier: 'Bluedart',
+              created_by_email: user?.email ?? null, updated_at: syncedAt,
+            })
+            logEvent(order.order_id, 'return', `RTO reverse AWB captured · ${t.reverseAwb}`, 'Bluedart')
+          } else if (!existing.reverse_tracking_id) {
+            // Return exists but has no reverse AWB yet — fill it in (don't overwrite a manual one).
+            await supabase.from('returns').update({
+              reverse_tracking_id: t.reverseAwb, reverse_courier: 'Bluedart', updated_at: syncedAt,
+            }).eq('id', existing.id)
+            logEvent(order.order_id, 'return', `RTO reverse AWB captured · ${t.reverseAwb}`, 'Bluedart')
+          }
+        }
       }))
       setOrders(prev => prev.map(o => {
         // Match the normalized key so rows whose stored AWB has a trailing .0/space still update.

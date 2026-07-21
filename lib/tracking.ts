@@ -7,7 +7,7 @@ const BD_API_SECRET = 'j2FGlGEWnGcgVYDs'
 const BD_LOGIN_ID = 'BOM41184'
 const BD_LICENCE_KEY = 'hkfoiszukslp0umqriqgn2bolmgovtge'
 
-export interface TrackResult { status: string; label: string; lastUpdate: string }
+export interface TrackResult { status: string; label: string; lastUpdate: string; reverseAwb?: string | null }
 export type TrackResults = Record<string, TrackResult>
 
 export interface TrackInput {
@@ -127,8 +127,17 @@ export async function fetchTracking(
               const scanText = firstScan?.querySelector('Scan')?.textContent || firstScan?.textContent || ''
               const scanDate = firstScan?.querySelector('ScanDate')?.textContent || ''
               const statusText = statusEl?.textContent || scanText || ''
+              // Reverse AWB: Bluedart puts the return/RTO waybill in <NewWaybillNo>
+              // once the shipment is Returned To Origin. Capture it so the reverse
+              // leg can be auto-tracked without manual entry.
+              const newWaybill = (shipment.querySelector('NewWaybillNo')?.textContent
+                || shipment.querySelector('NewWayBillNo')?.textContent
+                || shipment.getAttribute('NewWaybillNo')
+                || shipment.getAttribute('NewWayBillNo')
+                || '').trim()
               if (statusText) {
-                results[o.awb] = { ...normalizeBD('', statusText), lastUpdate: scanDate }
+                const norm = normalizeBD('', statusText)
+                results[o.awb] = { ...norm, lastUpdate: scanDate, reverseAwb: newWaybill && newWaybill !== o.awb ? newWaybill : null }
               }
             }
           } catch { /* skip */ }
