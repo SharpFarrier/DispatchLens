@@ -127,6 +127,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
 
   const COLS: Col[] = useMemo(() => [
     { key: 'order_date', label: 'Order Date', type: 'date', get: r => r.o.order_date || '', render: r => fmtDate(r.o.order_date) },
+    { key: 'dispatch_by', label: 'Dispatch By', type: 'date', get: r => r.o.target_dispatch_date || '', render: r => { const d = r.o.target_dispatch_date; if (!d) return <span style={{ color: 'var(--text3)' }}>—</span>; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{fmtDate(d)}</span> } },
     { key: 'callback_date', label: 'Callback', type: 'date', queues: ['callbacks'], get: r => r.o.callback_date || '', render: r => { const d = r.o.callback_date; if (!d) return '—'; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{overdue ? `${fmtDate(d)} · overdue` : due ? `${fmtDate(d)} · today` : fmtDate(d)}</span> } },
     { key: 'order_id', label: 'Order', type: 'text', get: r => r.o.order_id },
     { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '' },
