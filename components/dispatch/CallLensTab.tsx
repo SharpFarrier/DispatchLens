@@ -78,6 +78,10 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [textFilters, setTextFilters] = useState<Record<string, string>>({})
   const [catFilters, setCatFilters] = useState<Record<string, string[]>>({})
+  // Date filters: per column, a set of selected 'YYYY-MM-DD' days (OR match).
+  // Plus which year/month nodes are expanded in the tree UI (keyed "col|year", "col|year-month").
+  const [dateFilters, setDateFilters] = useState<Record<string, string[]>>({})
+  const [dateTreeOpen, setDateTreeOpen] = useState<Record<string, boolean>>({})
   const popRef = useRef<HTMLDivElement>(null)
   // selection + bulk
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -160,10 +164,31 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     return m
   }, [activeCols, base])
 
+  // Normalize any date value ('YYYY-MM-DD' or an ISO timestamp) to 'YYYY-MM-DD'.
+  const toDay = (v: string | number): string => { const s = String(v || ''); return s ? s.slice(0, 10) : '' }
+
+  // Build a Year -> Month -> Day tree of the actual dates present in each date column.
+  const dateTrees = useMemo(() => {
+    const m: Record<string, Record<string, Record<string, Set<string>>>> = {}
+    for (const c of activeCols) if (c.type === 'date') {
+      const tree: Record<string, Record<string, Set<string>>> = {}
+      for (const r of base) {
+        const day = toDay(c.get(r) as string | number)
+        if (!day || day.length < 10) continue
+        const [y, mo] = [day.slice(0, 4), day.slice(5, 7)]
+        ;(tree[y] ??= {})[mo] ??= new Set<string>()
+        tree[y][mo].add(day)
+      }
+      m[c.key] = tree
+    }
+    return m
+  }, [activeCols, base])
+
   const rows = useMemo(() => {
     let out = base.filter(r => {
       for (const key in textFilters) { const v = textFilters[key]; if (!v) continue; const col = colByKey[key]; if (col && !String(col.get(r)).toLowerCase().includes(v.toLowerCase())) return false }
       for (const key in catFilters) { const a = catFilters[key]; if (!a || !a.length) continue; const col = colByKey[key]; if (col && !a.includes(String(col.get(r)) || '(blank)')) return false }
+      for (const key in dateFilters) { const days = dateFilters[key]; if (!days || !days.length) continue; const col = colByKey[key]; if (col && !days.includes(toDay(col.get(r) as string | number))) return false }
       return true
     })
     // Sort — but always push locked rows to the bottom.
@@ -177,12 +202,33 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
       return sortDir === 'asc' ? cmp : -cmp
     })
     return out
-  }, [base, colByKey, textFilters, catFilters, sortKey, sortDir, isLocked])
+  }, [base, colByKey, textFilters, catFilters, dateFilters, sortKey, sortDir, isLocked])
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(key); setSortDir('asc') } }
-  const hasFilter = (key: string) => !!textFilters[key] || (catFilters[key]?.length ?? 0) > 0
-  const anyFilter = Object.values(textFilters).some(Boolean) || Object.values(catFilters).some(a => a?.length)
-  const clearAll = () => { setTextFilters({}); setCatFilters({}) }
+  const hasFilter = (key: string) => !!textFilters[key] || (catFilters[key]?.length ?? 0) > 0 || (dateFilters[key]?.length ?? 0) > 0
+  const anyFilter = Object.values(textFilters).some(Boolean) || Object.values(catFilters).some(a => a?.length) || Object.values(dateFilters).some(a => a?.length)
+  const clearAll = () => { setTextFilters({}); setCatFilters({}); setDateFilters({}) }
+
+  // ── Date-tree filter helpers ──
+  const monthName = (mo: string) => ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(mo, 10)] || mo
+  const dayNum = (day: string) => parseInt(day.slice(8, 10), 10)
+  const toggleDays = (colKey: string, days: string[], on: boolean) => {
+    setDateFilters(prev => {
+      const cur = new Set(prev[colKey] || [])
+      if (on) days.forEach(d => cur.add(d)); else days.forEach(d => cur.delete(d))
+      return { ...prev, [colKey]: Array.from(cur) }
+    })
+  }
+  const daysUnder = (tree: Record<string, Record<string, Set<string>>>, y?: string, mo?: string): string[] => {
+    const out: string[] = []
+    for (const yy in tree) { if (y && yy !== y) continue
+      for (const mm in tree[yy]) { if (mo && mm !== mo) continue; tree[yy][mm].forEach(d => out.push(d)) } }
+    return out
+  }
+  const allChecked = (colKey: string, days: string[]) => { const sel = new Set(dateFilters[colKey] || []); return days.length > 0 && days.every(d => sel.has(d)) }
+  const someChecked = (colKey: string, days: string[]) => { const sel = new Set(dateFilters[colKey] || []); return days.some(d => sel.has(d)) }
+  const treeNodeOpen = (k: string) => dateTreeOpen[k] ?? false
+  const toggleNode = (k: string) => setDateTreeOpen(prev => ({ ...prev, [k]: !(prev[k] ?? false) }))
 
   const allFilteredIds = useMemo(() => rows.map(r => r.o.order_id), [rows])
   const allSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selected.has(id))
@@ -374,6 +420,53 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                                 <input type="checkbox" checked={on} onChange={() => setCatFilters(prev => { const c = prev[col.key] || []; const next = c.includes(opt) ? c.filter(x => x !== opt) : [...c, opt]; return { ...prev, [col.key]: next } })} />{opt}
                               </label>) })}
                           </div>
+                        ) : col.type === 'date' ? (
+                          (() => {
+                            const tree = dateTrees[col.key] || {}
+                            const years = Object.keys(tree).sort((a, b) => b.localeCompare(a))
+                            if (!years.length) return <div style={{ fontSize: 12, color: 'var(--text3)', padding: '2px 0' }}>No dates</div>
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 1, maxHeight: 280, overflowY: 'auto' as const, minWidth: 180 }}>
+                                {(dateFilters[col.key]?.length ?? 0) > 0 && (
+                                  <button onClick={() => setDateFilters(prev => ({ ...prev, [col.key]: [] }))} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: '0 0 4px' }}>Clear</button>
+                                )}
+                                {years.map(y => {
+                                  const yKey = `${col.key}|${y}`, yDays = daysUnder(tree, y)
+                                  const months = Object.keys(tree[y]).sort((a, b) => b.localeCompare(a))
+                                  return (
+                                    <div key={y}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 0' }}>
+                                        <span onClick={() => toggleNode(yKey)} style={{ cursor: 'pointer', color: 'var(--text3)', display: 'inline-flex', width: 12 }}>{treeNodeOpen(yKey) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+                                        <input type="checkbox" checked={allChecked(col.key, yDays)} ref={el => { if (el) el.indeterminate = !allChecked(col.key, yDays) && someChecked(col.key, yDays) }} onChange={e => toggleDays(col.key, yDays, e.target.checked)} />
+                                        <span onClick={() => toggleNode(yKey)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{y}</span>
+                                      </div>
+                                      {treeNodeOpen(yKey) && months.map(mo => {
+                                        const mKey = `${col.key}|${y}-${mo}`, mDays = daysUnder(tree, y, mo)
+                                        const days = Array.from(tree[y][mo]).sort((a, b) => b.localeCompare(a))
+                                        return (
+                                          <div key={mo} style={{ marginLeft: 17 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 0' }}>
+                                              <span onClick={() => toggleNode(mKey)} style={{ cursor: 'pointer', color: 'var(--text3)', display: 'inline-flex', width: 12 }}>{treeNodeOpen(mKey) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+                                              <input type="checkbox" checked={allChecked(col.key, mDays)} ref={el => { if (el) el.indeterminate = !allChecked(col.key, mDays) && someChecked(col.key, mDays) }} onChange={e => toggleDays(col.key, mDays, e.target.checked)} />
+                                              <span onClick={() => toggleNode(mKey)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text2)' }}>{monthName(mo)}</span>
+                                            </div>
+                                            {treeNodeOpen(mKey) && days.map(d => {
+                                              const on = (dateFilters[col.key] || []).includes(d)
+                                              return (
+                                                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'DM Mono' }}>
+                                                  <input type="checkbox" checked={on} onChange={() => toggleDays(col.key, [d], !on)} />{dayNum(d)}
+                                                </label>
+                                              )
+                                            })}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          })()
                         ) : (
                           <input autoFocus value={textFilters[col.key] || ''} onChange={e => setTextFilters(prev => ({ ...prev, [col.key]: e.target.value }))} placeholder={`Filter ${col.label}…`} style={{ width: '100%', padding: '6px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', boxSizing: 'border-box' as const }} />
                         )}
