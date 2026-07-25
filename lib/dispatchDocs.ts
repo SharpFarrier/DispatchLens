@@ -346,6 +346,28 @@ export async function invoicePdfBytes(o: DBOrder, opts: InvoiceOpts = {}): Promi
 }
 
 // ── Merge many PDF byte-arrays into one ──
+// ── Bluedart labels: fetched from the label-generator app by AWB ──
+// The label app (bluedart-labels.vercel.app) renders print-ready Bluedart labels
+// on demand and returns a single merged PDF for the AWBs passed. DispatchLens
+// doesn't store or re-generate BD labels itself — it just asks this endpoint.
+const BD_LABELS_ENDPOINT = 'https://bluedart-labels.vercel.app/api/labels-by-awbs.pdf'
+export async function fetchBluedartLabels(awbs: string[]): Promise<Uint8Array> {
+  const clean = awbs.map(a => String(a || '').trim()).filter(Boolean)
+  if (!clean.length) return new Uint8Array()
+  const resp = await fetch(BD_LABELS_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ awbs: clean }),
+  })
+  if (!resp.ok) throw new Error(`Bluedart labels HTTP ${resp.status}`)
+  const buf = new Uint8Array(await resp.arrayBuffer())
+  // Guard: make sure we actually got a PDF, not an error page.
+  if (buf.length < 5 || buf[0] !== 0x25 || buf[1] !== 0x50 || buf[2] !== 0x44 || buf[3] !== 0x46) {
+    throw new Error('Bluedart labels: response was not a PDF')
+  }
+  return buf
+}
+
 export async function mergePdfs(list: Uint8Array[]): Promise<Uint8Array> {
   const PDFLib = (window as W).PDFLib
   const out = await PDFLib.PDFDocument.create()
