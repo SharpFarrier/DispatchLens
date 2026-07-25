@@ -4,6 +4,7 @@ import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrus
 import InventoryTab from './InventoryTab'
 import UnitsTab from './UnitsTab'
 import ScanToStockTab from './ScanToStockTab'
+import FbaTab from './FbaTab'
 import RtoTab from './RtoTab'
 import RtoTreatmentTab from './RtoTreatmentTab'
 import GenerateTab from './GenerateTab'
@@ -17,7 +18,7 @@ import LifecycleTab from './LifecycleTab'
 import { UserAccess } from '@/types'
 
 type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'
-type PackingTab = 'generate' | 'scan' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
+type PackingTab = 'generate' | 'scan' | 'fba' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
 
 const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof UserAccess | 'packing' }[] = [
   { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} />, perm: 'can_wh_stock' },
@@ -31,6 +32,7 @@ const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof
 const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; perm: keyof UserAccess }[] = [
   { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} />, perm: 'can_wh_pack_generate' },
   { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} />, perm: 'can_wh_pack_scan' },
+  { key: 'fba',       label: 'FBA',           icon: <Boxes size={14} />, perm: 'can_wh_pack_scan' },
   { key: 'inventory', label: 'Inventory',     icon: <Package size={14} />, perm: 'can_wh_pack_inventory' },
   { key: 'lifecycle', label: 'Lifecycle',     icon: <Activity size={14} />, perm: 'can_wh_pack_units' },
   { key: 'rto',       label: 'RTO',           icon: <RotateCcw size={14} />, perm: 'can_wh_pack_rto' },
@@ -91,6 +93,7 @@ export default function WarehouseSection({ userId, access, isOwner = false }: { 
 
           {packingTab === 'generate' && <GenerateTab userId={userId} />}
           {packingTab === 'scan' && <ScanToStockTab />}
+          {packingTab === 'fba' && <FbaTab />}
           {packingTab === 'inventory' && <InventoryTab />}
           {packingTab === 'lifecycle' && <LifecycleTab userId={userId} isOwner={isOwner} />}
           {packingTab === 'rto' && <RtoTab />}
