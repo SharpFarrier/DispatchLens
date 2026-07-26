@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { beepSuccess, beepError, beepWarn } from './scanFeedback'
 import { Camera, Undo2 } from 'lucide-react'
+import BarcodeScanner from './BarcodeScanner'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -15,7 +16,6 @@ export default function ScanToStockTab() {
   const [cameraOn, setCameraOn] = useState(false)
   const [lastResult, setLastResult] = useState<{ type: ResultType; msg: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const cameraRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null)
   const processingRef = useRef(false)
 
   useEffect(() => {
@@ -82,30 +82,6 @@ export default function ScanToStockTab() {
     }
   }
 
-  const startCamera = useCallback(async () => {
-    try {
-      const { Html5Qrcode } = await import('html5-qrcode')
-      setCameraOn(true)
-      setTimeout(async () => {
-        const el = document.getElementById('stock-camera')
-        if (!el) return
-        const cam = new Html5Qrcode('stock-camera')
-        cameraRef.current = cam as unknown as { stop: () => Promise<void>; clear: () => void }
-        await cam.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 250, height: 150 } },
-          (decoded: string) => { processScan(decoded) }, () => {})
-      }, 100)
-    } catch (e) {
-      flash('error', 'Camera unavailable: ' + (e as Error).message)
-      setCameraOn(false)
-    }
-  }, [processScan])
-
-  const stopCamera = useCallback(async () => {
-    try { if (cameraRef.current) { await cameraRef.current.stop(); cameraRef.current.clear(); cameraRef.current = null } } catch { /* ignore */ }
-    setCameraOn(false)
-  }, [])
-
-  useEffect(() => () => { stopCamera() }, [stopCamera])
 
   const banner = lastResult?.type === 'success' ? { color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' }
     : lastResult?.type === 'warn' ? { color: 'var(--today)', bg: 'var(--today-bg)', border: '#fed7aa' }
@@ -132,14 +108,11 @@ export default function ScanToStockTab() {
 
       <div>
         {!cameraOn ? (
-          <button onClick={startCamera} style={{ width: '100%', padding: '12px', borderRadius: 8, border: '2px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button onClick={() => setCameraOn(true)} style={{ width: '100%', padding: '12px', borderRadius: 8, border: '2px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <Camera size={15} /> Use Camera Instead
           </button>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
-            <div id="stock-camera" style={{ width: '100%', borderRadius: 8, overflow: 'hidden', background: '#000', minHeight: 200 }} />
-            <button onClick={stopCamera} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '2px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Stop Camera</button>
-          </div>
+          <BarcodeScanner onScan={processScan} onClose={() => setCameraOn(false)} />
         )}
       </div>
 

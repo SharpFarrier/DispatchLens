@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { beepSuccess, beepError, beepWarn } from './scanFeedback'
 import { Camera, Undo2, Plus, Package } from 'lucide-react'
+import BarcodeScanner from './BarcodeScanner'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }
 
@@ -24,7 +25,6 @@ export default function FbaTab() {
 
   const inputRef = useRef<HTMLInputElement>(null)
   const processingRef = useRef(false)
-  const cameraRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null)
 
   const active = shipments.find(s => s.id === activeId) || null
 
@@ -130,24 +130,6 @@ export default function FbaTab() {
     return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0]))
   }, [scanned])
 
-  const startCamera = useCallback(async () => {
-    try {
-      const { Html5Qrcode } = await import('html5-qrcode')
-      setCameraOn(true)
-      setTimeout(async () => {
-        const cam = new Html5Qrcode('fba-camera')
-        cameraRef.current = cam as unknown as { stop: () => Promise<void>; clear: () => void }
-        await cam.start({ facingMode: 'environment' }, { fps: 10, qrbox: 250 },
-          (decoded: string) => { processScan(decoded) }, () => {})
-      }, 100)
-    } catch { flash('error', 'Camera unavailable'); setCameraOn(false) }
-  }, [processScan])
-
-  const stopCamera = useCallback(async () => {
-    try { if (cameraRef.current) { await cameraRef.current.stop(); cameraRef.current.clear(); cameraRef.current = null } } catch { /* ignore */ }
-    setCameraOn(false)
-  }, [])
-  useEffect(() => () => { stopCamera() }, [stopCamera])
 
   const banner = lastResult?.type === 'success' ? { color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' }
     : lastResult?.type === 'warn' ? { color: 'var(--today)', bg: 'var(--today-bg)', border: '#fed7aa' }
@@ -199,14 +181,11 @@ export default function FbaTab() {
 
       <div>
         {!cameraOn ? (
-          <button onClick={startCamera} disabled={!activeId} style={{ width: '100%', padding: '12px', borderRadius: 8, border: '2px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, cursor: activeId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: activeId ? 1 : 0.5 }}>
+          <button onClick={() => setCameraOn(true)} disabled={!activeId} style={{ width: '100%', padding: '12px', borderRadius: 8, border: '2px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, cursor: activeId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: activeId ? 1 : 0.5 }}>
             <Camera size={15} /> Use Camera Instead
           </button>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
-            <div id="fba-camera" style={{ width: '100%', borderRadius: 8, overflow: 'hidden', background: '#000', minHeight: 200 }} />
-            <button onClick={stopCamera} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '2px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Stop Camera</button>
-          </div>
+          <BarcodeScanner onScan={processScan} onClose={() => setCameraOn(false)} />
         )}
       </div>
 

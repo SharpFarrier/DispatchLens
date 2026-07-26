@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import BarcodeScanner from './BarcodeScanner'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import { ColourDot } from './warehouse-ui'
@@ -22,7 +23,6 @@ export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
   const [lastResult, setLastResult] = useState<{ type: string; msg: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const scannedRef = useRef(new Set<string>())
-  const cameraRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null)
   const processingRef = useRef(false)
 
   useEffect(() => {
@@ -95,33 +95,7 @@ export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
     }
   }
 
-  async function startCamera() {
-    try {
-      const { Html5Qrcode } = await import('html5-qrcode')
-      setCameraOn(true)
-      setTimeout(async () => {
-        const el = document.getElementById('pick-camera')
-        if (!el) return
-        const cam = new Html5Qrcode('pick-camera')
-        cameraRef.current = cam as unknown as { stop: () => Promise<void>; clear: () => void }
-        await cam.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 250, height: 150 } },
-          (decoded: string) => { void processScan(decoded) },
-          () => {}
-        )
-      }, 100)
-    } catch (e) {
-      onToast?.('Camera unavailable: ' + (e as Error).message, 'error')
-      setCameraOn(false)
-    }
-  }
-  const stopCamera = useCallback(async () => {
-    try {
-      if (cameraRef.current) { await cameraRef.current.stop(); cameraRef.current.clear(); cameraRef.current = null }
-    } catch { /* ignore */ }
-    setCameraOn(false)
-  }, [])
+  const stopCamera = useCallback(async () => { setCameraOn(false) }, [])
   useEffect(() => () => { void stopCamera() }, [stopCamera])
 
   async function confirmSession() {
@@ -177,18 +151,12 @@ export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
 
       <div>
         {!cameraOn ? (
-          <button onClick={startCamera}
+          <button onClick={() => setCameraOn(true)}
             style={{ width: '100%', padding: 12, borderRadius: 10, border: '2px solid var(--border)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, background: 'var(--surface)', cursor: 'pointer' }}>
             📷 Use Camera Instead
           </button>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div id="pick-camera" style={{ width: '100%', borderRadius: 10, overflow: 'hidden', background: '#000', minHeight: 200 }} />
-            <button onClick={stopCamera}
-              style={{ width: '100%', padding: 8, borderRadius: 10, border: '2px solid var(--border)', color: 'var(--text2)', fontWeight: 700, fontSize: 13, background: 'var(--surface)', cursor: 'pointer' }}>
-              Stop Camera
-            </button>
-          </div>
+          <BarcodeScanner onScan={(t) => { void processScan(t) }} onClose={() => setCameraOn(false)} />
         )}
       </div>
 
