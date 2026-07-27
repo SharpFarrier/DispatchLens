@@ -286,6 +286,8 @@ function OrdersView() {
   const [rows, setRows] = useState<OrderRow[]>([])
   const [bucket, setBucket] = useState<'all' | OrderStatus>('all')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+  const PAGE_SIZE = 100
 
   useEffect(() => {
     (async () => {
@@ -368,6 +370,12 @@ function OrdersView() {
     })
   }, [rows, bucket, search])
 
+  // Reset to the first page whenever the filter/search/bucket changes.
+  useEffect(() => { setPage(0) }, [bucket, search])
+  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
+  const pageSafe = Math.min(page, pageCount - 1)
+  const paged = useMemo(() => shown.slice(pageSafe * PAGE_SIZE, (pageSafe + 1) * PAGE_SIZE), [shown, pageSafe])
+
   const fmt = (d: string | null) => d ? new Date(d.length <= 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
   const money = (n: number | null) => n != null ? Math.round(n).toLocaleString('en-IN') : '—'
 
@@ -425,7 +433,7 @@ function OrdersView() {
               <tr>{COLS.map(h => <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Amount' ? 'right' as const : 'left' as const, fontSize: 11, fontWeight: 700, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {shown.map((r, i) => (
+              {paged.map((r, i) => (
                 <tr key={r.order_id + i} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: '8px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', whiteSpace: 'nowrap' as const }}>{r.order_id}</td>
                   <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.order_date)}</td>
@@ -444,6 +452,21 @@ function OrdersView() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {!loading && shown.length > PAGE_SIZE && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+          <span style={{ fontSize: 12, color: 'var(--text3)' }}>
+            Showing {(pageSafe * PAGE_SIZE + 1).toLocaleString()}–{Math.min((pageSafe + 1) * PAGE_SIZE, shown.length).toLocaleString()} of {shown.length.toLocaleString()}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={pageSafe === 0}
+              style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe === 0 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Prev</button>
+            <span style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono' }}>{pageSafe + 1} / {pageCount}</span>
+            <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={pageSafe >= pageCount - 1}
+              style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe >= pageCount - 1 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe >= pageCount - 1 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Next</button>
+          </div>
         </div>
       )}
     </div>
