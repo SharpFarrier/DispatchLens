@@ -1025,6 +1025,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           tracking_label: t.label,
           tracking_last_update: t.lastUpdate,
           tracking_synced_at: syncedAt,
+          ...(t.status === 'delivered' && order.tracking_status !== 'delivered'
+            ? { delivered_at: t.lastUpdate ? new Date(t.lastUpdate).toISOString() : syncedAt }
+            : {}),
         }).eq('id', order.id)
         // Log a timeline event only when the status genuinely changed (avoids spam on every sync).
         if (order.tracking_status !== t.status) {

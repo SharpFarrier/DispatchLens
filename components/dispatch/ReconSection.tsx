@@ -9,7 +9,7 @@ import {
 } from '@/lib/settlements'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }
-type Tab = 'inbox' | 'notpaid'
+type Tab = 'inbox' | 'orders'
 
 interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string }
 
@@ -126,13 +126,13 @@ export default function ReconSection() {
     : { color: 'var(--critical)', bg: 'var(--critical-bg)', bd: '#fecaca' }
 
   return (
-    <div style={{ maxWidth: 1000 }}>
+    <div style={{ maxWidth: 1280 }}>
       <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
-        {(['inbox', 'notpaid'] as Tab[]).map(t => (
+        {(['inbox', 'orders'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
             background: tab === t ? 'var(--accent)' : 'var(--surface)', color: tab === t ? '#fff' : 'var(--text2)',
-          }}>{t === 'inbox' ? 'Settlement Inbox' : 'Not Paid'}</button>
+          }}>{t === 'inbox' ? 'Settlement Inbox' : 'Orders'}</button>
         ))}
         <button onClick={() => loadInbox()} style={{ marginLeft: 'auto', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
           <RefreshCw size={13} /> Refresh
@@ -148,7 +148,7 @@ export default function ReconSection() {
       {tab === 'inbox' ? (
         <InboxView uploads={uploads} totals={totals} loading={loading} busy={busy} onFiles={handleFiles} />
       ) : (
-        <NotPaidView />
+        <OrdersView />
       )}
     </div>
   )
@@ -222,77 +222,182 @@ function UploadCard({ platform, label, hint, count, busy, onFiles }: {
   )
 }
 
-// ── Not Paid: dispatched orders with no matching settlement ──
-function NotPaidView() {
+// ── Orders: dispatched orders reconciled against settlements (net-amount status) ──
+type OrderStatus = 'paid' | 'notpaid' | 'refunded'
+interface OrderRow {
+  order_id: string
+  sku: string | null
+  platform: string
+  order_date: string | null
+  dispatched_at: string | null
+  delivered_at: string | null
+  payment_date: string | null
+  tracking_ids: string
+  tracking_status: string | null
+  invoiced: number | null
+  net: number
+  hasRefund: boolean
+  status: OrderStatus
+}
+
+function OrdersView() {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
-  const [rows, setRows] = useState<{ order_id: string; sku: string | null; platform: string; dispatched_at: string | null; value: number | null }[]>([])
+  const [rows, setRows] = useState<OrderRow[]>([])
+  const [bucket, setBucket] = useState<'all' | OrderStatus>('all')
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     (async () => {
       setLoading(true)
-      // Dispatched, non-cancelled orders.
-      const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; taxable_value: number | null; unit_price: number | null; dispatched_at: string | null }>((from, to) =>
+      const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; taxable_value: number | null; unit_price: number | null; order_date: string | null; dispatched_at: string | null; delivered_at: string | null; tracking_number: string | null; lr_number: string | null; tracking_status: string | null }>((from, to) =>
         supabase.from('dispatch_orders')
-          .select('order_id, sku, barcode_sku, taxable_value, unit_price, dispatched_at')
+          .select('order_id, sku, barcode_sku, taxable_value, unit_price, order_date, dispatched_at, delivered_at, tracking_number, lr_number, tracking_status')
           .eq('is_dispatched', true).eq('is_cancelled', false)
           .order('dispatched_at', { ascending: false }).range(from, to))
-      // All settled order ids (any platform).
-      const settled = await fetchAllRows<{ order_id: string | null }>((from, to) =>
-        supabase.from('settlements').select('order_id').range(from, to))
-      const settledSet = new Set((settled || []).map(s => (s.order_id || '').trim()).filter(Boolean))
+
+      // All settlement lines (order_id, amount, transaction_type, settlement_date).
+      const settle = await fetchAllRows<{ order_id: string | null; amount: number | null; transaction_type: string | null; settlement_date: string | null }>((from, to) =>
+        supabase.from('settlements').select('order_id, amount, transaction_type, settlement_date').range(from, to))
+
+      // Aggregate settlements per order: net amount, whether a refund line exists, latest payment date.
+      const agg: Record<string, { net: number; hasRefund: boolean; payDate: string | null }> = {}
+      for (const s of settle || []) {
+        const oid = (s.order_id || '').trim()
+        if (!oid) continue
+        const a = agg[oid] || { net: 0, hasRefund: false, payDate: null }
+        a.net += s.amount || 0
+        const tt = (s.transaction_type || '').toLowerCase()
+        if (tt.includes('refund') || tt.includes('return') || (s.amount || 0) < 0) a.hasRefund = true
+        if (s.settlement_date && !a.payDate) a.payDate = s.settlement_date
+        agg[oid] = a
+      }
 
       const platformOf = (oid: string) => {
-        const s = (oid || '').trim()
-        if (/^\d{3}-\d{7}-\d{7}$/.test(s)) return 'Amazon'
-        if (s.startsWith('OD')) return 'Flipkart'
-        if (/^\d{4,6}$/.test(s)) return 'Website'
+        const t = (oid || '').trim()
+        if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'
+        if (t.startsWith('OD')) return 'Flipkart'
+        if (/^\d{4,6}$/.test(t)) return 'Website'
         return 'Other'
       }
-      const notPaid = (orders || [])
-        .filter(o => o.order_id && !settledSet.has(o.order_id.trim()))
-        .map(o => ({ order_id: o.order_id, sku: o.barcode_sku || o.sku, platform: platformOf(o.order_id), dispatched_at: o.dispatched_at, value: o.taxable_value ?? o.unit_price ?? null }))
-      setRows(notPaid)
+
+      const out: OrderRow[] = (orders || []).filter(o => o.order_id).map(o => {
+        const a = agg[o.order_id.trim()]
+        let status: OrderStatus
+        if (!a) status = 'notpaid'
+        else if (a.net <= 0) status = 'refunded'   // net-amount rule: fully reversed
+        else status = 'paid'                        // net positive (with badge if a refund also present)
+        const tids = [o.tracking_number, o.lr_number].filter(Boolean).join(' · ')
+        return {
+          order_id: o.order_id,
+          sku: o.barcode_sku || o.sku,
+          platform: platformOf(o.order_id),
+          order_date: o.order_date,
+          dispatched_at: o.dispatched_at,
+          delivered_at: o.delivered_at,
+          payment_date: a?.payDate ?? null,
+          tracking_ids: tids || '—',
+          tracking_status: o.tracking_status,
+          invoiced: o.taxable_value ?? o.unit_price ?? null,
+          net: a?.net ?? 0,
+          hasRefund: a?.hasRefund ?? false,
+          status,
+        }
+      })
+      setRows(out)
       setLoading(false)
     })()
   }, [supabase])
 
-  const totalValue = useMemo(() => rows.reduce((s, r) => s + (r.value || 0), 0), [rows])
+  const counts = useMemo(() => {
+    const c = { all: rows.length, paid: 0, notpaid: 0, refunded: 0 }
+    for (const r of rows) c[r.status]++
+    return c
+  }, [rows])
+
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return rows.filter(r => {
+      if (bucket !== 'all' && r.status !== bucket) return false
+      if (q && !(`${r.order_id} ${r.sku || ''} ${r.tracking_ids}`.toLowerCase().includes(q))) return false
+      return true
+    })
+  }, [rows, bucket, search])
+
+  const fmt = (d: string | null) => d ? new Date(d.length <= 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
+  const money = (n: number | null) => n != null ? Math.round(n).toLocaleString('en-IN') : '—'
+
+  const pill = (r: OrderRow) => {
+    const map: Record<OrderStatus, { bg: string; fg: string; label: string }> = {
+      paid: { bg: 'var(--dispatched-bg)', fg: 'var(--dispatched)', label: 'Paid' },
+      notpaid: { bg: 'var(--critical-bg)', fg: 'var(--critical)', label: 'Not paid' },
+      refunded: { bg: 'var(--today-bg)', fg: 'var(--today)', label: 'Refunded' },
+    }
+    const m = map[r.status]
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ background: m.bg, color: m.fg, padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{m.label}</span>
+        {r.status === 'paid' && r.hasRefund && (
+          <span style={{ background: 'var(--today-bg)', color: 'var(--today)', padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 700 }}>+refund</span>
+        )}
+      </span>
+    )
+  }
+
+  const tabs: { key: 'all' | OrderStatus; label: string; n: number }[] = [
+    { key: 'all', label: 'All', n: counts.all },
+    { key: 'paid', label: 'Paid', n: counts.paid },
+    { key: 'notpaid', label: 'Not paid', n: counts.notpaid },
+    { key: 'refunded', label: 'Refunded', n: counts.refunded },
+  ]
+
+  const COLS = ['Order ID', 'Order date', 'Dispatch date', 'Delivery date', 'Payment date', 'Tracking ID(s)', 'Platform', 'Tracking status', 'Amount', 'Status']
 
   return (
     <div>
-      <div style={{ ...card, padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <AlertTriangle size={18} color="var(--critical)" />
-        <div>
-          <div style={{ fontSize: 13, color: 'var(--text3)' }}>Dispatched orders with no matching settlement</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{loading ? '…' : rows.length.toLocaleString()} orders <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text3)', display: 'inline-flex', alignItems: 'center' }}>· <IndianRupee size={13} />{Math.round(totalValue).toLocaleString('en-IN')} invoiced</span></div>
-        </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setBucket(t.key)} style={{
+            padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+            border: bucket === t.key ? '2px solid var(--accent)' : '1px solid var(--border)',
+            background: bucket === t.key ? 'var(--accent)' : 'var(--surface)',
+            color: bucket === t.key ? '#fff' : 'var(--text2)',
+          }}>{t.label} {loading ? '' : t.n.toLocaleString()}</button>
+        ))}
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search order id, SKU, tracking"
+          style={{ marginLeft: 'auto', minWidth: 220, padding: '7px 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, outline: 'none' }} />
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>Matched by order id. &ldquo;Value&rdquo; is the invoiced taxable value from the order (expected-price engine comes later).</div>
+
+      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+        Status by net settlement amount: no settlement = not paid · net &le; 0 = refunded · net &gt; 0 = paid (with +refund badge if a refund line exists). Note: orders on a platform whose settlement file isn&rsquo;t uploaded will show as not paid.
+      </div>
+
       {loading ? (
-        <div style={{ ...card, padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>Loading…</div>
-      ) : !rows.length ? (
-        <div style={{ ...card, padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>Every dispatched order has a settlement — nothing outstanding.</div>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading…</div>
       ) : (
-        <div style={{ ...card, overflow: 'auto', maxHeight: 520 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'auto', maxHeight: 560 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 1040 }}>
             <thead style={{ background: 'var(--bg2)', position: 'sticky' as const, top: 0 }}>
-              <tr>
-                {['Order ID', 'Platform', 'SKU', 'Dispatched', 'Invoiced'].map(h => (
-                  <th key={h} style={{ padding: '8px 12px', textAlign: h === 'Invoiced' ? 'right' : 'left', fontSize: 11, fontWeight: 700, color: 'var(--text3)' }}>{h}</th>
-                ))}
-              </tr>
+              <tr>{COLS.map(h => <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Amount' ? 'right' as const : 'left' as const, fontSize: 11, fontWeight: 700, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {shown.map((r, i) => (
                 <tr key={r.order_id + i} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{r.order_id}</td>
-                  <td style={{ padding: '8px 12px', color: 'var(--text2)' }}>{r.platform}</td>
-                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.sku || '—'}</td>
-                  <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)' }}>{r.dispatched_at ? new Date(r.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text2)' }}>{r.value != null ? Math.round(r.value).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', whiteSpace: 'nowrap' as const }}>{r.order_id}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.order_date)}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.dispatched_at)}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.delivered_at)}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.payment_date)}</td>
+                  <td style={{ padding: '8px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{r.tracking_ids}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{r.platform}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{r.tracking_status || '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{money(r.invoiced)}</td>
+                  <td style={{ padding: '8px 10px' }}>{pill(r)}</td>
                 </tr>
               ))}
+              {!shown.length && (
+                <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No orders in this view.</td></tr>
+              )}
             </tbody>
           </table>
         </div>

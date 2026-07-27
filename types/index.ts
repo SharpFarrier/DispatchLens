@@ -121,6 +121,7 @@ export interface DBOrder {
   plan_decision: PlanDecision
   scheduled_date: string | null
   dispatched_at: string | null
+  delivered_at: string | null
   unfulfillable_reason: UnfulfillableReason | null
   unfulfillable_note: string | null
   target_dispatch_date: string | null
