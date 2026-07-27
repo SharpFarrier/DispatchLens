@@ -12,11 +12,14 @@ const card = { background: 'var(--surface)', border: '1px solid var(--border)', 
 type Tab = 'inbox' | 'orders'
 
 interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string }
+interface FileAgg { total: number; orders: Set<string>; depositDate: string | null; periodStart: string | null; periodEnd: string | null }
+type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
 
 export default function ReconSection() {
   const supabase = createClient()
   const [tab, setTab] = useState<Tab>('inbox')
   const [uploads, setUploads] = useState<UploadRow[]>([])
+  const [fileAgg, setFileAgg] = useState<FileAggMap>({})
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'warn' | 'err'; text: string } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -27,11 +30,33 @@ export default function ReconSection() {
   const loadInbox = useCallback(async () => {
     setLoading(true)
     const { data: up } = await supabase.from('settlement_uploads').select('*').order('created_at', { ascending: false })
-    setUploads((up as UploadRow[]) || [])
+    const upRows = (up as UploadRow[]) || []
+    setUploads(upRows)
     // Lightweight totals
     const { count: azCount } = await supabase.from('settlements').select('id', { count: 'exact', head: true }).eq('platform', 'amazon')
     const { count: fkCount } = await supabase.from('settlements').select('id', { count: 'exact', head: true }).eq('platform', 'flipkart')
     setTotals(t => ({ ...t, amazon: azCount || 0, flipkart: fkCount || 0 }))
+
+    // Per-file settlement details: total settled amount, distinct order count,
+    // deposit/payment date, and (Amazon) settlement period — pulled from stored rows.
+    const rows = await fetchAllRows<{ uploaded_file: string | null; amount: number | null; order_id: string | null; settlement_date: string | null; platform: string; raw: Record<string, unknown> | null }>((from, to) =>
+      supabase.from('settlements').select('uploaded_file, amount, order_id, settlement_date, platform, raw').range(from, to))
+    const byFile: Record<string, FileAgg> = {}
+    for (const r of rows || []) {
+      const key = r.uploaded_file || '(unknown)'
+      const a = byFile[key] || { total: 0, orders: new Set<string>(), depositDate: null, periodStart: null, periodEnd: null }
+      a.total += r.amount || 0
+      if (r.order_id) a.orders.add(r.order_id)
+      if (!a.depositDate && r.settlement_date) a.depositDate = r.settlement_date
+      // Amazon period from raw (settlement-start-date / settlement-end-date), first seen.
+      const raw = r.raw || {}
+      if (!a.periodStart && raw['settlement-start-date']) a.periodStart = String(raw['settlement-start-date'])
+      if (!a.periodEnd && raw['settlement-end-date']) a.periodEnd = String(raw['settlement-end-date'])
+      byFile[key] = a
+    }
+    const agg: Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }> = {}
+    for (const k in byFile) agg[k] = { total: byFile[k].total, orders: byFile[k].orders.size, depositDate: byFile[k].depositDate, periodStart: byFile[k].periodStart, periodEnd: byFile[k].periodEnd }
+    setFileAgg(agg)
     setLoading(false)
   }, [supabase])
   useEffect(() => { void loadInbox() }, [loadInbox])
@@ -146,7 +171,7 @@ export default function ReconSection() {
       )}
 
       {tab === 'inbox' ? (
-        <InboxView uploads={uploads} totals={totals} loading={loading} busy={busy} onFiles={handleFiles} />
+        <InboxView uploads={uploads} totals={totals} fileAgg={fileAgg} loading={loading} busy={busy} onFiles={handleFiles} />
       ) : (
         <OrdersView />
       )}
@@ -155,10 +180,13 @@ export default function ReconSection() {
 }
 
 // ── Settlement Inbox ──
-function InboxView({ uploads, totals, loading, busy, onFiles }: {
-  uploads: UploadRow[]; totals: { amazon: number; flipkart: number }; loading: boolean; busy: boolean;
+function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
+  uploads: UploadRow[]; totals: { amazon: number; flipkart: number }; fileAgg: FileAggMap; loading: boolean; busy: boolean;
   onFiles: (p: 'amazon' | 'flipkart', f: File[]) => void
 }) {
+  const money = (n: number) => Math.round(n).toLocaleString('en-IN')
+  const fmtD = (d: string | null) => { if (!d) return '—'; const s = String(d); const iso = s.includes('.') && /^\d{2}\.\d{2}\.\d{4}/.test(s) ? s.slice(6,10)+'-'+s.slice(3,5)+'-'+s.slice(0,2) : s; const dt = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso); return isNaN(dt.getTime()) ? s.slice(0,10) : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) }
+  const grand = Object.values(fileAgg).reduce((sum, a) => sum + a.total, 0)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
@@ -174,24 +202,36 @@ function InboxView({ uploads, totals, loading, busy, onFiles }: {
           <div style={{ ...card, padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>No settlement files uploaded yet</div>
         ) : (
           <div style={{ ...card, overflow: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 900 }}>
               <thead style={{ background: 'var(--bg2)' }}>
                 <tr>
-                  {['Platform', 'File', 'Rows', 'IDs', 'Uploaded'].map(h => (
-                    <th key={h} style={{ padding: '8px 12px', textAlign: h === 'Rows' || h === 'IDs' ? 'right' : 'left', fontSize: 11, fontWeight: 700, color: 'var(--text3)' }}>{h}</th>
+                  {['Platform', 'File', 'Transaction ID(s)', 'Total settled', 'Orders', 'Deposit date', 'Period', 'Uploaded'].map(h => (
+                    <th key={h} style={{ padding: '8px 12px', textAlign: h === 'Total settled' || h === 'Orders' ? 'right' : 'left', fontSize: 11, fontWeight: 700, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {uploads.map(u => (
+                {uploads.map(u => {
+                  const ids = u.dedup_ids || []
+                  const a = fileAgg[u.file_name]
+                  const idText = ids.length === 0 ? '—' : ids.length === 1 ? ids[0] : `${ids[0]} +${ids.length - 1} more`
+                  return (
                   <tr key={u.id} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '8px 12px', textTransform: 'capitalize', fontWeight: 600, color: 'var(--text)' }}>{u.platform}</td>
                     <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{u.file_name}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text2)' }}>{u.row_count.toLocaleString()}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text3)' }}>{(u.dedup_ids || []).length}</td>
-                    <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)' }}>{new Date(u.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }} title={ids.join(', ')}>{idText}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text)', fontWeight: 700 }}>{a ? money(a.total) : '—'}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text3)' }}>{a ? a.orders.toLocaleString() : '—'}</td>
+                    <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{a ? fmtD(a.depositDate) : '—'}</td>
+                    <td style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{a && a.periodStart ? `${fmtD(a.periodStart)} – ${fmtD(a.periodEnd)}` : '—'}</td>
+                    <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{new Date(u.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
                   </tr>
-                ))}
+                )})}
+                <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg2)' }}>
+                  <td style={{ padding: '8px 12px', fontWeight: 700, color: 'var(--text)' }} colSpan={3}>Grand total settled</td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', fontWeight: 800, color: 'var(--text)' }}>{money(grand)}</td>
+                  <td colSpan={4}></td>
+                </tr>
               </tbody>
             </table>
           </div>
