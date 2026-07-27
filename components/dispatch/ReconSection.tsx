@@ -450,13 +450,17 @@ function OrdersView() {
     })
 
     // Only fetch settlements for the orders in this window (batched by order-id) — keeps it light.
+    // Each order can have many settlement LINES (Amazon: ~10, up to 32), so a chunk of order-ids
+    // can exceed Supabase's 1000-row response cap. Use a small chunk AND page each .in() request
+    // through the cap, or orders past row 1000 silently come back with no settlement -> false "not paid".
     const oids = Array.from(new Set((orders || []).map(o => o.order_id).filter(Boolean)))
     const settle: { order_id: string | null; amount: number | null; transaction_type: string | null; settlement_date: string | null }[] = []
-    const CH = 200
+    const CH = 50
     for (let i = 0; i < oids.length; i += CH) {
       const slice = oids.slice(i, i + CH)
-      const { data } = await supabase.from('settlements').select('order_id, amount, transaction_type, settlement_date').in('order_id', slice)
-      if (data) settle.push(...(data as typeof settle))
+      const chunkRows = await fetchAllRows<{ order_id: string | null; amount: number | null; transaction_type: string | null; settlement_date: string | null }>((from, to) =>
+        supabase.from('settlements').select('order_id, amount, transaction_type, settlement_date').in('order_id', slice).order('id', { ascending: true }).range(from, to))
+      settle.push(...chunkRows)
     }
 
     const agg: Record<string, { net: number; hasRefund: boolean; payDate: string | null }> = {}
