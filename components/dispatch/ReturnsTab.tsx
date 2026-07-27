@@ -530,12 +530,19 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
   canSeeAmount: boolean
   savingId: string | null
   onRefund: (id: string, patch: Partial<ReturnRow>) => void
-  onOpenOrder: (orderId: string) => void
+  onOpenOrder: (order: DBOrder) => void
 }) {
+  const supabase = createClient()
   const [win, setWin] = useState<'7d' | '30d' | 'custom'>('7d')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [openDays, setOpenDays] = useState<Record<string, boolean>>({})
+
+  // Returns data only carries order_id; the history panel needs a full DBOrder, so look it up.
+  const openOrder = useCallback(async (orderId: string) => {
+    const { data } = await supabase.from('dispatch_orders').select('*').eq('order_id', orderId).limit(1).maybeSingle()
+    if (data) onOpenOrder(data as DBOrder)
+  }, [supabase, onOpenOrder])
 
   const platformOf = (oid: string) => {
     const t = (oid || '').trim()
@@ -649,7 +656,7 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
                       const refunded = r.refund_status === 'refunded'
                       return (
                         <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                          <td style={{ padding: '7px 10px' }}><span onClick={() => onOpenOrder(r.order_id)} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
+                          <td style={{ padding: '7px 10px' }}><span onClick={() => openOrder(r.order_id)} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
                           <td style={{ padding: '7px 10px', color: 'var(--text2)' }}>{platformOf(r.order_id)}</td>
                           <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
                           <td style={{ padding: '7px 10px', color: 'var(--text2)', textTransform: 'capitalize' as const }}>{r.return_type || r.source.replace('_', ' ')}</td>
