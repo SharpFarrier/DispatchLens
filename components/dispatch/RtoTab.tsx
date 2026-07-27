@@ -146,12 +146,17 @@ export default function RtoTab() {
           .eq('id', pending.returnId)
       } else if (pending.autoCreate) {
         // Auto-create a received return (reason pending) so it hits the Returns tab.
+        // This order was NOT manually added as a return, so there is NO known reverse
+        // (RTO) tracking id. Do NOT write the forward AWB / scanned barcode into
+        // reverse_tracking_id — the forward tracking number is not the reverse one.
+        // Leave reverse_tracking_id null; it can be filled later if a real reverse
+        // AWB is captured (e.g. Bluedart <NewWaybillNo>) or entered manually.
         const { data: created } = await supabase.from('returns').upsert({
           order_id: pending.autoCreate.order_id,
           source: 'rto_auto',
           reason: 'Pending review',
           barcode: pending.autoCreate.scanned_barcode,
-          reverse_tracking_id: pending.autoCreate.tracking_number || pending.barcode,
+          reverse_tracking_id: null,
           warehouse_received: true,
           warehouse_received_at: now,
           updated_at: now,
@@ -198,12 +203,14 @@ export default function RtoTab() {
           .eq('id', pending.returnId)
       } else if (pending.autoCreate) {
         // No return yet → create one that is rejected (not received), so it surfaces for review.
+        // As with the receive path: no manually-added return means no known reverse (RTO)
+        // tracking id — never write the forward AWB / scanned barcode into reverse_tracking_id.
         const { data: created } = await supabase.from('returns').upsert({
           order_id: pending.autoCreate.order_id,
           source: 'rto_auto',
           reason: 'Pending review',
           barcode: pending.autoCreate.scanned_barcode,
-          reverse_tracking_id: pending.autoCreate.tracking_number || pending.barcode,
+          reverse_tracking_id: null,
           warehouse_received: false,
           is_rejected: true,
           rejected_reason: reason,
