@@ -1,8 +1,8 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
-import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw } from 'lucide-react'
+import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X } from 'lucide-react'
 import {
   parseAmazonText, parseFlipkartBuffer, readFileText, readFileBuffer,
   type SettlementRow,
@@ -184,6 +184,7 @@ function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
   uploads: UploadRow[]; totals: { amazon: number; flipkart: number }; fileAgg: FileAggMap; loading: boolean; busy: boolean;
   onFiles: (p: 'amazon' | 'flipkart', f: File[]) => void
 }) {
+  const [detailFile, setDetailFile] = useState<{ name: string; platform: string } | null>(null)
   const money = (n: number) => Math.round(n).toLocaleString('en-IN')
   const fmtD = (d: string | null) => { if (!d) return '—'; const s = String(d); const iso = s.includes('.') && /^\d{2}\.\d{2}\.\d{4}/.test(s) ? s.slice(6,10)+'-'+s.slice(3,5)+'-'+s.slice(0,2) : s; const dt = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso); return isNaN(dt.getTime()) ? s.slice(0,10) : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) }
   const grand = Object.values(fileAgg).reduce((sum, a) => sum + a.total, 0)
@@ -216,7 +217,8 @@ function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
                   const a = fileAgg[u.file_name]
                   const idText = ids.length === 0 ? '—' : ids.length === 1 ? ids[0] : `${ids[0]} +${ids.length - 1} more`
                   return (
-                  <tr key={u.id} style={{ borderTop: '1px solid var(--border)' }}>
+                  <tr key={u.id} onClick={() => setDetailFile({ name: u.file_name, platform: u.platform })} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                     <td style={{ padding: '8px 12px', textTransform: 'capitalize', fontWeight: 600, color: 'var(--text)' }}>{u.platform}</td>
                     <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{u.file_name}</td>
                     <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }} title={ids.join(', ')}>{idText}</td>
@@ -237,6 +239,106 @@ function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
           </div>
         )}
       </div>
+
+      {detailFile && <FileDetail file={detailFile} onClose={() => setDetailFile(null)} />}
+    </div>
+  )
+}
+
+// ── Settlement file drill-down: payout status summary + transaction list ──
+function FileDetail({ file, onClose }: { file: { name: string; platform: string }; onClose: () => void }) {
+  const supabase = createClient()
+  const [loading, setLoading] = useState(true)
+  const [tx, setTx] = useState<{ order_id: string; sku: string | null; type: string; net: number; matched: boolean }[]>([])
+  const [summary, setSummary] = useState<{ total: number; orders: number; matched: number; unmatched: number; sales: number; refunds: number }>({ total: 0, orders: 0, matched: 0, unmatched: 0, sales: 0, refunds: 0 })
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true)
+      // This file's settlement lines.
+      const rows = await fetchAllRows<{ order_id: string | null; sku: string | null; amount: number | null; transaction_type: string | null }>((from, to) =>
+        supabase.from('settlements').select('order_id, sku, amount, transaction_type').eq('uploaded_file', file.name).range(from, to))
+      // Aggregate per order.
+      const byOrder: Record<string, { sku: string | null; net: number; isRefund: boolean }> = {}
+      for (const r of rows || []) {
+        const oid = (r.order_id || '').trim()
+        if (!oid) continue
+        const a = byOrder[oid] || { sku: r.sku, net: 0, isRefund: false }
+        a.net += r.amount || 0
+        if ((r.transaction_type || '').toLowerCase() === 'refund' || (r.transaction_type || '').toLowerCase().includes('return')) a.isRefund = true
+        if (!a.sku && r.sku) a.sku = r.sku
+        byOrder[oid] = a
+      }
+      const oids = Object.keys(byOrder)
+      // Which of these order-ids exist in dispatch_orders? (batch in chunks to keep the IN list sane)
+      const matchedSet = new Set<string>()
+      const CH = 200
+      for (let i = 0; i < oids.length; i += CH) {
+        const slice = oids.slice(i, i + CH)
+        const { data } = await supabase.from('dispatch_orders').select('order_id').in('order_id', slice)
+        for (const d of (data as { order_id: string }[] | null) || []) matchedSet.add(d.order_id)
+      }
+      const list = oids.map(oid => ({ order_id: oid, sku: byOrder[oid].sku, type: byOrder[oid].isRefund ? 'Refund' : 'Sale', net: byOrder[oid].net, matched: matchedSet.has(oid) }))
+      list.sort((a, b) => (a.matched === b.matched ? 0 : a.matched ? 1 : -1))  // unmatched first
+      const total = (rows || []).reduce((s, r) => s + (r.amount || 0), 0)
+      setSummary({
+        total, orders: oids.length,
+        matched: list.filter(t => t.matched).length,
+        unmatched: list.filter(t => !t.matched).length,
+        sales: list.filter(t => t.type === 'Sale').length,
+        refunds: list.filter(t => t.type === 'Refund').length,
+      })
+      setTx(list)
+      setLoading(false)
+    })()
+  }, [file.name, supabase])
+
+  const money = (n: number) => Math.round(n).toLocaleString('en-IN')
+
+  return (
+    <div style={{ position: 'relative' as const, marginTop: 18, ...card, padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{file.name}</div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'capitalize' as const }}>{file.platform} settlement · transactions in this payout</div>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', display: 'inline-flex' }}><X size={18} /></button>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading transactions…</div>
+      ) : (
+        <div style={{ padding: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 12 }}>
+            <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--text3)' }}>Total settled</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontFamily: 'DM Mono' }}>{money(summary.total)}</div></div>
+            <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--text3)' }}>Orders</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontFamily: 'DM Mono' }}>{summary.orders.toLocaleString()}</div></div>
+            <div style={{ background: 'var(--dispatched-bg)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--dispatched)' }}>Matched to dispatch</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--dispatched)', fontFamily: 'DM Mono' }}>{summary.matched.toLocaleString()}</div></div>
+            <div style={{ background: 'var(--today-bg)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--today)' }}>Unmatched</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--today)', fontFamily: 'DM Mono' }}>{summary.unmatched.toLocaleString()}</div></div>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>{summary.sales.toLocaleString()} sales · {summary.refunds.toLocaleString()} refunds · unmatched = order id not found in dispatch (older orders or account-level rows).</div>
+
+          <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'auto', maxHeight: 360 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 560 }}>
+              <thead style={{ background: 'var(--bg2)', position: 'sticky' as const, top: 0 }}>
+                <tr>{['Order ID', 'SKU', 'Type', 'Net', 'Match'].map(h => <th key={h} style={{ padding: '7px 10px', textAlign: h === 'Net' ? 'right' as const : 'left' as const, fontSize: 11, fontWeight: 700, color: 'var(--text3)' }}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {tx.map((t, i) => (
+                  <tr key={t.order_id + i} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{t.order_id}</td>
+                    <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{t.sku || '—'}</td>
+                    <td style={{ padding: '7px 10px', color: t.type === 'Refund' ? 'var(--today)' : 'var(--text2)' }}>{t.type}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: t.net < 0 ? 'var(--critical)' : 'var(--text2)' }}>{money(t.net)}</td>
+                    <td style={{ padding: '7px 10px' }}>
+                      <span style={{ background: t.matched ? 'var(--dispatched-bg)' : 'var(--today-bg)', color: t.matched ? 'var(--dispatched)' : 'var(--today)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{t.matched ? 'matched' : 'unmatched'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -280,14 +382,38 @@ interface OrderRow {
   status: OrderStatus
 }
 
+interface OrdCol {
+  key: string
+  label: string
+  type: 'text' | 'category' | 'date' | 'number'
+  get: (r: OrderRow) => string | number
+  render?: (r: OrderRow) => React.ReactNode
+  align?: 'left' | 'right'
+}
+
 function OrdersView() {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<OrderRow[]>([])
   const [bucket, setBucket] = useState<'all' | OrderStatus>('all')
-  const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   const PAGE_SIZE = 100
+
+  const [sortKey, setSortKey] = useState<string>('dispatched_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [textFilters, setTextFilters] = useState<Record<string, string>>({})
+  const [catFilters, setCatFilters] = useState<Record<string, string[]>>({})
+  const [dateFilters, setDateFilters] = useState<Record<string, string[]>>({})
+  const [openFilter, setOpenFilter] = useState<string | null>(null)
+  const [dateTreeOpen, setDateTreeOpen] = useState<Record<string, boolean>>({})
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!openFilter) return
+    const h = (e: MouseEvent) => { if (popRef.current && !popRef.current.contains(e.target as Node)) setOpenFilter(null) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [openFilter])
 
   useEffect(() => {
     (async () => {
@@ -296,13 +422,11 @@ function OrdersView() {
         supabase.from('dispatch_orders')
           .select('order_id, sku, barcode_sku, taxable_value, unit_price, order_date, dispatched_at, delivered_at, tracking_number, lr_number, tracking_status')
           .eq('is_dispatched', true).eq('is_cancelled', false)
-          .order('dispatched_at', { ascending: false }).range(from, to))
+          .order('dispatched_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
 
-      // All settlement lines (order_id, amount, transaction_type, settlement_date).
       const settle = await fetchAllRows<{ order_id: string | null; amount: number | null; transaction_type: string | null; settlement_date: string | null }>((from, to) =>
         supabase.from('settlements').select('order_id, amount, transaction_type, settlement_date').range(from, to))
 
-      // Aggregate settlements per order: net amount, whether a refund line exists, latest payment date.
       const agg: Record<string, { net: number; hasRefund: boolean; payDate: string | null }> = {}
       for (const s of settle || []) {
         const oid = (s.order_id || '').trim()
@@ -310,10 +434,6 @@ function OrdersView() {
         const a = agg[oid] || { net: 0, hasRefund: false, payDate: null }
         a.net += s.amount || 0
         const tt = (s.transaction_type || '').toLowerCase()
-        // A refund is identified ONLY by the settlement transaction type — NOT by a
-        // negative amount. On Amazon 'Order' lines, negatives are fees (commission,
-        // TCS, TDS), not refunds. Amazon marks refunds as transaction-type 'Refund';
-        // Flipkart marks them 'Customer Return' / 'Logistics Return'.
         if (tt === 'refund' || tt.includes('return')) a.hasRefund = true
         if (s.settlement_date && !a.payDate) a.payDate = s.settlement_date
         agg[oid] = a
@@ -331,8 +451,8 @@ function OrdersView() {
         const a = agg[o.order_id.trim()]
         let status: OrderStatus
         if (!a) status = 'notpaid'
-        else if (a.net <= 0) status = 'refunded'   // net-amount rule: fully reversed
-        else status = 'paid'                        // net positive (with badge if a refund also present)
+        else if (a.net <= 0) status = 'refunded'
+        else status = 'paid'
         const tids = [o.tracking_number, o.lr_number].filter(Boolean).join(' · ')
         return {
           order_id: o.order_id,
@@ -355,46 +475,114 @@ function OrdersView() {
     })()
   }, [supabase])
 
+  const fmt = (d: string | number | null) => { if (!d) return '—'; const s = String(d); const iso = s.length <= 10 ? s + 'T00:00:00' : s; const dt = new Date(iso); return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
+  const money = (n: number | null) => n != null ? Math.round(n).toLocaleString('en-IN') : '—'
+  const toDay = (v: string | number): string => { const s = String(v || ''); return s ? s.slice(0, 10) : '' }
+
+  const statusLabel: Record<OrderStatus, string> = { paid: 'Paid', notpaid: 'Not paid', refunded: 'Refunded' }
+  const pill = (r: OrderRow) => {
+    const map: Record<OrderStatus, { bg: string; fg: string }> = {
+      paid: { bg: 'var(--dispatched-bg)', fg: 'var(--dispatched)' },
+      notpaid: { bg: 'var(--critical-bg)', fg: 'var(--critical)' },
+      refunded: { bg: 'var(--today-bg)', fg: 'var(--today)' },
+    }
+    const m = map[r.status]
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ background: m.bg, color: m.fg, padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{statusLabel[r.status]}</span>
+        {r.status === 'paid' && r.hasRefund && (<span style={{ background: 'var(--today-bg)', color: 'var(--today)', padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 700 }}>+refund</span>)}
+      </span>
+    )
+  }
+
+  const COLS: OrdCol[] = useMemo(() => [
+    { key: 'order_id', label: 'Order ID', type: 'text', get: r => r.order_id, render: r => <span style={{ fontFamily: 'DM Mono', fontSize: 11 }}>{r.order_id}</span> },
+    { key: 'order_date', label: 'Order date', type: 'date', get: r => r.order_date || '', render: r => fmt(r.order_date) },
+    { key: 'dispatched_at', label: 'Dispatch date', type: 'date', get: r => r.dispatched_at || '', render: r => fmt(r.dispatched_at) },
+    { key: 'delivered_at', label: 'Delivery date', type: 'date', get: r => r.delivered_at || '', render: r => fmt(r.delivered_at) },
+    { key: 'payment_date', label: 'Payment date', type: 'date', get: r => toDay(r.payment_date || ''), render: r => fmt(toDay(r.payment_date || '')) },
+    { key: 'tracking_ids', label: 'Tracking ID(s)', type: 'text', get: r => r.tracking_ids, render: r => <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.tracking_ids}</span> },
+    { key: 'platform', label: 'Platform', type: 'category', get: r => r.platform },
+    { key: 'tracking_status', label: 'Tracking status', type: 'category', get: r => r.tracking_status || '(blank)', render: r => <span style={{ color: 'var(--text3)' }}>{r.tracking_status || '—'}</span> },
+    { key: 'invoiced', label: 'Amount', type: 'number', align: 'right', get: r => r.invoiced ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.invoiced)}</span> },
+    { key: 'status', label: 'Status', type: 'category', get: r => statusLabel[r.status], render: r => pill(r) },
+  ], [])
+  const colByKey = useMemo(() => Object.fromEntries(COLS.map(c => [c.key, c])), [COLS])
+
+  const catOptions = useMemo(() => {
+    const m: Record<string, string[]> = {}
+    for (const c of COLS) if (c.type === 'category') {
+      const set = new Set<string>()
+      for (const r of rows) set.add(String(c.get(r)) || '(blank)')
+      m[c.key] = Array.from(set).sort()
+    }
+    return m
+  }, [COLS, rows])
+
+  const dateTrees = useMemo(() => {
+    const m: Record<string, Record<string, Record<string, Set<string>>>> = {}
+    for (const c of COLS) if (c.type === 'date') {
+      const tree: Record<string, Record<string, Set<string>>> = {}
+      for (const r of rows) {
+        const day = toDay(c.get(r) as string | number)
+        if (!day || day.length < 10) continue
+        const [y, mo] = [day.slice(0, 4), day.slice(5, 7)]
+        ;(tree[y] ??= {})[mo] ??= new Set<string>()
+        tree[y][mo].add(day)
+      }
+      m[c.key] = tree
+    }
+    return m
+  }, [COLS, rows])
+
+  // bucket-filtered, then column-filtered, then sorted
+  const filtered = useMemo(() => {
+    let out = rows.filter(r => {
+      if (bucket !== 'all' && r.status !== bucket) return false
+      for (const key in textFilters) { const v = textFilters[key]; if (!v) continue; const col = colByKey[key]; if (col && !String(col.get(r)).toLowerCase().includes(v.toLowerCase())) return false }
+      for (const key in catFilters) { const a = catFilters[key]; if (!a || !a.length) continue; const col = colByKey[key]; if (col && !a.includes(String(col.get(r)) || '(blank)')) return false }
+      for (const key in dateFilters) { const days = dateFilters[key]; if (!days || !days.length) continue; const col = colByKey[key]; if (col && !days.includes(toDay(col.get(r) as string | number))) return false }
+      return true
+    })
+    const col = colByKey[sortKey]
+    if (col) out = [...out].sort((a, b) => {
+      const va = col.get(a), vb = col.get(b)
+      const cmp = col.type === 'number' ? (va as number) - (vb as number) : String(va).localeCompare(String(vb))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return out
+  }, [rows, bucket, colByKey, textFilters, catFilters, dateFilters, sortKey, sortDir])
+
+  useEffect(() => { setPage(0) }, [bucket, textFilters, catFilters, dateFilters])
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageSafe = Math.min(page, pageCount - 1)
+  const paged = useMemo(() => filtered.slice(pageSafe * PAGE_SIZE, (pageSafe + 1) * PAGE_SIZE), [filtered, pageSafe])
+
   const counts = useMemo(() => {
     const c = { all: rows.length, paid: 0, notpaid: 0, refunded: 0 }
     for (const r of rows) c[r.status]++
     return c
   }, [rows])
 
-  const shown = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return rows.filter(r => {
-      if (bucket !== 'all' && r.status !== bucket) return false
-      if (q && !(`${r.order_id} ${r.sku || ''} ${r.tracking_ids}`.toLowerCase().includes(q))) return false
-      return true
-    })
-  }, [rows, bucket, search])
+  const toggleSort = (key: string) => { if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(key); setSortDir('asc') } }
+  const hasFilter = (key: string) => !!textFilters[key] || (catFilters[key]?.length ?? 0) > 0 || (dateFilters[key]?.length ?? 0) > 0
+  const anyFilter = Object.values(textFilters).some(Boolean) || Object.values(catFilters).some(a => a?.length) || Object.values(dateFilters).some(a => a?.length)
+  const clearAll = () => { setTextFilters({}); setCatFilters({}); setDateFilters({}) }
 
-  // Reset to the first page whenever the filter/search/bucket changes.
-  useEffect(() => { setPage(0) }, [bucket, search])
-  const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
-  const pageSafe = Math.min(page, pageCount - 1)
-  const paged = useMemo(() => shown.slice(pageSafe * PAGE_SIZE, (pageSafe + 1) * PAGE_SIZE), [shown, pageSafe])
-
-  const fmt = (d: string | null) => d ? new Date(d.length <= 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'
-  const money = (n: number | null) => n != null ? Math.round(n).toLocaleString('en-IN') : '—'
-
-  const pill = (r: OrderRow) => {
-    const map: Record<OrderStatus, { bg: string; fg: string; label: string }> = {
-      paid: { bg: 'var(--dispatched-bg)', fg: 'var(--dispatched)', label: 'Paid' },
-      notpaid: { bg: 'var(--critical-bg)', fg: 'var(--critical)', label: 'Not paid' },
-      refunded: { bg: 'var(--today-bg)', fg: 'var(--today)', label: 'Refunded' },
-    }
-    const m = map[r.status]
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <span style={{ background: m.bg, color: m.fg, padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>{m.label}</span>
-        {r.status === 'paid' && r.hasRefund && (
-          <span style={{ background: 'var(--today-bg)', color: 'var(--today)', padding: '2px 6px', borderRadius: 6, fontSize: 10, fontWeight: 700 }}>+refund</span>
-        )}
-      </span>
-    )
+  const monthName = (mo: string) => ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(mo, 10)] || mo
+  const dayNum = (day: string) => parseInt(day.slice(8, 10), 10)
+  const toggleDays = (colKey: string, days: string[], on: boolean) => {
+    setDateFilters(prev => { const cur = new Set(prev[colKey] || []); if (on) days.forEach(d => cur.add(d)); else days.forEach(d => cur.delete(d)); return { ...prev, [colKey]: Array.from(cur) } })
   }
+  const daysUnder = (tree: Record<string, Record<string, Set<string>>>, y?: string, mo?: string): string[] => {
+    const out: string[] = []
+    for (const yy in tree) { if (y && yy !== y) continue; for (const mm in tree[yy]) { if (mo && mm !== mo) continue; tree[yy][mm].forEach(d => out.push(d)) } }
+    return out
+  }
+  const allChecked = (colKey: string, days: string[]) => { const sel = new Set(dateFilters[colKey] || []); return days.length > 0 && days.every(d => sel.has(d)) }
+  const someChecked = (colKey: string, days: string[]) => { const sel = new Set(dateFilters[colKey] || []); return days.some(d => sel.has(d)) }
+  const treeNodeOpen = (k: string) => dateTreeOpen[k] ?? false
+  const toggleNode = (k: string) => setDateTreeOpen(prev => ({ ...prev, [k]: !(prev[k] ?? false) }))
 
   const tabs: { key: 'all' | OrderStatus; label: string; n: number }[] = [
     { key: 'all', label: 'All', n: counts.all },
@@ -402,8 +590,6 @@ function OrdersView() {
     { key: 'notpaid', label: 'Not paid', n: counts.notpaid },
     { key: 'refunded', label: 'Refunded', n: counts.refunded },
   ]
-
-  const COLS = ['Order ID', 'Order date', 'Dispatch date', 'Delivery date', 'Payment date', 'Tracking ID(s)', 'Platform', 'Tracking status', 'Amount', 'Status']
 
   return (
     <div>
@@ -416,12 +602,13 @@ function OrdersView() {
             color: bucket === t.key ? '#fff' : 'var(--text2)',
           }}>{t.label} {loading ? '' : t.n.toLocaleString()}</button>
         ))}
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search order id, SKU, tracking"
-          style={{ marginLeft: 'auto', minWidth: 220, padding: '7px 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, outline: 'none' }} />
+        {anyFilter && (
+          <button onClick={clearAll} style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}><X size={12} /> Clear filters</button>
+        )}
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
-        Status by net settlement amount: no settlement = not paid · net &le; 0 = refunded · net &gt; 0 = paid (with +refund badge if a refund line exists). Note: orders on a platform whose settlement file isn&rsquo;t uploaded will show as not paid.
+        Click a column header to sort; the funnel to filter (date columns use a Year ▸ Month ▸ Day tree). Status by net settlement amount: no settlement = not paid · net &le; 0 = refunded · net &gt; 0 = paid. Orders on a platform whose settlement file isn&rsquo;t uploaded show as not paid.
       </div>
 
       {loading ? (
@@ -429,43 +616,108 @@ function OrdersView() {
       ) : (
         <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'auto', maxHeight: 560 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 1040 }}>
-            <thead style={{ background: 'var(--bg2)', position: 'sticky' as const, top: 0 }}>
-              <tr>{COLS.map(h => <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Amount' ? 'right' as const : 'left' as const, fontSize: 11, fontWeight: 700, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{h}</th>)}</tr>
+            <thead style={{ background: 'var(--bg2)', position: 'sticky' as const, top: 0, zIndex: 10 }}>
+              <tr>
+                {COLS.map(col => (
+                  <th key={col.key} style={{ padding: '8px 10px', textAlign: col.align === 'right' ? 'right' as const : 'left' as const, whiteSpace: 'nowrap' as const, position: 'relative' as const, userSelect: 'none' as const, background: 'var(--bg2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: col.align === 'right' ? 'flex-end' : 'flex-start' }}>
+                      <span onClick={() => toggleSort(col.key)} style={{ cursor: 'pointer', fontSize: 11, fontWeight: 700, color: sortKey === col.key ? 'var(--accent)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        {col.label}{sortKey === col.key && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+                      </span>
+                      <button onClick={() => setOpenFilter(openFilter === col.key ? null : col.key)} title="Filter" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 1, display: 'inline-flex', color: hasFilter(col.key) ? 'var(--accent)' : 'var(--text3)', opacity: hasFilter(col.key) ? 1 : 0.45 }}><Filter size={11} /></button>
+                    </div>
+                    {openFilter === col.key && (
+                      <div ref={popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const }}>
+                        {col.type === 'category' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3, maxHeight: 220, overflowY: 'auto' as const }}>
+                            {(catOptions[col.key] || []).map(opt => { const cur = catFilters[col.key] || []; const on = cur.includes(opt); return (
+                              <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text2)', cursor: 'pointer', padding: '2px 0' }}>
+                                <input type="checkbox" checked={on} onChange={() => setCatFilters(prev => { const c = prev[col.key] || []; const next = c.includes(opt) ? c.filter(x => x !== opt) : [...c, opt]; return { ...prev, [col.key]: next } })} />{opt}
+                              </label>) })}
+                          </div>
+                        ) : col.type === 'date' ? (
+                          (() => {
+                            const tree = dateTrees[col.key] || {}
+                            const years = Object.keys(tree).sort((a, b) => b.localeCompare(a))
+                            if (!years.length) return <div style={{ fontSize: 12, color: 'var(--text3)', padding: '2px 0' }}>No dates</div>
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 1, maxHeight: 280, overflowY: 'auto' as const, minWidth: 180 }}>
+                                {(dateFilters[col.key]?.length ?? 0) > 0 && (
+                                  <button onClick={() => setDateFilters(prev => ({ ...prev, [col.key]: [] }))} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: '0 0 4px' }}>Clear</button>
+                                )}
+                                {years.map(y => {
+                                  const yKey = `${col.key}|${y}`, yDays = daysUnder(tree, y)
+                                  const months = Object.keys(tree[y]).sort((a, b) => b.localeCompare(a))
+                                  return (
+                                    <div key={y}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 0' }}>
+                                        <span onClick={() => toggleNode(yKey)} style={{ cursor: 'pointer', color: 'var(--text3)', display: 'inline-flex', width: 12 }}>{treeNodeOpen(yKey) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+                                        <input type="checkbox" checked={allChecked(col.key, yDays)} ref={el => { if (el) el.indeterminate = !allChecked(col.key, yDays) && someChecked(col.key, yDays) }} onChange={e => toggleDays(col.key, yDays, e.target.checked)} />
+                                        <span onClick={() => toggleNode(yKey)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{y}</span>
+                                      </div>
+                                      {treeNodeOpen(yKey) && months.map(mo => {
+                                        const mKey = `${col.key}|${y}-${mo}`, mDays = daysUnder(tree, y, mo)
+                                        const days = Array.from(tree[y][mo]).sort((a, b) => b.localeCompare(a))
+                                        return (
+                                          <div key={mo} style={{ marginLeft: 17 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 0' }}>
+                                              <span onClick={() => toggleNode(mKey)} style={{ cursor: 'pointer', color: 'var(--text3)', display: 'inline-flex', width: 12 }}>{treeNodeOpen(mKey) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+                                              <input type="checkbox" checked={allChecked(col.key, mDays)} ref={el => { if (el) el.indeterminate = !allChecked(col.key, mDays) && someChecked(col.key, mDays) }} onChange={e => toggleDays(col.key, mDays, e.target.checked)} />
+                                              <span onClick={() => toggleNode(mKey)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text2)' }}>{monthName(mo)}</span>
+                                            </div>
+                                            {treeNodeOpen(mKey) && days.map(d => {
+                                              const on = (dateFilters[col.key] || []).includes(d)
+                                              return (
+                                                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'DM Mono' }}>
+                                                  <input type="checkbox" checked={on} onChange={() => toggleDays(col.key, [d], !on)} />{dayNum(d)}
+                                                </label>
+                                              )
+                                            })}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          })()
+                        ) : (
+                          <input autoFocus value={textFilters[col.key] || ''} onChange={e => setTextFilters(prev => ({ ...prev, [col.key]: e.target.value }))} placeholder={`Filter ${col.label}…`} style={{ width: '100%', padding: '6px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', boxSizing: 'border-box' as const }} />
+                        )}
+                      </div>
+                    )}
+                  </th>
+                ))}
+              </tr>
             </thead>
             <tbody>
               {paged.map((r, i) => (
                 <tr key={r.order_id + i} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '8px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', whiteSpace: 'nowrap' as const }}>{r.order_id}</td>
-                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.order_date)}</td>
-                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.dispatched_at)}</td>
-                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.delivered_at)}</td>
-                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{fmt(r.payment_date)}</td>
-                  <td style={{ padding: '8px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{r.tracking_ids}</td>
-                  <td style={{ padding: '8px 10px', color: 'var(--text2)' }}>{r.platform}</td>
-                  <td style={{ padding: '8px 10px', color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{r.tracking_status || '—'}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{money(r.invoiced)}</td>
-                  <td style={{ padding: '8px 10px' }}>{pill(r)}</td>
+                  {COLS.map(col => (
+                    <td key={col.key} style={{ padding: '8px 10px', textAlign: col.align === 'right' ? 'right' as const : 'left' as const, color: 'var(--text2)', whiteSpace: col.key === 'order_id' || col.key === 'tracking_ids' ? 'nowrap' as const : undefined }}>
+                      {col.render ? col.render(r) : (col.get(r) || '—')}
+                    </td>
+                  ))}
                 </tr>
               ))}
-              {!shown.length && (
-                <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No orders in this view.</td></tr>
+              {!filtered.length && (
+                <tr><td colSpan={COLS.length} style={{ padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No orders in this view.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       )}
 
-      {!loading && shown.length > PAGE_SIZE && (
+      {!loading && filtered.length > PAGE_SIZE && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
           <span style={{ fontSize: 12, color: 'var(--text3)' }}>
-            Showing {(pageSafe * PAGE_SIZE + 1).toLocaleString()}–{Math.min((pageSafe + 1) * PAGE_SIZE, shown.length).toLocaleString()} of {shown.length.toLocaleString()}
+            Showing {(pageSafe * PAGE_SIZE + 1).toLocaleString()}–{Math.min((pageSafe + 1) * PAGE_SIZE, filtered.length).toLocaleString()} of {filtered.length.toLocaleString()}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={pageSafe === 0}
-              style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe === 0 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Prev</button>
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={pageSafe === 0} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe === 0 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Prev</button>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono' }}>{pageSafe + 1} / {pageCount}</span>
-            <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={pageSafe >= pageCount - 1}
-              style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe >= pageCount - 1 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe >= pageCount - 1 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Next</button>
+            <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={pageSafe >= pageCount - 1} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe >= pageCount - 1 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe >= pageCount - 1 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Next</button>
           </div>
         </div>
       )}
