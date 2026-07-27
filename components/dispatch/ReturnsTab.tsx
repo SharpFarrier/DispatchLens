@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder } from '@/types'
-import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil } from 'lucide-react'
+import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight } from 'lucide-react'
 
 export const RETURN_REASONS = [
   'In-transit Damage',
@@ -58,6 +58,7 @@ interface Props {
 export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: Props) {
   const supabase = createClient()
   const [returns, setReturns] = useState<ReturnRow[]>([])
+  const [subTab, setSubTab] = useState<'returns' | 'daily'>('returns')
   const [rtoOrders, setRtoOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -226,6 +227,21 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
           ))}
         </div>
       </div>
+
+      {/* Sub-tab switcher */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {(['returns', 'daily'] as const).map(t => (
+          <button key={t} onClick={() => setSubTab(t)} style={{
+            padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+            border: subTab === t ? '2px solid var(--accent)' : '1px solid var(--border)',
+            background: subTab === t ? 'var(--accent)' : 'var(--surface)', color: subTab === t ? '#fff' : 'var(--text2)',
+          }}>{t === 'returns' ? 'Returns' : 'Daily review'}</button>
+        ))}
+      </div>
+
+      {subTab === 'daily' ? (
+        <DailyReview returns={returns} canSeeAmount={canSeeAmount} savingId={savingId} onRefund={patchReturn} onOpenOrder={onOpenOrder} />
+      ) : (<>
 
       {/* ── Manual add: search dispatched orders ── */}
       <div style={{ ...card, padding: 18, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
@@ -503,6 +519,171 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
           </table>
         </div>
       </div>
+      </>)}
+    </div>
+  )
+}
+
+// ── Daily review: returns received per day + refund status, for the returns manager ──
+function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }: {
+  returns: ReturnRow[]
+  canSeeAmount: boolean
+  savingId: string | null
+  onRefund: (id: string, patch: Partial<ReturnRow>) => void
+  onOpenOrder: (orderId: string) => void
+}) {
+  const [win, setWin] = useState<'7d' | '30d' | 'custom'>('7d')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [openDays, setOpenDays] = useState<Record<string, boolean>>({})
+
+  const platformOf = (oid: string) => {
+    const t = (oid || '').trim()
+    if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'
+    if (t.startsWith('OD')) return 'Flipkart'
+    if (/^\d{4,6}$/.test(t)) return 'Website'
+    return 'Other'
+  }
+  const dayKey = (iso: string | null) => iso ? iso.slice(0, 10) : ''
+  const fmtDay = (key: string) => { const d = new Date(key + 'T00:00:00'); return isNaN(d.getTime()) ? key : d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }
+  const fmtTime = (iso: string | null) => { if (!iso) return '—'; const d = new Date(iso); return isNaN(d.getTime()) ? '—' : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+
+  // Window bounds on the received DATE.
+  const range = useMemo<{ from: string | null; to: string | null }>(() => {
+    const now = new Date()
+    const iso = (d: Date) => d.toISOString().slice(0, 10)
+    if (win === '7d') return { from: iso(new Date(now.getTime() - 6 * 86400000)), to: null }
+    if (win === '30d') return { from: iso(new Date(now.getTime() - 29 * 86400000)), to: null }
+    return { from: customFrom || null, to: customTo || null }
+  }, [win, customFrom, customTo])
+
+  // Only received returns, within the window, grouped by received day.
+  const received = useMemo(() => {
+    return returns.filter(r => {
+      if (!r.warehouse_received || !r.warehouse_received_at) return false
+      const k = dayKey(r.warehouse_received_at)
+      if (range.from && k < range.from) return false
+      if (range.to && k > range.to) return false
+      return true
+    })
+  }, [returns, range])
+
+  const days = useMemo(() => {
+    const m: Record<string, ReturnRow[]> = {}
+    for (const r of received) { const k = dayKey(r.warehouse_received_at); (m[k] ??= []).push(r) }
+    return Object.keys(m).sort((a, b) => b.localeCompare(a)).map(k => ({ key: k, rows: m[k] }))
+  }, [received])
+
+  const totals = useMemo(() => {
+    const pending = received.filter(r => r.refund_status === 'pending')
+    return {
+      received: received.length,
+      pending: pending.length,
+      refunded: received.filter(r => r.refund_status === 'refunded').length,
+      pendingValue: pending.reduce((s, r) => s + (r.refund_amount || r.invoice_amount || 0), 0),
+    }
+  }, [received])
+
+  const toggle = (k: string) => setOpenDays(p => ({ ...p, [k]: !(p[k] ?? false) }))
+  const money = (n: number) => Math.round(n).toLocaleString('en-IN')
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
+      {/* Window selector */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' as const }}>
+        <span style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700 }}>Received:</span>
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+          {([['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['custom', 'Custom']] as [typeof win, string][]).map(([key, label]) => (
+            <button key={key} onClick={() => setWin(key)} style={{
+              padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              background: win === key ? 'var(--accent)' : 'transparent', color: win === key ? '#fff' : 'var(--text2)',
+            }}>{label}</button>
+          ))}
+        </div>
+        {win === 'custom' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+            <span style={{ color: 'var(--text3)', fontSize: 12 }}>→</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+          </div>
+        )}
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
+        <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Received</div><div style={{ fontSize: 22, fontWeight: 800 }}>{totals.received}</div></div>
+        <div style={{ background: 'var(--today-bg)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--today)' }}>Refund pending</div><div style={{ fontSize: 22, fontWeight: 800, color: 'var(--today)' }}>{totals.pending}</div></div>
+        <div style={{ background: 'var(--dispatched-bg)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--dispatched)' }}>Refunded</div><div style={{ fontSize: 22, fontWeight: 800, color: 'var(--dispatched)' }}>{totals.refunded}</div></div>
+        {canSeeAmount && <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Pending value</div><div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'DM Mono' }}>₹{money(totals.pendingValue)}</div></div>}
+      </div>
+
+      {!days.length ? (
+        <div style={{ ...card, padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No returns received in this window.</div>
+      ) : days.map(({ key, rows }) => {
+        const open = openDays[key] ?? (key === days[0].key)  // first day open by default
+        const pend = rows.filter(r => r.refund_status === 'pending').length
+        const refd = rows.filter(r => r.refund_status === 'refunded').length
+        const pval = rows.filter(r => r.refund_status === 'pending').reduce((s, r) => s + (r.refund_amount || r.invoice_amount || 0), 0)
+        return (
+          <div key={key} style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+            <div onClick={() => toggle(key)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: 'var(--bg2)', cursor: 'pointer' }}>
+              <span style={{ display: 'inline-flex', transition: 'transform .15s', transform: open ? 'rotate(90deg)' : 'none' }}><ChevronRight size={15} /></span>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>{fmtDay(key)}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{rows.length} received</span>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' as const }}>
+                {pend > 0 && <span style={{ background: 'var(--today-bg)', color: 'var(--today)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{pend} pending</span>}
+                {refd > 0 && <span style={{ background: 'var(--dispatched-bg)', color: 'var(--dispatched)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{refd} refunded</span>}
+                {canSeeAmount && pval > 0 && <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>₹{money(pval)} pend.</span>}
+              </div>
+            </div>
+            {open && (
+              <div style={{ overflowX: 'auto' as const }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 720 }}>
+                  <thead style={{ background: 'var(--surface)' }}>
+                    <tr>{['Order', 'Platform', 'SKU', 'Type', 'Received at', 'Handled by', 'Refund', ''].map(h => (
+                      <th key={h} style={{ padding: '7px 10px', textAlign: h === 'Refund' || h === '' ? 'right' as const : 'left' as const, fontSize: 11, fontWeight: 700, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{h}</th>
+                    ))}</tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => {
+                      const refunded = r.refund_status === 'refunded'
+                      return (
+                        <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                          <td style={{ padding: '7px 10px' }}><span onClick={() => onOpenOrder(r.order_id)} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
+                          <td style={{ padding: '7px 10px', color: 'var(--text2)' }}>{platformOf(r.order_id)}</td>
+                          <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
+                          <td style={{ padding: '7px 10px', color: 'var(--text2)', textTransform: 'capitalize' as const }}>{r.return_type || r.source.replace('_', ' ')}</td>
+                          <td style={{ padding: '7px 10px', color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{fmtTime(r.warehouse_received_at)}</td>
+                          <td style={{ padding: '7px 10px', color: 'var(--text3)', fontSize: 11 }}>{r.created_by_email ? r.created_by_email.split('@')[0] : '—'}</td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right' as const }}>
+                            {refunded ? (
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'flex-end', gap: 1 }}>
+                                <span style={{ background: 'var(--dispatched-bg)', color: 'var(--dispatched)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}><CheckCircle size={11} /> Refunded</span>
+                                <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{r.refund_type ? r.refund_type.toUpperCase() : ''}{canSeeAmount && r.refund_amount ? ` ₹${money(r.refund_amount)}` : ''} · {fmtTime(r.refunded_at)}</span>
+                              </div>
+                            ) : (
+                              <span style={{ background: 'var(--today-bg)', color: 'var(--today)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}><Clock size={11} /> Pending</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '7px 10px', textAlign: 'right' as const }}>
+                            <button onClick={() => onRefund(r.id, refunded
+                              ? { refund_status: 'pending', refund_type: null, refunded_at: null } as Partial<ReturnRow>
+                              : { refund_status: 'refunded', refund_type: (r.refund_type || 'full'), refunded_at: new Date().toISOString() } as Partial<ReturnRow>)}
+                              disabled={savingId === r.id}
+                              style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: refunded ? 'var(--text3)' : 'var(--dispatched)', fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+                              {refunded ? 'Undo' : 'Mark refunded'}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
