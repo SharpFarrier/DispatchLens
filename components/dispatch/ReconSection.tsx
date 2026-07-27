@@ -11,8 +11,7 @@ import {
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }
 type Tab = 'inbox' | 'orders'
 
-interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string }
-interface FileAgg { total: number; orders: Set<string>; depositDate: string | null; periodStart: string | null; periodEnd: string | null }
+interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string; total_settled?: number | null; order_count?: number | null; deposit_date?: string | null; period_start?: string | null; period_end?: string | null }
 type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
 
 export default function ReconSection() {
@@ -32,30 +31,22 @@ export default function ReconSection() {
     const { data: up } = await supabase.from('settlement_uploads').select('*').order('created_at', { ascending: false })
     const upRows = (up as UploadRow[]) || []
     setUploads(upRows)
-    // Lightweight totals
-    const { count: azCount } = await supabase.from('settlements').select('id', { count: 'exact', head: true }).eq('platform', 'amazon')
-    const { count: fkCount } = await supabase.from('settlements').select('id', { count: 'exact', head: true }).eq('platform', 'flipkart')
-    setTotals(t => ({ ...t, amazon: azCount || 0, flipkart: fkCount || 0 }))
-
-    // Per-file settlement details: total settled amount, distinct order count,
-    // deposit/payment date, and (Amazon) settlement period — pulled from stored rows.
-    const rows = await fetchAllRows<{ uploaded_file: string | null; amount: number | null; order_id: string | null; settlement_date: string | null; platform: string; raw: Record<string, unknown> | null }>((from, to) =>
-      supabase.from('settlements').select('uploaded_file, amount, order_id, settlement_date, platform, raw').range(from, to))
-    const byFile: Record<string, FileAgg> = {}
-    for (const r of rows || []) {
-      const key = r.uploaded_file || '(unknown)'
-      const a = byFile[key] || { total: 0, orders: new Set<string>(), depositDate: null, periodStart: null, periodEnd: null }
-      a.total += r.amount || 0
-      if (r.order_id) a.orders.add(r.order_id)
-      if (!a.depositDate && r.settlement_date) a.depositDate = r.settlement_date
-      // Amazon period from raw (settlement-start-date / settlement-end-date), first seen.
-      const raw = r.raw || {}
-      if (!a.periodStart && raw['settlement-start-date']) a.periodStart = String(raw['settlement-start-date'])
-      if (!a.periodEnd && raw['settlement-end-date']) a.periodEnd = String(raw['settlement-end-date'])
-      byFile[key] = a
+    // Totals come straight from the stored per-file columns — no scan of settlement rows.
+    const azRows = upRows.filter(u => u.platform === 'amazon')
+    const fkRows = upRows.filter(u => u.platform === 'flipkart')
+    setTotals(t => ({ ...t, amazon: azRows.reduce((s, u) => s + (u.row_count || 0), 0), flipkart: fkRows.reduce((s, u) => s + (u.row_count || 0), 0) }))
+    // Build the per-file aggregate map from the stored columns (fallback to 0/null if an
+    // older file was uploaded before these columns existed).
+    const agg: FileAggMap = {}
+    for (const u of upRows) {
+      agg[u.file_name] = {
+        total: u.total_settled ?? 0,
+        orders: u.order_count ?? (u.dedup_ids?.length ?? 0),
+        depositDate: u.deposit_date ?? null,
+        periodStart: u.period_start ?? null,
+        periodEnd: u.period_end ?? null,
+      }
     }
-    const agg: Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }> = {}
-    for (const k in byFile) agg[k] = { total: byFile[k].total, orders: byFile[k].orders.size, depositDate: byFile[k].depositDate, periodStart: byFile[k].periodStart, periodEnd: byFile[k].periodEnd }
     setFileAgg(agg)
     setLoading(false)
   }, [supabase])
@@ -126,8 +117,23 @@ export default function ReconSection() {
 
         const insertedCount = await insertRows(parsed.rows, f.name)
         console.log('[recon] inserting settlement_uploads registry row…')
+        // Precompute per-file totals now, so the inbox never has to re-scan all settlement rows.
+        const orderSet = new Set<string>()
+        let totalSettled = 0
+        let depositDate: string | null = null
+        let periodStart: string | null = null
+        let periodEnd: string | null = null
+        for (const r of parsed.rows) {
+          totalSettled += r.amount || 0
+          if (r.order_id) orderSet.add(r.order_id)
+          if (!depositDate && r.settlement_date) depositDate = r.settlement_date
+          const raw = (r.raw || {}) as Record<string, unknown>
+          if (!periodStart && raw['settlement-start-date']) periodStart = String(raw['settlement-start-date'])
+          if (!periodEnd && raw['settlement-end-date']) periodEnd = String(raw['settlement-end-date'])
+        }
         const { error: upErr } = await supabase.from('settlement_uploads').insert({
           platform, file_name: f.name, dedup_ids: fileIds, row_count: parsed.rows.length, uploaded_by_email: email,
+          total_settled: totalSettled, order_count: orderSet.size, deposit_date: depositDate, period_start: periodStart, period_end: periodEnd,
         })
         if (upErr) { console.error('[recon] settlement_uploads insert error', upErr); throw new Error(`file loaded (${insertedCount} rows) but registry insert failed: ${upErr.message}`) }
 
@@ -398,6 +404,10 @@ function OrdersView() {
   const [bucket, setBucket] = useState<'all' | OrderStatus>('all')
   const [page, setPage] = useState(0)
   const PAGE_SIZE = 100
+  // Load window (by ORDER DATE) — keeps the tab fast as history grows.
+  const [win, setWin] = useState<'7d' | '30d' | '3mo' | 'all' | 'custom'>('7d')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
 
   const [sortKey, setSortKey] = useState<string>('dispatched_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -415,65 +425,89 @@ function OrdersView() {
     return () => document.removeEventListener('mousedown', h)
   }, [openFilter])
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true)
-      const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; taxable_value: number | null; unit_price: number | null; order_date: string | null; dispatched_at: string | null; delivered_at: string | null; tracking_number: string | null; lr_number: string | null; tracking_status: string | null }>((from, to) =>
-        supabase.from('dispatch_orders')
-          .select('order_id, sku, barcode_sku, taxable_value, unit_price, order_date, dispatched_at, delivered_at, tracking_number, lr_number, tracking_status')
-          .eq('is_dispatched', true).eq('is_cancelled', false)
-          .order('dispatched_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
+  // Resolve the active window to a from/to on order_date (ISO date strings).
+  const range = useMemo<{ from: string | null; to: string | null }>(() => {
+    const now = new Date()
+    const iso = (d: Date) => d.toISOString().slice(0, 10)
+    const back = (days: number) => iso(new Date(now.getTime() - days * 86400000))
+    if (win === '7d') return { from: back(6), to: null }
+    if (win === '30d') return { from: back(29), to: null }
+    if (win === '3mo') return { from: back(89), to: null }
+    if (win === 'all') return { from: null, to: null }
+    return { from: customFrom || null, to: customTo || null }  // custom
+  }, [win, customFrom, customTo])
 
-      const settle = await fetchAllRows<{ order_id: string | null; amount: number | null; transaction_type: string | null; settlement_date: string | null }>((from, to) =>
-        supabase.from('settlements').select('order_id, amount, transaction_type, settlement_date').range(from, to))
+  const loadWindow = useCallback(async () => {
+    if (win === 'custom' && (!customFrom || !customTo)) { setRows([]); setLoading(false); return }
+    setLoading(true)
+    const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; taxable_value: number | null; unit_price: number | null; order_date: string | null; dispatched_at: string | null; delivered_at: string | null; tracking_number: string | null; lr_number: string | null; tracking_status: string | null }>((from, to) => {
+      let q = supabase.from('dispatch_orders')
+        .select('order_id, sku, barcode_sku, taxable_value, unit_price, order_date, dispatched_at, delivered_at, tracking_number, lr_number, tracking_status')
+        .eq('is_dispatched', true).eq('is_cancelled', false)
+      if (range.from) q = q.gte('order_date', range.from)
+      if (range.to) q = q.lte('order_date', range.to)
+      return q.order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to)
+    })
 
-      const agg: Record<string, { net: number; hasRefund: boolean; payDate: string | null }> = {}
-      for (const s of settle || []) {
-        const oid = (s.order_id || '').trim()
-        if (!oid) continue
-        const a = agg[oid] || { net: 0, hasRefund: false, payDate: null }
-        a.net += s.amount || 0
-        const tt = (s.transaction_type || '').toLowerCase()
-        if (tt === 'refund' || tt.includes('return')) a.hasRefund = true
-        if (s.settlement_date && !a.payDate) a.payDate = s.settlement_date
-        agg[oid] = a
+    // Only fetch settlements for the orders in this window (batched by order-id) — keeps it light.
+    const oids = Array.from(new Set((orders || []).map(o => o.order_id).filter(Boolean)))
+    const settle: { order_id: string | null; amount: number | null; transaction_type: string | null; settlement_date: string | null }[] = []
+    const CH = 200
+    for (let i = 0; i < oids.length; i += CH) {
+      const slice = oids.slice(i, i + CH)
+      const { data } = await supabase.from('settlements').select('order_id, amount, transaction_type, settlement_date').in('order_id', slice)
+      if (data) settle.push(...(data as typeof settle))
+    }
+
+    const agg: Record<string, { net: number; hasRefund: boolean; payDate: string | null }> = {}
+    for (const s of settle) {
+      const oid = (s.order_id || '').trim()
+      if (!oid) continue
+      const a = agg[oid] || { net: 0, hasRefund: false, payDate: null }
+      a.net += s.amount || 0
+      const tt = (s.transaction_type || '').toLowerCase()
+      if (tt === 'refund' || tt.includes('return')) a.hasRefund = true
+      if (s.settlement_date && !a.payDate) a.payDate = s.settlement_date
+      agg[oid] = a
+    }
+
+    const platformOf = (oid: string) => {
+      const t = (oid || '').trim()
+      if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'
+      if (t.startsWith('OD')) return 'Flipkart'
+      if (/^\d{4,6}$/.test(t)) return 'Website'
+      return 'Other'
+    }
+
+    const out: OrderRow[] = (orders || []).filter(o => o.order_id).map(o => {
+      const a = agg[o.order_id.trim()]
+      let status: OrderStatus
+      if (!a) status = 'notpaid'
+      else if (a.net <= 0) status = 'refunded'
+      else status = 'paid'
+      const tids = [o.tracking_number, o.lr_number].filter(Boolean).join(' · ')
+      return {
+        order_id: o.order_id,
+        sku: o.barcode_sku || o.sku,
+        platform: platformOf(o.order_id),
+        order_date: o.order_date,
+        dispatched_at: o.dispatched_at,
+        delivered_at: o.delivered_at,
+        payment_date: a?.payDate ?? null,
+        tracking_ids: tids || '—',
+        tracking_status: o.tracking_status,
+        invoiced: o.taxable_value ?? o.unit_price ?? null,
+        net: a?.net ?? 0,
+        hasRefund: a?.hasRefund ?? false,
+        status,
       }
+    })
+    setRows(out)
+    setLoading(false)
+  }, [supabase, win, customFrom, customTo, range])
 
-      const platformOf = (oid: string) => {
-        const t = (oid || '').trim()
-        if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'
-        if (t.startsWith('OD')) return 'Flipkart'
-        if (/^\d{4,6}$/.test(t)) return 'Website'
-        return 'Other'
-      }
-
-      const out: OrderRow[] = (orders || []).filter(o => o.order_id).map(o => {
-        const a = agg[o.order_id.trim()]
-        let status: OrderStatus
-        if (!a) status = 'notpaid'
-        else if (a.net <= 0) status = 'refunded'
-        else status = 'paid'
-        const tids = [o.tracking_number, o.lr_number].filter(Boolean).join(' · ')
-        return {
-          order_id: o.order_id,
-          sku: o.barcode_sku || o.sku,
-          platform: platformOf(o.order_id),
-          order_date: o.order_date,
-          dispatched_at: o.dispatched_at,
-          delivered_at: o.delivered_at,
-          payment_date: a?.payDate ?? null,
-          tracking_ids: tids || '—',
-          tracking_status: o.tracking_status,
-          invoiced: o.taxable_value ?? o.unit_price ?? null,
-          net: a?.net ?? 0,
-          hasRefund: a?.hasRefund ?? false,
-          status,
-        }
-      })
-      setRows(out)
-      setLoading(false)
-    })()
-  }, [supabase])
+  // Auto-load on mount + when a preset window changes (custom waits for the Load button).
+  useEffect(() => { if (win !== 'custom') void loadWindow() }, [win, loadWindow])
 
   const fmt = (d: string | number | null) => { if (!d) return '—'; const s = String(d); const iso = s.length <= 10 ? s + 'T00:00:00' : s; const dt = new Date(iso); return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
   const money = (n: number | null) => n != null ? Math.round(n).toLocaleString('en-IN') : '—'
@@ -593,6 +627,26 @@ function OrdersView() {
 
   return (
     <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700 }}>Order date:</span>
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+          {([['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['3mo', 'Last 3 months'], ['all', 'All'], ['custom', 'Custom']] as [typeof win, string][]).map(([key, label]) => (
+            <button key={key} onClick={() => setWin(key)} style={{
+              padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              background: win === key ? 'var(--accent)' : 'transparent', color: win === key ? '#fff' : 'var(--text2)',
+            }}>{label}</button>
+          ))}
+        </div>
+        {win === 'custom' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+            <span style={{ color: 'var(--text3)', fontSize: 12 }}>→</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+            <button onClick={() => loadWindow()} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Load</button>
+          </div>
+        )}
+      </div>
+
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' as const, alignItems: 'center' }}>
         {tabs.map(t => (
           <button key={t.key} onClick={() => setBucket(t.key)} style={{
@@ -608,7 +662,7 @@ function OrdersView() {
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
-        Click a column header to sort; the funnel to filter (date columns use a Year ▸ Month ▸ Day tree). Status by net settlement amount: no settlement = not paid · net &le; 0 = refunded · net &gt; 0 = paid. Orders on a platform whose settlement file isn&rsquo;t uploaded show as not paid.
+        Showing {win === '7d' ? 'orders from the last 7 days' : win === '30d' ? 'orders from the last 30 days' : win === '3mo' ? 'orders from the last 3 months' : win === 'all' ? 'all orders' : 'a custom date range'} (by order date). Counts above reflect this window. Click a header to sort; the funnel to filter (date columns use a Year ▸ Month ▸ Day tree). Status by net settlement amount: no settlement = not paid · net &le; 0 = refunded · net &gt; 0 = paid.
       </div>
 
       {loading ? (
