@@ -268,7 +268,11 @@ function OrdersView() {
         const a = agg[oid] || { net: 0, hasRefund: false, payDate: null }
         a.net += s.amount || 0
         const tt = (s.transaction_type || '').toLowerCase()
-        if (tt.includes('refund') || tt.includes('return') || (s.amount || 0) < 0) a.hasRefund = true
+        // A refund is identified ONLY by the settlement transaction type — NOT by a
+        // negative amount. On Amazon 'Order' lines, negatives are fees (commission,
+        // TCS, TDS), not refunds. Amazon marks refunds as transaction-type 'Refund';
+        // Flipkart marks them 'Customer Return' / 'Logistics Return'.
+        if (tt === 'refund' || tt.includes('return')) a.hasRefund = true
         if (s.settlement_date && !a.payDate) a.payDate = s.settlement_date
         agg[oid] = a
       }
