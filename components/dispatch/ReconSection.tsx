@@ -36,9 +36,10 @@ export default function ReconSection() {
   }, [supabase])
   useEffect(() => { void loadInbox() }, [loadInbox])
 
-  // Insert settlement rows in chunks (Supabase caps payload size).
+  // Insert settlement rows in chunks (Supabase caps payload size). Loud on error.
   const insertRows = async (rows: SettlementRow[], fileName: string) => {
-    const CHUNK = 500
+    const CHUNK = 300
+    let inserted = 0
     for (let i = 0; i < rows.length; i += CHUNK) {
       const slice = rows.slice(i, i + CHUNK).map(r => ({
         platform: r.platform, order_id: r.order_id, order_item_code: r.order_item_code,
@@ -46,51 +47,74 @@ export default function ReconSection() {
         amount_description: r.amount_description, dedup_key: r.dedup_key,
         settlement_date: r.settlement_date, raw: r.raw, uploaded_file: fileName,
       }))
-      const { error } = await supabase.from('settlements').insert(slice)
-      if (error) throw error
+      console.log(`[recon] inserting rows ${i}–${i + slice.length} of ${rows.length}…`)
+      const { data, error, status } = await supabase.from('settlements').insert(slice).select('id')
+      if (error) {
+        console.error('[recon] INSERT ERROR', { status, message: error.message, details: (error as { details?: string }).details, hint: (error as { hint?: string }).hint, code: (error as { code?: string }).code })
+        throw new Error(`insert failed at row ${i} (HTTP ${status}): ${error.message}${(error as { hint?: string }).hint ? ' · ' + (error as { hint?: string }).hint : ''}`)
+      }
+      inserted += (data?.length ?? slice.length)
+      console.log(`[recon] ok, total inserted so far: ${inserted}`)
     }
+    console.log(`[recon] insertRows DONE — ${inserted} rows for ${fileName}`)
+    return inserted
   }
 
   const handleFiles = async (platform: 'amazon' | 'flipkart', files: FileList | null) => {
-    if (!files || !files.length) return
+    console.log('[recon] handleFiles called', { platform, count: files?.length })
+    if (!files || !files.length) { console.log('[recon] no files'); return }
     setBusy(true); setMsg(null)
     try {
-      const { data: auth } = await supabase.auth.getUser()
+      const { data: auth, error: authErr } = await supabase.auth.getUser()
       const email = auth?.user?.email ?? null
+      console.log('[recon] auth user:', email, authErr ? `(authErr: ${authErr.message})` : '')
+      if (!auth?.user) {
+        flash('err', 'Not signed in (no auth session) — settlement insert would be blocked by RLS. Try reloading / re-logging in.')
+        setBusy(false); return
+      }
       // Existing dedup ids across all prior uploads for this platform.
       const priorIds = new Set<string>()
       uploads.filter(u => u.platform === platform).forEach(u => (u.dedup_ids || []).forEach(id => priorIds.add(String(id))))
 
       let filesLoaded = 0, filesSkipped = 0, rowsLoaded = 0
       for (const f of Array.from(files)) {
+        console.log('[recon] processing file:', f.name, f.size, 'bytes')
         let parsed
-        if (platform === 'amazon') {
-          if (!/\.(txt|csv|tsv)$/i.test(f.name)) { flash('warn', `Skipped ${f.name} — Amazon settlement should be a .txt flat-file`); continue }
-          parsed = parseAmazonText(await readFileText(f))
-        } else {
-          if (!/\.xlsx$/i.test(f.name)) { flash('warn', `Skipped ${f.name} — Flipkart settlement should be a .xlsx`); continue }
-          parsed = await parseFlipkartBuffer(await readFileBuffer(f))
-        }
-        // Dedup: if every dedup-id in this file is already loaded, skip it.
-        const fileIds = parsed.dedupIds.map(String)
-        const allDup = fileIds.length > 0 && fileIds.every(id => priorIds.has(id))
-        if (allDup) {
-          filesSkipped++
-          flash('warn', `${f.name}: already uploaded (settlement/NEFT id seen before) — skipped`)
+        try {
+          if (platform === 'amazon') {
+            if (!/\.(txt|csv|tsv)$/i.test(f.name)) { flash('warn', `Skipped ${f.name} — expected a .txt/.csv/.tsv flat-file`); continue }
+            parsed = parseAmazonText(await readFileText(f))
+          } else {
+            if (!/\.xlsx$/i.test(f.name)) { flash('warn', `Skipped ${f.name} — expected a .xlsx`); continue }
+            parsed = await parseFlipkartBuffer(await readFileBuffer(f))
+          }
+        } catch (pe) {
+          console.error('[recon] PARSE ERROR', pe)
+          flash('err', `Parse failed for ${f.name}: ${(pe as Error).message}`)
           continue
         }
-        // Insert rows + registry entry.
-        await insertRows(parsed.rows, f.name)
-        await supabase.from('settlement_uploads').insert({
+        console.log('[recon] parsed', { rows: parsed.rows.length, dedupIds: parsed.dedupIds.length })
+
+        const fileIds = parsed.dedupIds.map(String)
+        const allDup = fileIds.length > 0 && fileIds.every(id => priorIds.has(id))
+        if (allDup) { filesSkipped++; flash('warn', `${f.name}: already uploaded — skipped`); continue }
+
+        const insertedCount = await insertRows(parsed.rows, f.name)
+        console.log('[recon] inserting settlement_uploads registry row…')
+        const { error: upErr } = await supabase.from('settlement_uploads').insert({
           platform, file_name: f.name, dedup_ids: fileIds, row_count: parsed.rows.length, uploaded_by_email: email,
         })
+        if (upErr) { console.error('[recon] settlement_uploads insert error', upErr); throw new Error(`file loaded (${insertedCount} rows) but registry insert failed: ${upErr.message}`) }
+
         fileIds.forEach(id => priorIds.add(id))
         filesLoaded++; rowsLoaded += parsed.rows.length
       }
       if (filesLoaded) flash('ok', `Loaded ${filesLoaded} file(s), ${rowsLoaded.toLocaleString()} settlement rows${filesSkipped ? ` · skipped ${filesSkipped} duplicate` : ''}`)
       else if (filesSkipped) flash('warn', `All ${filesSkipped} file(s) were duplicates — nothing loaded`)
+      else flash('warn', 'Nothing was loaded (no rows parsed). Check the file format.')
       await loadInbox()
     } catch (e) {
+      console.error('[recon] handleFiles fatal', e)
       flash('err', 'Error: ' + (e as Error).message)
     } finally {
       setBusy(false)
