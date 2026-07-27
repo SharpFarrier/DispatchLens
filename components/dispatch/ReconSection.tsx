@@ -60,7 +60,7 @@ export default function ReconSection() {
     return inserted
   }
 
-  const handleFiles = async (platform: 'amazon' | 'flipkart', files: FileList | null) => {
+  const handleFiles = async (platform: 'amazon' | 'flipkart', files: File[]) => {
     console.log('[recon] handleFiles called', { platform, count: files?.length })
     if (!files || !files.length) { console.log('[recon] no files'); return }
     setBusy(true); setMsg(null)
@@ -77,7 +77,7 @@ export default function ReconSection() {
       uploads.filter(u => u.platform === platform).forEach(u => (u.dedup_ids || []).forEach(id => priorIds.add(String(id))))
 
       let filesLoaded = 0, filesSkipped = 0, rowsLoaded = 0
-      for (const f of Array.from(files)) {
+      for (const f of files) {
         console.log('[recon] processing file:', f.name, f.size, 'bytes')
         let parsed
         try {
@@ -157,7 +157,7 @@ export default function ReconSection() {
 // ── Settlement Inbox ──
 function InboxView({ uploads, totals, loading, busy, onFiles }: {
   uploads: UploadRow[]; totals: { amazon: number; flipkart: number }; loading: boolean; busy: boolean;
-  onFiles: (p: 'amazon' | 'flipkart', f: FileList | null) => void
+  onFiles: (p: 'amazon' | 'flipkart', f: File[]) => void
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -203,7 +203,7 @@ function InboxView({ uploads, totals, loading, busy, onFiles }: {
 
 function UploadCard({ platform, label, hint, count, busy, onFiles }: {
   platform: 'amazon' | 'flipkart'; label: string; hint: string; count: number; busy: boolean;
-  onFiles: (p: 'amazon' | 'flipkart', f: FileList | null) => void
+  onFiles: (p: 'amazon' | 'flipkart', f: File[]) => void
 }) {
   const inputId = `recon-upload-${platform}`
   return (
@@ -217,7 +217,7 @@ function UploadCard({ platform, label, hint, count, busy, onFiles }: {
         <Upload size={15} /> {busy ? 'Working…' : 'Upload file(s)'}
       </label>
       <input id={inputId} type="file" multiple accept={platform === 'amazon' ? '.txt,.csv,.tsv' : '.xlsx'} disabled={busy}
-        onChange={e => { onFiles(platform, e.target.files); e.currentTarget.value = '' }} style={{ display: 'none' }} />
+        onChange={e => { const picked = e.target.files ? Array.from(e.target.files) : []; e.currentTarget.value = ''; onFiles(platform, picked) }} style={{ display: 'none' }} />
     </div>
   )
 }
