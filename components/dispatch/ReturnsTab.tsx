@@ -403,9 +403,9 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                       // Show the stored value; if it's the placeholder / unset, sit on the blank option.
                       const selectVal = (!r.reason || r.reason === 'Pending review') ? '' : r.reason
                       const isRto = r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto'
-                      const reasonList = isRto ? RTO_REASONS : CUSTOMER_RETURN_REASONS
+                      const reasonList: readonly string[] = isRto ? RTO_REASONS : CUSTOMER_RETURN_REASONS
                       // If the stored reason isn't in the type's list (e.g. an older value), still show it.
-                      const options = selectVal && !reasonList.includes(selectVal as typeof reasonList[number])
+                      const options = selectVal && !reasonList.includes(selectVal)
                         ? [selectVal, ...reasonList] : reasonList
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
