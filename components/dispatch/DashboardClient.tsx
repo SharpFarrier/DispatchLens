@@ -5,7 +5,7 @@ import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
 import AllOrdersTab from './AllOrdersTab'
 import CallLensTab from './CallLensTab'
-import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart } from '@/lib/dispatchDocs'
+import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart, fetchBluedartLabels } from '@/lib/dispatchDocs'
 import { fetchTracking, type TrackResult } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
@@ -13,7 +13,6 @@ import SkuMapTab from './SkuMapTab'
 import ReturnsTab from './ReturnsTab'
 import CargoTokenPanel from './CargoTokenPanel'
 import WarehouseSection from './WarehouseSection'
-import ReconSection from './ReconSection'
 import OrderHistoryPanel from './OrderHistoryPanel'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
@@ -24,7 +23,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -1025,9 +1024,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           tracking_label: t.label,
           tracking_last_update: t.lastUpdate,
           tracking_synced_at: syncedAt,
-          ...(t.status === 'delivered' && order.tracking_status !== 'delivered'
-            ? { delivered_at: t.lastUpdate ? new Date(t.lastUpdate).toISOString() : syncedAt }
-            : {}),
         }).eq('id', order.id)
         // Log a timeline event only when the status genuinely changed (avoids spam on every sync).
         if (order.tracking_status !== t.status) {
@@ -1866,21 +1862,31 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const failed: string[] = []
       // Per-order generation outcome (order_id -> { status, error }).
       const genOutcome: Record<string, { status: 'ok' | 'failed'; error: string | null }> = {}
+      // Ordered label slots — one per order, filled in loop order so labels stay
+      // in the SAME sequence as invoices for printing. Bluedart labels are fetched
+      // in parallel AFTER the loop (fast) but written back into their slot by index.
+      const labelSlots: (Uint8Array | null)[] = base.map(() => null)
+      const bdJobs: { idx: number; order: DBOrder }[] = []
       let done = 0
-      for (const o of base) {
+      for (let i = 0; i < base.length; i++) {
+        const o = base[i]
         done++
         setGenProgress(`Order ${done}/${base.length} — ${o.order_id}`)
         const issues: string[] = []
         // Invoice for every order (uses imported invoice fields).
         try { invoiceParts.push(await invoicePdfBytes(o, { signatureDataUrl })) }
         catch (e) { failed.push(`${o.order_id} invoice: ${(e as Error).message}`); issues.push('invoice failed') }
-        // Label only for Cargo-fetchable (skip Bluedart — BD labels come from elsewhere, NOT a failure).
-        if (!isBluedart(o) && o.tracking_number) {
+        // Label: Bluedart comes from the label app (fetched in parallel after the loop);
+        // everything else is Cargo-fetchable inline.
+        if (isBluedart(o)) {
+          if (o.tracking_number) bdJobs.push({ idx: i, order: o })
+          else { failed.push(`${o.order_id} label: no AWB`); issues.push('label failed (no AWB)') }
+        } else if (o.tracking_number) {
           if (!token) { failed.push(`${o.order_id} label: no Cargo token set`); issues.push('label failed (no token)') }
           else {
             try {
               const raw = await fetchLabelBytes(o.tracking_number, token)
-              labelParts.push(await stripAdPage(raw))
+              labelSlots[i] = await stripAdPage(raw)
             } catch (e) { failed.push(`${o.order_id} label: ${(e as Error).message}`); issues.push('label failed') }
           }
         }
@@ -1888,6 +1894,24 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           ? { status: 'failed', error: issues.join(' · ') }
           : { status: 'ok', error: null }
       }
+
+      // Fetch all Bluedart labels in parallel (one call each, concurrent = fast),
+      // writing each into its slot so the print order matches the invoices.
+      if (bdJobs.length) {
+        setGenProgress(`Fetching ${bdJobs.length} Bluedart label(s)…`)
+        await Promise.all(bdJobs.map(async ({ idx, order }) => {
+          try {
+            const pdf = await fetchBluedartLabels([order.tracking_number as string])
+            if (pdf.length) labelSlots[idx] = pdf
+            else throw new Error('empty label')
+          } catch (e) {
+            failed.push(`${order.order_id} label: ${(e as Error).message}`)
+            genOutcome[order.order_id] = { status: 'failed', error: [genOutcome[order.order_id]?.error, 'label failed'].filter(Boolean).join(' · ') }
+          }
+        }))
+      }
+      // Collapse slots (in order) into the final label list.
+      for (const slot of labelSlots) if (slot) labelParts.push(slot)
       // Persist generation status on every processed order (chunked).
       setGenProgress('Saving generation status…')
       const nowIso = new Date().toISOString()
@@ -2345,7 +2369,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'calllens', label: 'CallLens', show: effectiveAccess.can_calllens },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
-            { key: 'recon', label: 'Recon', show: effectiveAccess.can_users },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -4553,10 +4576,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ WAREHOUSE ════ */}
         {tab === 'warehouse' && (
           <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} />
-        )}
-
-        {tab === 'recon' && effectiveAccess.can_users && (
-          <ReconSection />
         )}
 
         {/* ════ USERS ════ */}
