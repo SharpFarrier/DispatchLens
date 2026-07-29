@@ -13,6 +13,7 @@ import SkuMapTab from './SkuMapTab'
 import ReturnsTab from './ReturnsTab'
 import CargoTokenPanel from './CargoTokenPanel'
 import WarehouseSection from './WarehouseSection'
+import ReconSection from './ReconSection'
 import OrderHistoryPanel from './OrderHistoryPanel'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
@@ -23,7 +24,7 @@ import {
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -1024,6 +1025,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           tracking_label: t.label,
           tracking_last_update: t.lastUpdate,
           tracking_synced_at: syncedAt,
+          ...(t.status === 'delivered' && order.tracking_status !== 'delivered'
+            ? { delivered_at: t.lastUpdate ? new Date(t.lastUpdate).toISOString() : syncedAt }
+            : {}),
         }).eq('id', order.id)
         // Log a timeline event only when the status genuinely changed (avoids spam on every sync).
         if (order.tracking_status !== t.status) {
@@ -2369,6 +2373,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'calllens', label: 'CallLens', show: effectiveAccess.can_calllens },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
+            { key: 'recon', label: 'Recon', show: effectiveAccess.can_users },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -4576,6 +4581,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ WAREHOUSE ════ */}
         {tab === 'warehouse' && (
           <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} />
+        )}
+
+        {tab === 'recon' && effectiveAccess.can_users && (
+          <ReconSection />
         )}
 
         {/* ════ USERS ════ */}
