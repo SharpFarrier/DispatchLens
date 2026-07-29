@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'rea
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { DBOrder } from '@/types'
-import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw } from 'lucide-react'
+import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -136,6 +136,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     { key: 'order_id', label: 'Order', type: 'text', get: r => r.o.order_id },
     { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '' },
     { key: 'sku', label: 'SKU', type: 'text', get: r => r.o.sku || '' },
+    { key: 'oda', label: 'ODA', type: 'category', get: r => r.o.oda === 'ODA' ? 'ODA' : '(no)', render: r => r.o.oda === 'ODA' ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', padding: '2px 7px', borderRadius: 4 }}>ODA</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
     { key: 'contact', label: 'Contact', type: 'text', get: r => r.o.contact_number || '', render: r => r.o.contact_number ? <a href={`tel:${r.o.contact_number}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{r.o.contact_number}</a> : '—' },
     { key: 'confirmation', label: 'Confirmation', type: 'category', queues: ['predispatch', 'callbacks'], get: r => confirmationBadge(r.o)?.label || '(pending)', render: r => { const b = confirmationBadge(r.o); return b ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: b.fg, background: b.bg, padding: '2px 7px', borderRadius: 4 }}>{b.label}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>pending</span> } },
     { key: 'dispatch', label: 'Dispatch', type: 'category', get: r => dispatchStatus(r.o).label, render: r => { const s = dispatchStatus(r.o); return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: s.fg, background: s.bg, padding: '2px 7px', borderRadius: 4 }}>{s.label}</span> } },
@@ -365,6 +366,22 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
 
   const totalCols = activeCols.length + 4 // checkbox + WA + Disposition + log
 
+  // Export the currently shown rows (respects active filters/sort; if no filter, exports the whole table).
+  const exportCsv = () => {
+    const cols = activeCols
+    const esc = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const header = cols.map(c => c.label)
+    const lines = rows.map(r => cols.map(c => esc(c.get(r))).join(','))
+    const csv = [header.join(','), ...lines].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `calllens-${queue}-${todayStr()}.csv`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  }
+
   const QueueBtn = ({ q, label, n }: { q: Queue; label: string; n: number }) => (
     <button onClick={() => setQueue(q)} style={{ padding: '6px 12px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: queue === q ? 'var(--surface)' : 'transparent', color: queue === q ? 'var(--text)' : 'var(--text3)', boxShadow: queue === q ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>
       {label} <b style={{ color: queue === q ? 'var(--accent)' : 'var(--text3)' }}>{n}</b>
@@ -382,6 +399,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
         </div>
         <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
+        <button onClick={exportCsv} disabled={loading || !rows.length} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> Export{anyFilter ? ' (filtered)' : ''}</button>
       </div>
 
       {selected.size > 0 && (
