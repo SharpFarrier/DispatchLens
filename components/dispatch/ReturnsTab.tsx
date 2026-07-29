@@ -1,10 +1,10 @@
 'use client'
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder } from '@/types'
-import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, Download } from 'lucide-react'
+import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, ChevronDown, Download, ArrowUp, ArrowDown, Filter } from 'lucide-react'
 
 // Reasons shared by both RTO and customer returns (physical-condition reasons).
 const SHARED_REASONS = [
@@ -90,10 +90,161 @@ interface Props {
   reloadSignal: number
 }
 
+// ── Shared sort/filter machinery for the Returns tables (main list + daily review) ──
+interface RetCol { key: string; label: string; type: 'text' | 'category' | 'date' | 'number'; get: (r: ReturnRow) => string | number }
+
+function isRtoRow(r: ReturnRow) { return r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto' }
+
+// Column value-getters used for filtering & sorting (rendering stays in the table body).
+function returnCols(canSeeAmount: boolean): RetCol[] {
+  const cols: RetCol[] = [
+    { key: 'order_id', label: 'Order', type: 'text', get: r => r.order_id },
+    { key: 'barcode', label: 'SKU', type: 'text', get: r => r.barcode || '' },
+    { key: 'reason', label: 'Reason', type: 'category', get: r => (!r.reason || r.reason === 'Pending review') ? '(no reason)' : r.reason },
+    { key: 'type', label: 'Type', type: 'category', get: r => isRtoRow(r) ? 'RTO' : 'Customer' },
+    { key: 'reverse', label: 'Reverse', type: 'text', get: r => r.reverse_tracking_id || '' },
+    { key: 'warehouse', label: 'Warehouse', type: 'category', get: r => r.warehouse_received ? 'Received' : 'Not received' },
+    { key: 'refund', label: 'Refund', type: 'category', get: r => r.refund_status === 'refunded' ? 'Refunded' : 'Pending' },
+  ]
+  if (canSeeAmount) cols.push({ key: 'amount', label: 'Amount', type: 'number', get: r => r.refund_amount ?? 0 })
+  cols.push({ key: 'added', label: 'Added', type: 'date', get: r => r.created_at || '' })
+  return cols
+}
+
+const retToDay = (v: string | number): string => { const s = String(v || ''); return s ? s.slice(0, 10) : '' }
+
+// Hook: holds sort + filter state and returns the filtered+sorted rows + header helpers.
+function useReturnFilters(rows: ReturnRow[], cols: RetCol[]) {
+  const [sortKey, setSortKey] = useState<string>('added')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [textFilters, setTextFilters] = useState<Record<string, string>>({})
+  const [catFilters, setCatFilters] = useState<Record<string, string[]>>({})
+  const [dateFilters, setDateFilters] = useState<Record<string, string[]>>({})
+  const [openFilter, setOpenFilter] = useState<string | null>(null)
+  const [dateTreeOpen, setDateTreeOpen] = useState<Record<string, boolean>>({})
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!openFilter) return
+    const h = (e: MouseEvent) => { if (popRef.current && !popRef.current.contains(e.target as Node)) setOpenFilter(null) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [openFilter])
+
+  const colByKey = useMemo(() => Object.fromEntries(cols.map(c => [c.key, c])), [cols])
+
+  const catOptions = useMemo(() => {
+    const m: Record<string, string[]> = {}
+    for (const c of cols) if (c.type === 'category') { const set = new Set<string>(); for (const r of rows) set.add(String(c.get(r)) || '(blank)'); m[c.key] = Array.from(set).sort() }
+    return m
+  }, [cols, rows])
+
+  const dateTrees = useMemo(() => {
+    const m: Record<string, Record<string, Record<string, Set<string>>>> = {}
+    for (const c of cols) if (c.type === 'date') {
+      const tree: Record<string, Record<string, Set<string>>> = {}
+      for (const r of rows) { const day = retToDay(c.get(r)); if (!day || day.length < 10) continue; const [y, mo] = [day.slice(0, 4), day.slice(5, 7)]; (tree[y] ??= {})[mo] ??= new Set<string>(); tree[y][mo].add(day) }
+      m[c.key] = tree
+    }
+    return m
+  }, [cols, rows])
+
+  const filtered = useMemo(() => {
+    let out = rows.filter(r => {
+      for (const key in textFilters) { const v = textFilters[key]; if (!v) continue; const col = colByKey[key]; if (col && !String(col.get(r)).toLowerCase().includes(v.toLowerCase())) return false }
+      for (const key in catFilters) { const a = catFilters[key]; if (!a || !a.length) continue; const col = colByKey[key]; if (col && !a.includes(String(col.get(r)) || '(blank)')) return false }
+      for (const key in dateFilters) { const days = dateFilters[key]; if (!days || !days.length) continue; const col = colByKey[key]; if (col && !days.includes(retToDay(col.get(r)))) return false }
+      return true
+    })
+    const col = colByKey[sortKey]
+    if (col) out = [...out].sort((a, b) => { const va = col.get(a), vb = col.get(b); const cmp = col.type === 'number' ? (va as number) - (vb as number) : String(va).localeCompare(String(vb)); return sortDir === 'asc' ? cmp : -cmp })
+    return out
+  }, [rows, colByKey, textFilters, catFilters, dateFilters, sortKey, sortDir])
+
+  const toggleSort = (key: string) => { if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(key); setSortDir('asc') } }
+  const hasFilter = (key: string) => !!textFilters[key] || (catFilters[key]?.length ?? 0) > 0 || (dateFilters[key]?.length ?? 0) > 0
+  const anyFilter = Object.values(textFilters).some(Boolean) || Object.values(catFilters).some(a => a?.length) || Object.values(dateFilters).some(a => a?.length)
+  const clearAll = () => { setTextFilters({}); setCatFilters({}); setDateFilters({}) }
+
+  return { filtered, sortKey, sortDir, toggleSort, hasFilter, anyFilter, clearAll, openFilter, setOpenFilter, popRef, catOptions, dateTrees, textFilters, setTextFilters, catFilters, setCatFilters, dateFilters, setDateFilters, dateTreeOpen, setDateTreeOpen }
+}
+
+type RetFilterCtx = ReturnType<typeof useReturnFilters>
+
+// A filterable + sortable <th> for the Returns tables.
+function RetHeaderCell({ col, ctx }: { col: RetCol; ctx: RetFilterCtx }) {
+  const monthName = (mo: string) => ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(mo, 10)] || mo
+  const dayNum = (day: string) => parseInt(day.slice(8, 10), 10)
+  const toggleDays = (colKey: string, days: string[], on: boolean) => ctx.setDateFilters(prev => { const cur = new Set(prev[colKey] || []); if (on) days.forEach(d => cur.add(d)); else days.forEach(d => cur.delete(d)); return { ...prev, [colKey]: Array.from(cur) } })
+  const daysUnder = (tree: Record<string, Record<string, Set<string>>>, y?: string, mo?: string): string[] => { const out: string[] = []; for (const yy in tree) { if (y && yy !== y) continue; for (const mm in tree[yy]) { if (mo && mm !== mo) continue; tree[yy][mm].forEach(d => out.push(d)) } } return out }
+  const allChecked = (colKey: string, days: string[]) => { const sel = new Set(ctx.dateFilters[colKey] || []); return days.length > 0 && days.every(d => sel.has(d)) }
+  const someChecked = (colKey: string, days: string[]) => { const sel = new Set(ctx.dateFilters[colKey] || []); return days.some(d => sel.has(d)) }
+  const treeNodeOpen = (k: string) => ctx.dateTreeOpen[k] ?? false
+  const toggleNode = (k: string) => ctx.setDateTreeOpen(prev => ({ ...prev, [k]: !(prev[k] ?? false) }))
+
+  return (
+    <th style={{ padding: '9px 12px', textAlign: col.type === 'number' ? 'right' as const : 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: col.type === 'number' ? 'flex-end' : 'flex-start' }}>
+        <span onClick={() => ctx.toggleSort(col.key)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, color: ctx.sortKey === col.key ? 'var(--accent)' : 'inherit' }}>
+          {col.label}{ctx.sortKey === col.key && (ctx.sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+        </span>
+        <button onClick={() => ctx.setOpenFilter(ctx.openFilter === col.key ? null : col.key)} title="Filter" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 1, display: 'inline-flex', color: ctx.hasFilter(col.key) ? 'var(--accent)' : 'var(--text3)', opacity: ctx.hasFilter(col.key) ? 1 : 0.4 }}><Filter size={11} /></button>
+      </div>
+      {ctx.openFilter === col.key && (
+        <div ref={ctx.popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'DM Sans', fontWeight: 400 }}>
+          {col.type === 'category' ? (
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3, maxHeight: 240, overflowY: 'auto' as const }}>
+              {(ctx.catOptions[col.key] || []).map(opt => { const cur = ctx.catFilters[col.key] || []; const on = cur.includes(opt); return (
+                <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text2)', cursor: 'pointer', padding: '2px 0' }}>
+                  <input type="checkbox" checked={on} onChange={() => ctx.setCatFilters(prev => { const c = prev[col.key] || []; const next = c.includes(opt) ? c.filter(x => x !== opt) : [...c, opt]; return { ...prev, [col.key]: next } })} />{opt}
+                </label>) })}
+            </div>
+          ) : col.type === 'date' ? (() => {
+            const tree = ctx.dateTrees[col.key] || {}
+            const years = Object.keys(tree).sort((a, b) => b.localeCompare(a))
+            if (!years.length) return <div style={{ fontSize: 12, color: 'var(--text3)' }}>No dates</div>
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 1, maxHeight: 280, overflowY: 'auto' as const, minWidth: 180 }}>
+                {(ctx.dateFilters[col.key]?.length ?? 0) > 0 && <button onClick={() => ctx.setDateFilters(prev => ({ ...prev, [col.key]: [] }))} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: '0 0 4px' }}>Clear</button>}
+                {years.map(y => { const yKey = `${col.key}|${y}`, yDays = daysUnder(tree, y); const months = Object.keys(tree[y]).sort((a, b) => b.localeCompare(a)); return (
+                  <div key={y}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 0' }}>
+                      <span onClick={() => toggleNode(yKey)} style={{ cursor: 'pointer', color: 'var(--text3)', display: 'inline-flex', width: 12 }}>{treeNodeOpen(yKey) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+                      <input type="checkbox" checked={allChecked(col.key, yDays)} ref={el => { if (el) el.indeterminate = !allChecked(col.key, yDays) && someChecked(col.key, yDays) }} onChange={e => toggleDays(col.key, yDays, e.target.checked)} />
+                      <span onClick={() => toggleNode(yKey)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{y}</span>
+                    </div>
+                    {treeNodeOpen(yKey) && months.map(mo => { const mKey = `${col.key}|${y}-${mo}`, mDays = daysUnder(tree, y, mo); const days = Array.from(tree[y][mo]).sort((a, b) => b.localeCompare(a)); return (
+                      <div key={mo} style={{ marginLeft: 17 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 0' }}>
+                          <span onClick={() => toggleNode(mKey)} style={{ cursor: 'pointer', color: 'var(--text3)', display: 'inline-flex', width: 12 }}>{treeNodeOpen(mKey) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+                          <input type="checkbox" checked={allChecked(col.key, mDays)} ref={el => { if (el) el.indeterminate = !allChecked(col.key, mDays) && someChecked(col.key, mDays) }} onChange={e => toggleDays(col.key, mDays, e.target.checked)} />
+                          <span onClick={() => toggleNode(mKey)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text2)' }}>{monthName(mo)}</span>
+                        </div>
+                        {treeNodeOpen(mKey) && days.map(d => { const on = (ctx.dateFilters[col.key] || []).includes(d); return (
+                          <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'DM Mono' }}>
+                            <input type="checkbox" checked={on} onChange={() => toggleDays(col.key, [d], !on)} />{dayNum(d)}
+                          </label>) })}
+                      </div>) })}
+                  </div>) })}
+              </div>
+            )
+          })() : (
+            <input autoFocus value={ctx.textFilters[col.key] || ''} onChange={e => ctx.setTextFilters(prev => ({ ...prev, [col.key]: e.target.value }))} placeholder={`Filter ${col.label}…`} style={{ width: '100%', padding: '6px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', boxSizing: 'border-box' as const }} />
+          )}
+        </div>
+      )}
+    </th>
+  )
+}
+
+
 export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: Props) {
   const supabase = createClient()
   const [returns, setReturns] = useState<ReturnRow[]>([])
   const [subTab, setSubTab] = useState<'returns' | 'daily'>('returns')
+  const cols = useMemo(() => returnCols(canSeeAmount), [canSeeAmount])
+  const flt = useReturnFilters(returns, cols)
+  const shownReturns = flt.filtered
   const [rtoOrders, setRtoOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -206,9 +357,8 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   // ── Update refund status / amount / reason ──
   const exportReturns = () => {
     const esc = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
-    const isRtoRow = (r: ReturnRow) => r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto'
     const header = ['Order', 'SKU', 'Reason', 'Type', 'Reverse tracking', 'Reverse courier', 'Warehouse received', 'Received at', 'Refund status', ...(canSeeAmount ? ['Refund amount'] : []), 'Added']
-    const lines = returns.map(r => [
+    const lines = shownReturns.map(r => [
       r.order_id,
       r.barcode || '',
       (!r.reason || r.reason === 'Pending review') ? '' : r.reason,
@@ -267,15 +417,16 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 18, fontWeight: 600 }}>Returns</h1>
-        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{returns.length} tracked</span>
+        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{subTab === 'returns' && flt.anyFilter ? `${shownReturns.length} of ${returns.length}` : `${returns.length} tracked`}</span>
+        {subTab === 'returns' && flt.anyFilter && <button onClick={flt.clearAll} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}><X size={12} /> Clear filters</button>}
         <button onClick={load} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
           <RefreshCw size={12} /> Refresh
         </button>
         <button onClick={syncReverse} disabled={revSyncing} style={{ background: revSyncing ? 'var(--bg2)' : 'var(--accent)', border: 'none', borderRadius: 6, color: revSyncing ? 'var(--text3)' : '#fff', cursor: revSyncing ? 'default' : 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
           <RotateCcw size={12} /> {revSyncing ? 'Syncing…' : 'Sync Reverse'}
         </button>
-        <button onClick={exportReturns} disabled={!returns.length} title="Export the returns list as CSV" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: returns.length ? 'var(--text2)' : 'var(--text3)', cursor: returns.length ? 'pointer' : 'not-allowed', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
-          <Download size={12} /> Export
+        <button onClick={exportReturns} disabled={!shownReturns.length} title={flt.anyFilter ? 'Export the filtered rows as CSV' : 'Export the returns list as CSV'} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: shownReturns.length ? 'var(--text2)' : 'var(--text3)', cursor: shownReturns.length ? 'pointer' : 'not-allowed', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
+          <Download size={12} /> Export{subTab === 'returns' && flt.anyFilter ? ' (filtered)' : ''}
         </button>
         {revSyncMsg && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{revSyncMsg}</span>}
         {/* Summary chips */}
@@ -383,9 +534,8 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 820 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
-                {['Order', 'SKU', 'Reason', 'Type', 'Reverse', 'Warehouse', 'Refund', ...(canSeeAmount ? ['Amount'] : []), 'Added', ''].map((h, hi) => (
-                  <th key={hi} style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
-                ))}
+                {cols.map(c => <RetHeaderCell key={c.key} col={c} ctx={flt} />)}
+                <th style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}></th>
               </tr>
             </thead>
             <tbody>
@@ -393,8 +543,10 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                 <tr><td colSpan={canSeeAmount ? 10 : 9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</td></tr>
               ) : returns.length === 0 ? (
                 <tr><td colSpan={canSeeAmount ? 10 : 9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns tracked yet. Add one above.</td></tr>
-              ) : returns.map((r, i) => (
-                <tr key={r.id} style={{ borderBottom: i < returns.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
+              ) : shownReturns.length === 0 ? (
+                <tr><td colSpan={canSeeAmount ? 10 : 9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns match the current filters.</td></tr>
+              ) : shownReturns.map((r, i) => (
+                <tr key={r.id} style={{ borderBottom: i < shownReturns.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{r.order_id}</td>
                   <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
                   <td style={{ padding: '9px 12px' }}>
@@ -634,8 +786,8 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
     return { from: customFrom || null, to: customTo || null }
   }, [win, customFrom, customTo])
 
-  // Only received returns, within the window, grouped by received day.
-  const received = useMemo(() => {
+  // Only received returns, within the window.
+  const receivedInWindow = useMemo(() => {
     return returns.filter(r => {
       if (!r.warehouse_received || !r.warehouse_received_at) return false
       const k = dayKey(r.warehouse_received_at)
@@ -644,6 +796,11 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
       return true
     })
   }, [returns, range])
+
+  // Column sort/filter layered on top of the window (same machinery as the main list).
+  const cols = useMemo(() => returnCols(canSeeAmount), [canSeeAmount])
+  const flt = useReturnFilters(receivedInWindow, cols)
+  const received = flt.filtered
 
   const days = useMemo(() => {
     const m: Record<string, ReturnRow[]> = {}
@@ -694,8 +851,19 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
         {canSeeAmount && <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Pending value</div><div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'DM Mono' }}>₹{money(totals.pendingValue)}</div></div>}
       </div>
 
+      {/* Filter / sort bar — same machinery as the main list; filters re-group the days below. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+        <span style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700 }}>Filter / sort:</span>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'visible' as const }}>
+          <table style={{ borderCollapse: 'collapse' as const }}>
+            <thead><tr>{cols.map(c => <RetHeaderCell key={c.key} col={c} ctx={flt} />)}</tr></thead>
+          </table>
+        </div>
+        {flt.anyFilter && <button onClick={flt.clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
+      </div>
+
       {!days.length ? (
-        <div style={{ ...card, padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No returns received in this window.</div>
+        <div style={{ ...card, padding: 24, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>{flt.anyFilter ? 'No received returns match the current filters.' : 'No returns received in this window.'}</div>
       ) : days.map(({ key, rows }) => {
         const open = openDays[key] ?? (key === days[0].key)  // first day open by default
         const pend = rows.filter(r => r.refund_status === 'pending').length
