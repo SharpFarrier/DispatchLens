@@ -3,22 +3,22 @@
 // Flipkart: settlement .xlsx ("Orders" sheet), deduped by NEFT ID.
 
 export interface SettlementRow {
-  platform: 'amazon' | 'flipkart'
+  platform: 'amazon' | 'flipkart' | 'website'
   order_id: string | null
   order_item_code: string | null
   sku: string | null
   amount: number
   transaction_type: string | null
   amount_description: string | null
-  dedup_key: string          // settlement-id (amazon) / neft_id (flipkart)
+  dedup_key: string          // settlement-id (amazon) / neft_id (flipkart) / payment-id (aggregator)
   settlement_date: string | null
   raw: Record<string, unknown>
 }
 
 export interface ParsedFile {
-  platform: 'amazon' | 'flipkart'
+  platform: 'amazon' | 'flipkart' | 'website'
   rows: SettlementRow[]
-  dedupIds: string[]         // all distinct settlement-ids / neft-ids in the file
+  dedupIds: string[]         // all distinct settlement-ids / neft-ids / payment-ids in the file
 }
 
 // ── TSV parser (Amazon flat file) ──
@@ -141,4 +141,110 @@ export function readFileBuffer(file: File): Promise<ArrayBuffer> {
     r.onerror = () => reject(new Error('Read failed'))
     r.readAsArrayBuffer(file)
   })
+}
+
+// ── CSV parser (handles quoted fields containing commas/newlines) ──
+// Needed because Razorpay's `notes` column is a JSON blob full of commas.
+function parseCSV(text: string): Record<string, string>[] {
+  const rows: string[][] = []
+  let field = '', row: string[] = [], inQuotes = false
+  const src = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]
+    if (inQuotes) {
+      if (c === '"') { if (src[i + 1] === '"') { field += '"'; i++ } else inQuotes = false }
+      else field += c
+    } else {
+      if (c === '"') inQuotes = true
+      else if (c === ',') { row.push(field); field = '' }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = '' }
+      else field += c
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row) }
+  const nonEmpty = rows.filter(r => r.some(v => v.trim() !== ''))
+  if (!nonEmpty.length) return []
+  const headers = nonEmpty[0].map(h => h.trim())
+  return nonEmpty.slice(1).map(vals => {
+    const o: Record<string, string> = {}
+    headers.forEach((h, i) => { o[h] = (vals[i] ?? '').trim() })
+    return o
+  })
+}
+
+// Detect which aggregator a CSV is, from its header columns.
+export function detectWebsiteAggregator(text: string): 'razorpay' | 'cashfree' | null {
+  const firstLine = (text.split('\n')[0] || '').toLowerCase()
+  if (firstLine.includes('order_id') && firstLine.includes('notes') && firstLine.includes('captured')) return 'razorpay'
+  if (firstLine.includes('cashfree order id') || (firstLine.includes('order id') && firstLine.includes('payment mode'))) return 'cashfree'
+  return null
+}
+
+// ── Razorpay CSV ──
+// Join key = notes.merchant_order_id (the website order-id). Net = amount - fee - tax - amount_refunded.
+// Amounts are in RUPEES. dedup by Razorpay payment id (`id`). Only captured payments count as paid.
+export function parseRazorpayText(text: string): ParsedFile {
+  const raw = parseCSV(text)
+  const rows: SettlementRow[] = []
+  const dedupSet = new Set<string>()
+  for (const r of raw) {
+    const payId = (r['id'] || '').trim()
+    if (!payId) continue
+    // Website order-id lives in the notes JSON as merchant_order_id.
+    let orderId: string | null = null
+    try { const n = JSON.parse(r['notes'] || '{}'); orderId = String(n.merchant_order_id || n.merchant_order_no || '').trim() || null } catch { orderId = null }
+    const captured = (r['status'] || '').toLowerCase() === 'captured' || r['captured'] === '1'
+    const gross = parseFloat(r['amount']) || 0
+    const fee = parseFloat(r['fee']) || 0
+    const tax = parseFloat(r['tax']) || 0
+    const refunded = parseFloat(r['amount_refunded']) || 0
+    const net = gross - fee - tax - refunded
+    dedupSet.add(payId)
+    rows.push({
+      platform: 'website',
+      order_id: orderId,
+      order_item_code: null,
+      sku: null,
+      // Advance/prepaid online payment. Failed captures carry 0 so they never count as paid.
+      amount: captured ? net : 0,
+      transaction_type: 'advance',
+      amount_description: 'razorpay',
+      dedup_key: payId,
+      settlement_date: (r['created_at'] || '').trim() || null,
+      raw: r,
+    })
+  }
+  return { platform: 'website', rows, dedupIds: [...dedupSet] }
+}
+
+// ── Cashfree CSV ──
+// Join key = "Order Id" (already the website order-id, plain column). No fee/tax breakout,
+// so net = Transaction Amount. dedup by "Cashfree Order ID". Only SUCCESS counts as paid.
+export function parseCashfreeText(text: string): ParsedFile {
+  const raw = parseCSV(text)
+  const rows: SettlementRow[] = []
+  const dedupSet = new Set<string>()
+  for (const r of raw) {
+    const cfId = (r['Cashfree Order ID'] || r['Reference Id'] || '').trim()
+    const orderId = (r['Order Id'] || '').trim() || null
+    const key = cfId || `${orderId}-${r['Transaction Time'] || ''}`
+    if (!key) continue
+    const success = (r['Transaction Status'] || '').toUpperCase() === 'SUCCESS' || r['Captured'] === '1'
+    const amt = parseFloat(r['Transaction Amount'] || r['Order Amount']) || 0
+    const refunded = (r['Refunded'] || '').toUpperCase() === 'TRUE'
+    dedupSet.add(key)
+    rows.push({
+      platform: 'website',
+      order_id: orderId,
+      order_item_code: null,
+      sku: null,
+      amount: success ? (refunded ? 0 : amt) : 0,
+      transaction_type: 'advance',
+      amount_description: 'cashfree',
+      dedup_key: key,
+      settlement_date: (r['Transaction Time'] || '').trim() || null,
+      raw: r,
+    })
+  }
+  return { platform: 'website', rows, dedupIds: [...dedupSet] }
 }

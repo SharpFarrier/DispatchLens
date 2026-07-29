@@ -5,6 +5,7 @@ import { fetchAllRows } from './fetchAll'
 import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X } from 'lucide-react'
 import {
   parseAmazonText, parseFlipkartBuffer, readFileText, readFileBuffer,
+  parseRazorpayText, parseCashfreeText, detectWebsiteAggregator,
   type SettlementRow,
 } from '@/lib/settlements'
 
@@ -22,7 +23,7 @@ export default function ReconSection() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'warn' | 'err'; text: string } | null>(null)
   const [loading, setLoading] = useState(true)
-  const [totals, setTotals] = useState<{ amazon: number; flipkart: number; orders: number }>({ amazon: 0, flipkart: 0, orders: 0 })
+  const [totals, setTotals] = useState<{ amazon: number; flipkart: number; website: number; orders: number }>({ amazon: 0, flipkart: 0, website: 0, orders: 0 })
 
   const flash = (type: 'ok' | 'warn' | 'err', text: string) => setMsg({ type, text })
 
@@ -34,7 +35,8 @@ export default function ReconSection() {
     // Totals come straight from the stored per-file columns — no scan of settlement rows.
     const azRows = upRows.filter(u => u.platform === 'amazon')
     const fkRows = upRows.filter(u => u.platform === 'flipkart')
-    setTotals(t => ({ ...t, amazon: azRows.reduce((s, u) => s + (u.row_count || 0), 0), flipkart: fkRows.reduce((s, u) => s + (u.row_count || 0), 0) }))
+    const wsRows = upRows.filter(u => u.platform === 'website')
+    setTotals(t => ({ ...t, amazon: azRows.reduce((s, u) => s + (u.row_count || 0), 0), flipkart: fkRows.reduce((s, u) => s + (u.row_count || 0), 0), website: wsRows.reduce((s, u) => s + (u.row_count || 0), 0) }))
     // Build the per-file aggregate map from the stored columns (fallback to 0/null if an
     // older file was uploaded before these columns existed).
     const agg: FileAggMap = {}
@@ -76,7 +78,7 @@ export default function ReconSection() {
     return inserted
   }
 
-  const handleFiles = async (platform: 'amazon' | 'flipkart', files: File[]) => {
+  const handleFiles = async (platform: 'amazon' | 'flipkart' | 'website', files: File[]) => {
     console.log('[recon] handleFiles called', { platform, count: files?.length })
     if (!files || !files.length) { console.log('[recon] no files'); return }
     setBusy(true); setMsg(null)
@@ -100,9 +102,18 @@ export default function ReconSection() {
           if (platform === 'amazon') {
             if (!/\.(txt|csv|tsv)$/i.test(f.name)) { flash('warn', `Skipped ${f.name} — expected a .txt/.csv/.tsv flat-file`); continue }
             parsed = parseAmazonText(await readFileText(f))
-          } else {
+          } else if (platform === 'flipkart') {
             if (!/\.xlsx$/i.test(f.name)) { flash('warn', `Skipped ${f.name} — expected a .xlsx`); continue }
             parsed = await parseFlipkartBuffer(await readFileBuffer(f))
+          } else {
+            // Website payments — a CSV from an aggregator. Auto-detect Razorpay vs Cashfree.
+            if (!/\.csv$/i.test(f.name)) { flash('warn', `Skipped ${f.name} — expected a .csv from Razorpay or Cashfree`); continue }
+            const txt = await readFileText(f)
+            const agg = detectWebsiteAggregator(txt)
+            if (agg === 'razorpay') parsed = parseRazorpayText(txt)
+            else if (agg === 'cashfree') parsed = parseCashfreeText(txt)
+            else { flash('warn', `Skipped ${f.name} — couldn't tell if it's a Razorpay or Cashfree export (unrecognized columns)`); continue }
+            console.log('[recon] website aggregator detected:', agg)
           }
         } catch (pe) {
           console.error('[recon] PARSE ERROR', pe)
@@ -187,8 +198,8 @@ export default function ReconSection() {
 
 // ── Settlement Inbox ──
 function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
-  uploads: UploadRow[]; totals: { amazon: number; flipkart: number }; fileAgg: FileAggMap; loading: boolean; busy: boolean;
-  onFiles: (p: 'amazon' | 'flipkart', f: File[]) => void
+  uploads: UploadRow[]; totals: { amazon: number; flipkart: number; website: number }; fileAgg: FileAggMap; loading: boolean; busy: boolean;
+  onFiles: (p: 'amazon' | 'flipkart' | 'website', f: File[]) => void
 }) {
   const [detailFile, setDetailFile] = useState<{ name: string; platform: string } | null>(null)
   const money = (n: number) => Math.round(n).toLocaleString('en-IN')
@@ -199,6 +210,7 @@ function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
         <UploadCard platform="amazon" label="Amazon settlement (.txt flat-file)" hint="Deduped by settlement-id" count={totals.amazon} busy={busy} onFiles={onFiles} />
         <UploadCard platform="flipkart" label="Flipkart settlement (.xlsx)" hint="Deduped by NEFT ID" count={totals.flipkart} busy={busy} onFiles={onFiles} />
+        <UploadCard platform="website" label="Website payments (Razorpay / Cashfree .csv)" hint="Auto-detects aggregator · deduped by payment id" count={totals.website} busy={busy} onFiles={onFiles} />
       </div>
 
       <div>
@@ -350,8 +362,8 @@ function FileDetail({ file, onClose }: { file: { name: string; platform: string 
 }
 
 function UploadCard({ platform, label, hint, count, busy, onFiles }: {
-  platform: 'amazon' | 'flipkart'; label: string; hint: string; count: number; busy: boolean;
-  onFiles: (p: 'amazon' | 'flipkart', f: File[]) => void
+  platform: 'amazon' | 'flipkart' | 'website'; label: string; hint: string; count: number; busy: boolean;
+  onFiles: (p: 'amazon' | 'flipkart' | 'website', f: File[]) => void
 }) {
   const inputId = `recon-upload-${platform}`
   return (
@@ -364,7 +376,7 @@ function UploadCard({ platform, label, hint, count, busy, onFiles }: {
       <label htmlFor={inputId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px', borderRadius: 8, border: '2px dashed var(--border)', cursor: busy ? 'wait' : 'pointer', color: 'var(--text2)', fontSize: 13, fontWeight: 700, background: 'var(--bg)' }}>
         <Upload size={15} /> {busy ? 'Working…' : 'Upload file(s)'}
       </label>
-      <input id={inputId} type="file" multiple accept={platform === 'amazon' ? '.txt,.csv,.tsv' : '.xlsx'} disabled={busy}
+      <input id={inputId} type="file" multiple accept={platform === 'amazon' ? '.txt,.csv,.tsv' : platform === 'website' ? '.csv' : '.xlsx'} disabled={busy}
         onChange={e => { const picked = e.target.files ? Array.from(e.target.files) : []; e.currentTarget.value = ''; onFiles(platform, picked) }} style={{ display: 'none' }} />
     </div>
   )
