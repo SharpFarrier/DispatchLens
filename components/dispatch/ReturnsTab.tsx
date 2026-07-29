@@ -4,8 +4,37 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder } from '@/types'
-import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight } from 'lucide-react'
+import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, Download } from 'lucide-react'
 
+// Reasons shared by both RTO and customer returns (physical-condition reasons).
+const SHARED_REASONS = [
+  'In-transit Damage',
+  'Manufacturing Defect',
+] as const
+
+// Shown when the return is an RTO (returned to origin, never delivered/kept).
+export const RTO_REASONS = [
+  ...SHARED_REASONS,
+  'Delay in Delivery',
+  'Customer Refused Delivery',
+  'No Need',
+  'Not Available',
+  'Other',
+] as const
+
+// Shown when the return is a customer return (was delivered, came back).
+export const CUSTOMER_RETURN_REASONS = [
+  ...SHARED_REASONS,
+  'Customer not Satisfied with Quality',
+  'A-Z Claim Received',
+  'Noise Issue',
+  'Size Issue',
+  'Self Ship Return',
+  'Alignment Issue',
+  'Other',
+] as const
+
+// Full set (union) — kept for reason-colour lookups and any all-reasons use.
 export const RETURN_REASONS = [
   'In-transit Damage',
   'Manufacturing Defect',
@@ -13,6 +42,12 @@ export const RETURN_REASONS = [
   'A-Z Claim Received',
   'Customer Refused Delivery',
   'Delay in Delivery',
+  'No Need',
+  'Not Available',
+  'Noise Issue',
+  'Size Issue',
+  'Self Ship Return',
+  'Alignment Issue',
   'Other',
 ] as const
 
@@ -169,6 +204,33 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   }
 
   // ── Update refund status / amount / reason ──
+  const exportReturns = () => {
+    const esc = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const isRtoRow = (r: ReturnRow) => r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto'
+    const header = ['Order', 'SKU', 'Reason', 'Type', 'Reverse tracking', 'Reverse courier', 'Warehouse received', 'Received at', 'Refund status', ...(canSeeAmount ? ['Refund amount'] : []), 'Added']
+    const lines = returns.map(r => [
+      r.order_id,
+      r.barcode || '',
+      (!r.reason || r.reason === 'Pending review') ? '' : r.reason,
+      isRtoRow(r) ? 'RTO' : 'Customer',
+      r.reverse_tracking_id || '',
+      r.reverse_courier || '',
+      r.warehouse_received ? 'Yes' : 'No',
+      r.warehouse_received_at ? new Date(r.warehouse_received_at).toLocaleString('en-IN') : '',
+      r.refund_status,
+      ...(canSeeAmount ? [r.refund_amount != null ? String(r.refund_amount) : ''] : []),
+      r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN') : '',
+    ].map(esc).join(','))
+    const csv = [header.join(','), ...lines].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `returns-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  }
+
   const patchReturn = async (id: string, patch: Partial<ReturnRow>) => {
     setSavingId(id)
     const { data } = await supabase.from('returns')
@@ -211,6 +273,9 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
         </button>
         <button onClick={syncReverse} disabled={revSyncing} style={{ background: revSyncing ? 'var(--bg2)' : 'var(--accent)', border: 'none', borderRadius: 6, color: revSyncing ? 'var(--text3)' : '#fff', cursor: revSyncing ? 'default' : 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
           <RotateCcw size={12} /> {revSyncing ? 'Syncing…' : 'Sync Reverse'}
+        </button>
+        <button onClick={exportReturns} disabled={!returns.length} title="Export the returns list as CSV" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: returns.length ? 'var(--text2)' : 'var(--text3)', cursor: returns.length ? 'pointer' : 'not-allowed', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
+          <Download size={12} /> Export
         </button>
         {revSyncMsg && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{revSyncMsg}</span>}
         {/* Summary chips */}
@@ -337,6 +402,11 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                       const needsReason = r.warehouse_received && (!r.reason || r.reason === 'Pending review')
                       // Show the stored value; if it's the placeholder / unset, sit on the blank option.
                       const selectVal = (!r.reason || r.reason === 'Pending review') ? '' : r.reason
+                      const isRto = r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto'
+                      const reasonList = isRto ? RTO_REASONS : CUSTOMER_RETURN_REASONS
+                      // If the stored reason isn't in the type's list (e.g. an older value), still show it.
+                      const options = selectVal && !reasonList.includes(selectVal as typeof reasonList[number])
+                        ? [selectVal, ...reasonList] : reasonList
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {needsReason && (
@@ -345,7 +415,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                           <select value={selectVal} onChange={e => patchReturn(r.id, { reason: e.target.value })}
                             style={{ fontSize: 11, fontFamily: 'DM Sans', color: reasonColor(selectVal || null), background: 'var(--surface)', border: `1px solid ${needsReason ? '#fecaca' : 'var(--border)'}`, borderRadius: 5, padding: '3px 6px', cursor: 'pointer', maxWidth: 200 }}>
                             <option value="">— set reason —</option>
-                            {RETURN_REASONS.map(rs => <option key={rs} value={rs}>{rs}</option>)}
+                            {options.map(rs => <option key={rs} value={rs}>{rs}</option>)}
                           </select>
                         </div>
                       )

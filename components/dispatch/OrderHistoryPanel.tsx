@@ -5,6 +5,9 @@ import { DBOrder } from '@/types'
 import { X, Clock, Send, Package, Calendar, Ban, AlertTriangle, CheckCircle, Upload, RotateCcw, MessageSquare, Truck, FileText } from 'lucide-react'
 import { invoicePdfBytes, downloadBytes } from '@/lib/dispatchDocs'
 
+const SHARED_REASONS = ['In-transit Damage', 'Manufacturing Defect'] as const
+const RTO_REASONS = [...SHARED_REASONS, 'Delay in Delivery', 'Customer Refused Delivery', 'No Need', 'Not Available', 'Other'] as const
+const CUSTOMER_RETURN_REASONS = [...SHARED_REASONS, 'Customer not Satisfied with Quality', 'A-Z Claim Received', 'Noise Issue', 'Size Issue', 'Self Ship Return', 'Alignment Issue', 'Other'] as const
 const RETURN_REASONS = [
   'In-transit Damage',
   'Manufacturing Defect',
@@ -12,6 +15,12 @@ const RETURN_REASONS = [
   'A-Z Claim Received',
   'Customer Refused Delivery',
   'Delay in Delivery',
+  'No Need',
+  'Not Available',
+  'Noise Issue',
+  'Size Issue',
+  'Self Ship Return',
+  'Alignment Issue',
   'Other',
 ] as const
 
@@ -360,7 +369,7 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
                   <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>Return type</div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     {([['customer', 'Customer return'], ['rto', 'RTO (courier)']] as const).map(([val, lbl]) => (
-                      <button key={val} onClick={() => setReturnType(val)}
+                      <button key={val} onClick={() => { setReturnType(val); setReturnReason((val === 'rto' ? RTO_REASONS : CUSTOMER_RETURN_REASONS)[0]) }}
                         style={{ flex: 1, padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600,
                           border: `1px solid ${returnType === val ? 'var(--today)' : 'var(--border)'}`,
                           background: returnType === val ? 'var(--today)' : 'var(--surface)',
@@ -378,7 +387,7 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
                       <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>Reason (required)</div>
                       <select value={returnReason} onChange={e => setReturnReason(e.target.value)}
                         style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
-                        {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        {(returnType === 'rto' ? RTO_REASONS : returnType === 'customer' ? CUSTOMER_RETURN_REASONS : RETURN_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </div>
                     <textarea value={returnNote} onChange={e => setReturnNote(e.target.value)} placeholder="Optional note…" rows={2}
