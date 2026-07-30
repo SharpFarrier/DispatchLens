@@ -1025,11 +1025,24 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       await Promise.all(updates.map(async ([awb, t]) => {
         const order = trackOrders.find(o => normAwb(o.tracking_number) === normAwb(awb))
         if (!order) return
+        // Suspected lost: still moving/booked (never delivered, not RTO/NDR) but
+        // stuck ≥14 days since dispatch. Flags for human review — never auto-marks lost.
+        const STUCK_DAYS = 14
+        const inFlight = ['in_transit', 'picked_up', 'booked', 'unknown'].includes(t.status)
+        let suspectedPatch: Record<string, unknown> = {}
+        if (inFlight && order.dispatched_at && !order.suspected_lost && order.tracking_status !== 'lost') {
+          const days = (Date.now() - new Date(order.dispatched_at).getTime()) / 86400000
+          if (days >= STUCK_DAYS) {
+            suspectedPatch = { suspected_lost: true, suspected_lost_at: syncedAt }
+            logEvent(order.order_id, 'note', `Suspected lost — no delivery ${Math.floor(days)} days after dispatch`, `${order.courier} · ${t.label}`)
+          }
+        }
         await supabase.from('dispatch_orders').update({
           tracking_status: t.status,
           tracking_label: t.label,
           tracking_last_update: t.lastUpdate,
           tracking_synced_at: syncedAt,
+          ...suspectedPatch,
           ...(t.status === 'delivered' && order.tracking_status !== 'delivered'
             ? { delivered_at: t.lastUpdate ? new Date(t.lastUpdate).toISOString() : syncedAt }
             : {}),

@@ -123,6 +123,9 @@ export interface DBOrder {
   scheduled_date: string | null
   dispatched_at: string | null
   delivered_at: string | null
+  suspected_lost: boolean
+  suspected_lost_at: string | null
+  lost_at: string | null
   unfulfillable_reason: UnfulfillableReason | null
   unfulfillable_note: string | null
   target_dispatch_date: string | null

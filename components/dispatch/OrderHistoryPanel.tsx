@@ -106,6 +106,9 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
   const [cancelReason, setCancelReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
   const [isCancelled, setIsCancelled] = useState(order.is_cancelled)
+  const [showLostMenu, setShowLostMenu] = useState(false)
+  const [lostBusy, setLostBusy] = useState(false)
+  const [lostDone, setLostDone] = useState<null | 'cancelled' | 'reship'>(null)
   const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) return resolve()
     const el = document.createElement('script'); el.src = src
@@ -235,6 +238,67 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
     } finally { setCancelling(false) }
   }
 
+  // Archive the current dispatch attempt (its AWB / piece) before we clear it, so
+  // the full history of both attempts survives a re-ship.
+  const archiveAttempt = async (outcome: 'lost' | 'superseded', note?: string) => {
+    const { count } = await supabase.from('dispatch_attempts').select('id', { count: 'exact', head: true }).eq('order_id', order.order_id)
+    await supabase.from('dispatch_attempts').insert({
+      order_id: order.order_id,
+      attempt_no: (count ?? 0) + 1,
+      tracking_number: order.tracking_number, lr_number: order.lr_number, courier: order.courier,
+      scanned_barcode: order.scanned_barcode, dispatched_at: order.dispatched_at,
+      outcome, note: note ?? null, created_by_email: currentUserEmail,
+    })
+  }
+
+  const logLost = (title: string, note?: string) => fetch('/api/events', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order_id: order.order_id, event_type: 'note', title, note: note ?? null }),
+  }).catch(() => {})
+
+  // Lost → customer cancels: archive the lost attempt, cancel the order.
+  const lostThenCancel = async () => {
+    if (lostBusy) return
+    setLostBusy(true)
+    try {
+      const now = new Date().toISOString()
+      await archiveAttempt('lost', `AWB ${order.tracking_number || '—'} lost in transit`)
+      await supabase.from('dispatch_orders').update({
+        tracking_status: 'lost', lost_at: now, suspected_lost: false,
+        is_cancelled: true, manual_cancelled: true, manual_cancelled_at: now, updated_at: now,
+      }).eq('order_id', order.order_id)
+      await logLost('Marked lost in transit — order cancelled', order.tracking_number ? `lost AWB ${order.tracking_number}` : undefined)
+      setIsCancelled(true); setLostDone('cancelled'); setShowLostMenu(false)
+      fetchEvents(); onReturnCreated?.()
+    } finally { setLostBusy(false) }
+  }
+
+  // Lost → customer wants a re-ship: archive the lost attempt, then un-dispatch the
+  // order back to Plan (undecided) so the normal pipeline re-picks/re-labels it and
+  // a new tracking id is entered manually. The physical piece is gone (lost), so we
+  // do NOT return anything to stock.
+  const lostThenReship = async () => {
+    if (lostBusy) return
+    setLostBusy(true)
+    try {
+      const now = new Date().toISOString()
+      await archiveAttempt('lost', `AWB ${order.tracking_number || '—'} lost — re-shipping`)
+      await supabase.from('dispatch_orders').update({
+        // clear the dispatched/tracking state, back to Plan as undecided
+        is_dispatched: false, dispatched_at: null,
+        scan_verified: false, scan_verified_at: null, scanned_barcode: null,
+        tracking_number: null, lr_number: null,
+        tracking_status: null, tracking_label: null, tracking_last_update: null, tracking_synced_at: null,
+        dispatch_generated_at: null, dispatch_gen_status: null, dispatch_gen_error: null,
+        plan_decision: 'undecided', scheduled_date: null,
+        suspected_lost: false, lost_at: now, updated_at: now,
+      }).eq('order_id', order.order_id)
+      await logLost('Marked lost in transit — re-shipping (back to Plan)', order.tracking_number ? `lost AWB ${order.tracking_number} · new piece to be dispatched` : undefined)
+      setLostDone('reship'); setShowLostMenu(false)
+      fetchEvents(); onReturnCreated?.()
+    } finally { setLostBusy(false) }
+  }
+
   const urgencyColors: Record<string, string> = {
     CRITICAL: 'var(--critical)', TODAY: 'var(--today)',
     PLAN: 'var(--plan)', HOLD: 'var(--hold)',
@@ -335,6 +399,18 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
                   <Ban size={12} /> Cancel order
                 </button>
               )}
+              {order.is_dispatched && !isCancelled && lostDone !== 'reship' && !showLostMenu && (
+                <button onClick={() => setShowLostMenu(true)}
+                  title="The courier lost this shipment in transit"
+                  style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <AlertTriangle size={12} /> Mark as lost{order.suspected_lost ? ' (suspected)' : ''}
+                </button>
+              )}
+              {lostDone === 'reship' && (
+                <span style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #bfdbfe', background: 'var(--plan-bg, #eff6ff)', color: 'var(--plan, #2563eb)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <RotateCcw size={12} /> Lost — back in Plan for re-ship
+                </span>
+              )}
               {isCancelled && (
                 <span style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <Ban size={12} /> Cancelled
@@ -358,6 +434,30 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
                     Back
                   </button>
                 </div>
+              </div>
+            )}
+            {showLostMenu && (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 8, border: '1px solid #fecaca', background: 'var(--critical-bg)', display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+                <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)' }}>LOST IN TRANSIT</span>
+                <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+                  The courier lost this shipment{order.tracking_number ? ` (AWB ${order.tracking_number})` : ''}. This attempt will be archived either way. What does the customer want?
+                </span>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const }}>
+                  <button onClick={lostThenReship} disabled={lostBusy}
+                    title="Send it back to Plan so a new piece is picked, labelled, and a new tracking id entered"
+                    style={{ padding: '8px 14px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: lostBusy ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <RotateCcw size={13} /> {lostBusy ? 'Working…' : 'Re-ship (back to Plan)'}
+                  </button>
+                  <button onClick={lostThenCancel} disabled={lostBusy}
+                    style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #fecaca', background: 'var(--surface)', color: 'var(--critical)', fontSize: 13, fontWeight: 700, cursor: lostBusy ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <Ban size={13} /> Cancel order
+                  </button>
+                  <button onClick={() => setShowLostMenu(false)} disabled={lostBusy}
+                    style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                    Back
+                  </button>
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--text3)' }}>Re-ship keeps the order and re-plans it for a fresh piece + new AWB. The lost piece is written off (not returned to stock).</span>
               </div>
             )}
             {showReturnForm && (
