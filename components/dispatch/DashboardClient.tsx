@@ -5,7 +5,7 @@ import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
 import AllOrdersTab from './AllOrdersTab'
 import CallLensTab from './CallLensTab'
-import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart, fetchBluedartLabels } from '@/lib/dispatchDocs'
+import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart, fetchBluedartLabels, stampLabelStrip } from '@/lib/dispatchDocs'
 import { fetchTracking, type TrackResult } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import UsersTab from './UsersTab'
@@ -150,6 +150,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispExporting, setDispExporting] = useState(false)
   const [genDocs, setGenDocs] = useState(false)
   const [genProgress, setGenProgress] = useState('')
+  // Session-only dispatch checklist — populated after Generate Docs, ticks reset on refresh.
+  const [checklist, setChecklist] = useState<{ seq: number; courier: string; order_id: string; sku: string; awb: string; daysLeft: number | null }[]>([])
+  const [checklistTicks, setChecklistTicks] = useState<Record<string, boolean>>({})
+  const [showChecklist, setShowChecklist] = useState(false)
   // Tracking source — decoupled from the view window: everything not delivered/RTO, any age.
   const [trackOrders, setTrackOrders] = useState<DBOrder[]>([])
   // Tracking
@@ -1914,8 +1918,33 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           }
         }))
       }
-      // Collapse slots (in order) into the final label list.
-      for (const slot of labelSlots) if (slot) labelParts.push(slot)
+      // Collapse slots (in order). As we go, assign a per-courier sequence number,
+      // compute days-left, stamp a "COURIER #N · X days left" strip on the label, and
+      // build the checklist rows (same order as the printed stack).
+      const courierOf = (o: DBOrder) => isBluedart(o) ? 'Bluedart' : 'Shiprocket'
+      const shortCourier = (c: string) => c === 'Bluedart' ? 'BD' : 'SR'
+      const daysLeftOf = (o: DBOrder): number | null => {
+        if (!o.dispatch_by_date) return null
+        const due = new Date(o.dispatch_by_date + 'T00:00:00')
+        if (isNaN(due.getTime())) return null
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        return Math.round((due.getTime() - today.getTime()) / 86400000)
+      }
+      const daysLeftLabel = (d: number | null) => d == null ? '' : d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? 'due today' : `${d} day${d === 1 ? '' : 's'} left`
+      const perCourierSeq: Record<string, number> = {}
+      const newChecklist: { seq: number; courier: string; order_id: string; sku: string; awb: string; daysLeft: number | null }[] = []
+      setGenProgress('Numbering labels…')
+      for (let i = 0; i < base.length; i++) {
+        const slot = labelSlots[i]
+        if (!slot) continue
+        const o = base[i]
+        const courier = courierOf(o)
+        const seq = (perCourierSeq[courier] = (perCourierSeq[courier] || 0) + 1)
+        const d = daysLeftOf(o)
+        const strip = `${shortCourier(courier)} #${seq}` + (d != null ? ` · ${daysLeftLabel(d)}` : '')
+        labelParts.push(await stampLabelStrip(slot, strip))
+        newChecklist.push({ seq, courier, order_id: o.order_id, sku: o.barcode_sku || o.sku || '', awb: o.tracking_number || o.lr_number || '', daysLeft: d })
+      }
       // Persist generation status on every processed order (chunked).
       setGenProgress('Saving generation status…')
       const nowIso = new Date().toISOString()
@@ -1940,8 +1969,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const stamp = new Date().toISOString().slice(0, 10)
       if (labelParts.length) { setGenProgress('Merging labels…'); downloadBytes(await mergePdfs(labelParts), `labels-${stamp}.pdf`) }
       if (invoiceParts.length) { setGenProgress('Merging invoices…'); downloadBytes(await mergePdfs(invoiceParts), `invoices-${stamp}.pdf`) }
+      // Show the session checklist (session-only; ticks reset on refresh).
+      if (newChecklist.length) { setChecklist(newChecklist); setChecklistTicks({}); setShowChecklist(true) }
       const msg = `Done. ${labelParts.length} labels, ${invoiceParts.length} invoices.` + (failed.length ? `\n\n${failed.length} issue(s):\n` + failed.slice(0, 12).join('\n') + (failed.length > 12 ? `\n…and ${failed.length - 12} more` : '') : '')
-      alert(msg)
+      if (failed.length) alert(msg)
     } catch (e) {
       alert('Generation failed: ' + (e as Error).message)
     } finally {
@@ -4602,6 +4633,66 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           onReturnCreated={() => setReturnsReload(n => n + 1)}
         />
       )}
+
+      {/* Dispatch checklist — appears after Generate Docs. Session-only ticks. */}
+      {showChecklist && checklist.length > 0 && (() => {
+        const byCourier: Record<string, typeof checklist> = {}
+        for (const r of checklist) (byCourier[r.courier] ??= []).push(r)
+        const couriers = Object.keys(byCourier).sort()
+        const daysBadge = (d: number | null) => {
+          if (d == null) return { bg: 'var(--bg2)', fg: 'var(--text3)', txt: '—' }
+          if (d < 0) return { bg: 'var(--critical-bg)', fg: 'var(--critical)', txt: `${Math.abs(d)}d overdue` }
+          if (d === 0) return { bg: 'var(--today-bg)', fg: 'var(--today)', txt: 'due today' }
+          if (d <= 2) return { bg: '#fff4e6', fg: '#a86420', txt: `${d} day${d === 1 ? '' : 's'}` }
+          return { bg: 'var(--dispatched-bg)', fg: 'var(--dispatched)', txt: `${d} days` }
+        }
+        const keyOf = (r: typeof checklist[number]) => `${r.courier}-${r.seq}`
+        const totalTicked = Object.values(checklistTicks).filter(Boolean).length
+        return (
+          <div onClick={() => setShowChecklist(false)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, overflowY: 'auto' as const }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)', padding: 24, maxWidth: 720, width: '100%', margin: '24px 0', boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Dispatch checklist</h3>
+                <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{totalTicked} / {checklist.length} stuck</span>
+                <button onClick={() => window.print()} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print</button>
+                <button onClick={() => setShowChecklist(false)} style={{ padding: '5px 12px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Close</button>
+              </div>
+              <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text3)' }}>Tick each label as you stick it on its box. The number on the label matches the number here. (Ticks reset if you refresh.)</p>
+              {couriers.map(courier => {
+                const rows = byCourier[courier]
+                const stuck = rows.filter(r => checklistTicks[keyOf(r)]).length
+                return (
+                  <div key={courier} style={{ marginBottom: 18 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '8px 8px 0 0', borderBottom: 'none' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '3px 9px', borderRadius: 20, background: courier === 'Bluedart' ? '#e8eef7' : '#eef3e8', color: courier === 'Bluedart' ? '#2b5a9e' : '#5a7a2b' }}>{courier.toUpperCase()}</span>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{rows.length} label{rows.length === 1 ? '' : 's'}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{stuck} / {rows.length} stuck</span>
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+                      <thead><tr>{['✓', '#', 'Order', 'SKU', 'AWB', 'Days left'].map(h => <th key={h} style={{ textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', fontWeight: 500, padding: '7px 12px', background: 'var(--surface)' }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {rows.map(r => {
+                          const k = keyOf(r), on = !!checklistTicks[k], b = daysBadge(r.daysLeft)
+                          return (
+                            <tr key={k} onClick={() => setChecklistTicks(p => ({ ...p, [k]: !p[k] }))} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', opacity: on ? 0.5 : 1 }}>
+                              <td style={{ padding: '8px 12px' }}><span style={{ width: 20, height: 20, borderRadius: 5, border: on ? 'none' : '2px solid var(--border2)', background: on ? 'var(--dispatched)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>{on ? '✓' : ''}</span></td>
+                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontWeight: 800, fontSize: 15 }}>{r.seq}</td>
+                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12 }}>{r.order_id}</td>
+                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{r.sku || '—'}</td>
+                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{r.awb || '—'}</td>
+                              <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '2px 8px', borderRadius: 5, background: b.bg, color: b.fg, whiteSpace: 'nowrap' as const }}>{b.txt}</span></td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Logout confirmation */}
       {showLogoutConfirm && (

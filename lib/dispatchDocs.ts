@@ -306,6 +306,36 @@ export async function stripAdPage(bytes: Uint8Array): Promise<Uint8Array> {
   return await out.save()
 }
 
+// Stamp a labelled strip across the top of every page of a label PDF.
+// Used to print a per-courier sequence number + days-left on each dispatch label,
+// matching the on-screen checklist. Works for both Bluedart and Cargo/Shiprocket
+// labels since both are plain PDFs here. Returns the original bytes on any failure
+// (never blocks label generation).
+export async function stampLabelStrip(bytes: Uint8Array, text: string): Promise<Uint8Array> {
+  try {
+    const PDFLib = (window as W).PDFLib
+    if (!PDFLib || !bytes || bytes.length < 5) return bytes
+    const doc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true })
+    const font = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold)
+    const pages = doc.getPages()
+    for (const page of pages) {
+      const { width, height } = page.getSize()
+      const stripH = Math.min(28, Math.max(20, height * 0.05))
+      // Dark strip across the very top.
+      page.drawRectangle({ x: 0, y: height - stripH, width, height: stripH, color: PDFLib.rgb(0.11, 0.10, 0.09) })
+      const fontSize = Math.min(14, stripH * 0.55)
+      page.drawText(text, {
+        x: 8, y: height - stripH + (stripH - fontSize) / 2 + 1,
+        size: fontSize, font, color: PDFLib.rgb(1, 1, 1),
+        maxWidth: width - 16,
+      })
+    }
+    return await doc.save()
+  } catch {
+    return bytes  // stamping is best-effort — never fail the label over it
+  }
+}
+
 // ── Invoice PDF from HTML (html2canvas + jsPDF) → bytes ──
 export async function invoicePdfBytes(o: DBOrder, opts: InvoiceOpts = {}): Promise<Uint8Array> {
   const w = window as W
