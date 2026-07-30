@@ -13,6 +13,7 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
   { key: 'can_returns',  label: 'Returns',  desc: 'Returns tracker & refunds' },
   { key: 'can_allorders', label: 'All Orders', desc: 'All orders view (every status + platform)' },
   { key: 'can_calllens', label: 'CallLens', desc: 'Call center: confirm & delay queues' },
+  { key: 'can_recon',    label: 'Recon',    desc: 'Settlement reconciliation & payments' },
   { key: 'can_users',    label: 'Users',    desc: 'Manage user access (admin only)' },
 ]
 
