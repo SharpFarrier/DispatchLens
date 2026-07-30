@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder } from '@/types'
+import { logOrderEvent } from '@/lib/orderEvents'
 import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, ChevronDown, Download, ArrowUp, ArrowDown, Filter } from 'lucide-react'
 
 // Reasons shared by both RTO and customer returns (physical-condition reasons).
@@ -348,8 +349,10 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
       updated_at: new Date().toISOString(),
     }, { onConflict: 'order_id' }).select().maybeSingle()
     if (data) {
-      setReturns(prev => [data as ReturnRow, ...prev.filter(r => r.order_id !== o.order_id)])
+      const row = data as ReturnRow
+      setReturns(prev => [row, ...prev.filter(r => r.order_id !== o.order_id)])
       setRtoOrders(prev => prev.filter(x => x.id !== o.id))
+      void logOrderEvent(row.order_id, 'return', `Return created${row.return_type ? ` · ${row.return_type === 'rto' ? 'RTO' : 'Customer'}` : ''}`, row.reason || null)
     }
     setSavingId(null)
   }
@@ -383,10 +386,25 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
 
   const patchReturn = async (id: string, patch: Partial<ReturnRow>) => {
     setSavingId(id)
+    const before = returns.find(r => r.id === id)
     const { data } = await supabase.from('returns')
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq('id', id).select().maybeSingle()
-    if (data) setReturns(prev => prev.map(r => r.id === id ? (data as ReturnRow) : r))
+    if (data) {
+      const row = data as ReturnRow
+      setReturns(prev => prev.map(r => r.id === id ? row : r))
+      // Mirror meaningful return changes onto the order timeline.
+      if ('warehouse_received' in patch) {
+        void logOrderEvent(row.order_id, 'return', patch.warehouse_received ? 'Return received at factory' : 'Return receipt undone', row.barcode ? `piece ${row.barcode}` : null)
+      }
+      if ('refund_status' in patch) {
+        if (patch.refund_status === 'refunded') void logOrderEvent(row.order_id, 'return', `Refund issued${row.refund_type ? ` · ${row.refund_type}` : ''}`, row.refund_amount != null ? `₹${row.refund_amount}` : null)
+        else void logOrderEvent(row.order_id, 'return', 'Refund reverted (back to pending)')
+      }
+      if ('reason' in patch && patch.reason && before && before.reason !== patch.reason) {
+        void logOrderEvent(row.order_id, 'return', `Return reason set · ${patch.reason}`)
+      }
+    }
     setSavingId(null)
   }
 

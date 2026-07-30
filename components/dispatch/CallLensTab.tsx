@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'rea
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { DBOrder } from '@/types'
+import { logOrderEvent } from '@/lib/orderEvents'
 import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
@@ -244,6 +245,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
       for (let i = 0; i < ids.length; i += 200) {
         const chunk = ids.slice(i, i + 200)
         await supabase.from('dispatch_orders').update({ assigned_caller: bulkCaller, updated_at: now }).in('order_id', chunk)
+        chunk.forEach(oid => void logOrderEvent(oid, 'note', `Caller assigned · ${bulkCaller}`))
       }
       setOrders(prev => prev.map(o => selected.has(o.order_id) ? { ...o, assigned_caller: bulkCaller } as DBOrder : o))
       setSelected(new Set()); setBulkCaller('')
@@ -292,6 +294,21 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
 
       await logDisposition(o, d.disp, d.note)
       await supabase.from('dispatch_orders').update(patch).eq('order_id', o.order_id)
+      // Mirror the disposition onto the order lifecycle timeline (history panel).
+      {
+        const disp = d.disp
+        const noteBits = [d.note || null, d.callbackDate ? `callback ${d.callbackDate}` : null].filter(Boolean).join(' · ') || null
+        let evtType = 'note', evtTitle = `CallLens · ${disp}`
+        if (disp === 'Hold') { evtType = 'hold'; evtTitle = 'Marked On Hold (CallLens)' }
+        else if (disp === 'Cancelled') { evtType = 'cancelled'; evtTitle = 'Cancelled (CallLens)' }
+        else if (disp === 'Confirmed' || disp === 'WhatsApp-confirmed') { evtType = 'note'; evtTitle = `Order confirmed (${disp === 'WhatsApp-confirmed' ? 'WhatsApp' : 'call'})` }
+        else if (disp === 'Call back later' || disp === 'Call back') { evtType = 'note'; evtTitle = 'Callback scheduled' }
+        else if (disp === 'Wants to cancel') { evtType = 'note'; evtTitle = 'Cancellation requested (CallLens)' }
+        else if (disp === 'Escalate') { evtType = 'note'; evtTitle = 'Escalated (CallLens)' }
+        else if (disp === 'Okay with delay') { evtType = 'note'; evtTitle = 'Customer okay with delay' }
+        else if (disp === 'No answer') { evtType = 'note'; evtTitle = 'Call — no answer' }
+        void logOrderEvent(o.order_id, evtType, evtTitle, noteBits)
+      }
       setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, ...patch } as DBOrder : x))
       setDispDraft(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
       setConfirmingFor(null)
@@ -360,6 +377,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     const now = new Date().toISOString(); const next = !o.whatsapp_sent
     await supabase.from('dispatch_orders').update({ whatsapp_sent: next, whatsapp_sent_at: next ? now : null, updated_at: now }).eq('order_id', o.order_id)
     if (next) await supabase.from('call_logs').insert({ order_id: o.order_id, queue, channel: 'whatsapp', disposition: 'WhatsApp sent', caller: o.assigned_caller || null, created_by_email: currentUserEmail })
+    if (next) void logOrderEvent(o.order_id, 'note', 'WhatsApp message sent')
     setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, whatsapp_sent: next } as DBOrder : x))
     if (logs[o.order_id]) loadLogs(o.order_id)
   }

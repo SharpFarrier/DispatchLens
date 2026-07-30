@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { logOrderEvent } from '@/lib/orderEvents'
 import { beepSuccess, beepError, beepWarn } from './scanFeedback'
 import { Camera, Undo2, AlertTriangle, CheckCircle, XCircle, Package } from 'lucide-react'
 
@@ -179,6 +180,7 @@ export default function RtoTab() {
       }
 
       setScanned(prev => [{ barcode: pending.barcode, prevStatus, unitId, returnId, orderId: pending.orderId ?? undefined }, ...prev])
+      if (pending.orderId) void logOrderEvent(pending.orderId, 'return', 'RTO piece received at intake', `barcode ${pending.barcode}`)
       flash('success', `Received: ${pending.barcode}${pending.orderId ? ` · order ${pending.orderId}` : ''}`)
       setPending(null)
     } catch (e) {
@@ -224,6 +226,7 @@ export default function RtoTab() {
       }
 
       setScanned(prev => [{ barcode: pending.barcode, prevStatus: 'return', unitId: `rej:${returnId || pending.barcode}`, returnId, rejected: true, orderId: pending.orderId ?? undefined }, ...prev])
+      if (pending.orderId) void logOrderEvent(pending.orderId, 'return', `RTO piece rejected · ${reason}`, `barcode ${pending.barcode}`)
       flash('warn', `Rejected: ${pending.barcode}${pending.orderId ? ` · order ${pending.orderId}` : ''} — ${reason}`)
       setPending(null); setRejecting(false); setRejectReason(REJECT_REASONS[0])
     } catch (e) {
