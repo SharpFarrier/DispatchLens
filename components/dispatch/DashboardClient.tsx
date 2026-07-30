@@ -1,5 +1,6 @@
 'use client'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
@@ -2046,7 +2047,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false); setShowDispatchedCourierPopover(false) }}>
+    <div className="dl-app-root" style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false); setShowDispatchedCourierPopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -2358,6 +2359,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           .pick-total-row { position: static !important; }
           tr, td, th { page-break-inside: avoid; }
           table { page-break-inside: auto; width: 100% !important; }
+          /* When the dispatch checklist is open, print ONLY it, laid out for A4. */
+          body.checklist-printing { background: #fff !important; }
+          body.checklist-printing .dl-app-root { display: none !important; }
+          body.checklist-printing .dl-checklist-overlay {
+            position: static !important; inset: auto !important; background: none !important;
+            padding: 0 !important; margin: 0 !important; overflow: visible !important; display: block !important;
+          }
+          body.checklist-printing .dl-checklist-card {
+            box-shadow: none !important; border: none !important; max-width: none !important;
+            width: 100% !important; margin: 0 !important; padding: 0 !important; border-radius: 0 !important;
+          }
+          body.checklist-printing .dl-checklist-overlay .no-print { display: none !important; }
+          body.checklist-printing .dl-checklist-card table { font-size: 12pt !important; }
+          body.checklist-printing .dl-checklist-card th,
+          body.checklist-printing .dl-checklist-card td { padding: 6px 10px !important; }
+          @page { size: A4; margin: 12mm; }
         }
       `}</style>
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
@@ -4635,7 +4652,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       )}
 
       {/* Dispatch checklist — appears after Generate Docs. Session-only ticks. */}
-      {showChecklist && checklist.length > 0 && (() => {
+      {showChecklist && checklist.length > 0 && typeof document !== 'undefined' && createPortal((() => {
         const byCourier: Record<string, typeof checklist> = {}
         for (const r of checklist) (byCourier[r.courier] ??= []).push(r)
         const couriers = Object.keys(byCourier).sort()
@@ -4648,38 +4665,43 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         }
         const keyOf = (r: typeof checklist[number]) => `${r.courier}-${r.seq}`
         const totalTicked = Object.values(checklistTicks).filter(Boolean).length
+        const doPrint = () => {
+          document.body.classList.add('checklist-printing')
+          const cleanup = () => { document.body.classList.remove('checklist-printing'); window.removeEventListener('afterprint', cleanup) }
+          window.addEventListener('afterprint', cleanup)
+          setTimeout(() => window.print(), 60)
+        }
         return (
-          <div onClick={() => setShowChecklist(false)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, overflowY: 'auto' as const }}>
-            <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)', padding: 24, maxWidth: 720, width: '100%', margin: '24px 0', boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
+          <div className="dl-checklist-overlay" onClick={() => setShowChecklist(false)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, overflowY: 'auto' as const }}>
+            <div className="dl-checklist-card" onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)', padding: 24, maxWidth: 760, width: '100%', margin: '24px 0', boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Dispatch checklist</h3>
-                <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{totalTicked} / {checklist.length} stuck</span>
-                <button onClick={() => window.print()} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print</button>
-                <button onClick={() => setShowChecklist(false)} style={{ padding: '5px 12px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Close</button>
+                <span className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{totalTicked} / {checklist.length} stuck</span>
+                <button className="no-print" onClick={doPrint} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print</button>
+                <button className="no-print" onClick={() => setShowChecklist(false)} style={{ padding: '5px 12px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Close</button>
               </div>
-              <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text3)' }}>Tick each label as you stick it on its box. The number on the label matches the number here. (Ticks reset if you refresh.)</p>
+              <p className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text3)' }}>Tick each label as you stick it on its box. The number on the label matches the number here. (Ticks reset if you refresh.)</p>
               {couriers.map(courier => {
                 const rows = byCourier[courier]
                 const stuck = rows.filter(r => checklistTicks[keyOf(r)]).length
                 return (
-                  <div key={courier} style={{ marginBottom: 18 }}>
+                  <div key={courier} style={{ marginBottom: 18, breakInside: 'avoid' as const }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '8px 8px 0 0', borderBottom: 'none' }}>
                       <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '3px 9px', borderRadius: 20, background: courier === 'Bluedart' ? '#e8eef7' : '#eef3e8', color: courier === 'Bluedart' ? '#2b5a9e' : '#5a7a2b' }}>{courier.toUpperCase()}</span>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>{rows.length} label{rows.length === 1 ? '' : 's'}</span>
                       <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{stuck} / {rows.length} stuck</span>
                     </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
-                      <thead><tr>{['✓', '#', 'Order', 'SKU', 'AWB', 'Days left'].map(h => <th key={h} style={{ textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', fontWeight: 500, padding: '7px 12px', background: 'var(--surface)' }}>{h}</th>)}</tr></thead>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px', overflow: 'hidden', tableLayout: 'fixed' as const }}>
+                      <thead><tr>{[['✓', 40], ['#', 48], ['SKU', 0], ['AWB', 0], ['Days left', 110]].map(([h, wdt]) => <th key={h as string} style={{ textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', fontWeight: 500, padding: '7px 12px', background: 'var(--surface)', width: (wdt as number) ? (wdt as number) : 'auto' }}>{h}</th>)}</tr></thead>
                       <tbody>
                         {rows.map(r => {
                           const k = keyOf(r), on = !!checklistTicks[k], b = daysBadge(r.daysLeft)
                           return (
-                            <tr key={k} onClick={() => setChecklistTicks(p => ({ ...p, [k]: !p[k] }))} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', opacity: on ? 0.5 : 1 }}>
-                              <td style={{ padding: '8px 12px' }}><span style={{ width: 20, height: 20, borderRadius: 5, border: on ? 'none' : '2px solid var(--border2)', background: on ? 'var(--dispatched)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800 }}>{on ? '✓' : ''}</span></td>
+                            <tr key={k} onClick={() => setChecklistTicks(p => ({ ...p, [k]: !p[k] }))} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', opacity: on ? 0.5 : 1, breakInside: 'avoid' as const }}>
+                              <td style={{ padding: '8px 12px' }}><span style={{ width: 20, height: 20, borderRadius: 5, border: on ? 'none' : '2px solid var(--border2)', background: on ? 'var(--dispatched)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, boxSizing: 'border-box' as const }}>{on ? '✓' : ''}</span></td>
                               <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontWeight: 800, fontSize: 15 }}>{r.seq}</td>
-                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12 }}>{r.order_id}</td>
-                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{r.sku || '—'}</td>
-                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{r.awb || '—'}</td>
+                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.sku || '—'}</td>
+                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.awb || '—'}</td>
                               <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '2px 8px', borderRadius: 5, background: b.bg, color: b.fg, whiteSpace: 'nowrap' as const }}>{b.txt}</span></td>
                             </tr>
                           )
@@ -4692,7 +4714,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             </div>
           </div>
         )
-      })()}
+      })(), document.body)}
 
       {/* Logout confirmation */}
       {showLogoutConfirm && (

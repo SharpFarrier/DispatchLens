@@ -315,22 +315,32 @@ export async function stampLabelStrip(bytes: Uint8Array, text: string): Promise<
   try {
     const PDFLib = (window as W).PDFLib
     if (!PDFLib || !bytes || bytes.length < 5) return bytes
-    const doc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true })
-    const font = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold)
-    const pages = doc.getPages()
-    for (const page of pages) {
-      const { width, height } = page.getSize()
-      const stripH = Math.min(28, Math.max(20, height * 0.05))
-      // Dark strip across the very top.
-      page.drawRectangle({ x: 0, y: height - stripH, width, height: stripH, color: PDFLib.rgb(0.11, 0.10, 0.09) })
-      const fontSize = Math.min(14, stripH * 0.55)
+    const src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true })
+    const out = await PDFLib.PDFDocument.create()
+    const font = await out.embedFont(PDFLib.StandardFonts.HelveticaBold)
+    const srcPages = src.getPageCount()
+    const embedded = await out.embedPdf(src, Array.from({ length: srcPages }, (_, i) => i))
+    for (const emb of embedded) {
+      const w = emb.width, h = emb.height
+      // Add a header band ABOVE the label so nothing overlaps the label content.
+      const bandH = Math.max(34, Math.round(h * 0.075))
+      const page = out.addPage([w, h + bandH])
+      // Draw the original label in the lower part, unchanged.
+      page.drawPage(emb, { x: 0, y: 0, width: w, height: h })
+      // Dark band fills the new space at the very top, full width.
+      page.drawRectangle({ x: 0, y: h, width: w, height: bandH, color: PDFLib.rgb(0.11, 0.10, 0.09) })
+      // Big, full-width text — size scales to the band, capped so long text still fits.
+      let fontSize = Math.floor(bandH * 0.6)
+      const maxW = w - 16
+      while (fontSize > 8 && font.widthOfTextAtSize(text, fontSize) > maxW) fontSize -= 1
+      const textW = font.widthOfTextAtSize(text, fontSize)
       page.drawText(text, {
-        x: 8, y: height - stripH + (stripH - fontSize) / 2 + 1,
+        x: Math.max(8, (w - textW) / 2),  // centred, full-width band
+        y: h + (bandH - fontSize) / 2 + fontSize * 0.12,
         size: fontSize, font, color: PDFLib.rgb(1, 1, 1),
-        maxWidth: width - 16,
       })
     }
-    return await doc.save()
+    return await out.save()
   } catch {
     return bytes  // stamping is best-effort — never fail the label over it
   }
