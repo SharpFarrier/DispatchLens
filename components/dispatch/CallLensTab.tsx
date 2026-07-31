@@ -56,6 +56,15 @@ type Queue = 'predispatch' | 'callbacks' | 'delay'
 interface Row { o: DBOrder }
 interface Col { key: string; label: string; type: 'text' | 'category' | 'date' | 'number'; get: (r: Row) => string | number; render?: (r: Row) => React.ReactNode; queues?: Queue[] }
 
+// Platform from the order-id shape (same rules as Recon): Amazon 3-7-7, Flipkart OD…, Website 4-6 digits.
+function platformOf(oid: string): string {
+  const t = (oid || '').trim()
+  if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'
+  if (t.startsWith('OD')) return 'Flipkart'
+  if (/^\d{4,6}$/.test(t)) return 'Website'
+  return '(other)'
+}
+
 export default function CallLensTab({ currentUserEmail }: { currentUserEmail: string }) {
   const supabase = createClient()
   const [orders, setOrders] = useState<DBOrder[]>([])
@@ -79,6 +88,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [textFilters, setTextFilters] = useState<Record<string, string>>({})
   const [catFilters, setCatFilters] = useState<Record<string, string[]>>({})
+  const [catSearch, setCatSearch] = useState<Record<string, string>>({})
   // Date filters: per column, a set of selected 'YYYY-MM-DD' days (OR match).
   // Plus which year/month nodes are expanded in the tree UI (keyed "col|year", "col|year-month").
   const [dateFilters, setDateFilters] = useState<Record<string, string[]>>({})
@@ -135,8 +145,10 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     { key: 'dispatch_by', label: 'Dispatch By', type: 'date', get: r => r.o.dispatch_by_date || '', render: r => { const d = r.o.dispatch_by_date; if (!d) return <span style={{ color: 'var(--text3)' }}>—</span>; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span> } },
     { key: 'callback_date', label: 'Callback', type: 'date', queues: ['callbacks'], get: r => r.o.callback_date || '', render: r => { const d = r.o.callback_date; if (!d) return '—'; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{overdue ? `${fmtDate(d)} · overdue` : due ? `${fmtDate(d)} · today` : fmtDate(d)}</span> } },
     { key: 'order_id', label: 'Order', type: 'text', get: r => r.o.order_id },
+    { key: 'platform', label: 'Platform', type: 'category', get: r => platformOf(r.o.order_id), render: r => { const p = platformOf(r.o.order_id); const c = p === 'Amazon' ? { fg: '#b45309', bg: '#fef3c7' } : p === 'Flipkart' ? { fg: '#2563eb', bg: '#eff6ff' } : p === 'Website' ? { fg: '#7c3aed', bg: '#f5f3ff' } : { fg: 'var(--text3)', bg: 'var(--bg2)' }; return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: c.fg, background: c.bg, padding: '2px 7px', borderRadius: 4 }}>{p}</span> } },
+    { key: 'tracking', label: 'Tracking ID', type: 'text', get: r => r.o.tracking_number || '', render: r => r.o.tracking_number ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{r.o.tracking_number}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
     { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '' },
-    { key: 'sku', label: 'SKU', type: 'text', get: r => r.o.sku || '' },
+    { key: 'sku', label: 'SKU', type: 'category', get: r => r.o.sku || '(none)' },
     { key: 'oda', label: 'ODA', type: 'category', get: r => r.o.oda === 'ODA' ? 'ODA' : '(no)', render: r => r.o.oda === 'ODA' ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', padding: '2px 7px', borderRadius: 4 }}>ODA</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
     { key: 'contact', label: 'Contact', type: 'text', get: r => r.o.contact_number || '', render: r => r.o.contact_number ? <a href={`tel:${r.o.contact_number}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{r.o.contact_number}</a> : '—' },
     { key: 'confirmation', label: 'Confirmation', type: 'category', queues: ['predispatch', 'callbacks'], get: r => confirmationBadge(r.o)?.label || '(pending)', render: r => { const b = confirmationBadge(r.o); return b ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: b.fg, background: b.bg, padding: '2px 7px', borderRadius: 4 }}>{b.label}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>pending</span> } },
@@ -449,14 +461,30 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                     </div>
                     {openFilter === col.key && (
                       <div ref={popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'DM Sans' }}>
-                        {col.type === 'category' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3, maxHeight: 220, overflowY: 'auto' as const }}>
-                            {(catOptions[col.key] || []).map(opt => { const cur = catFilters[col.key] || []; const on = cur.includes(opt); return (
-                              <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text2)', cursor: 'pointer', padding: '2px 0' }}>
-                                <input type="checkbox" checked={on} onChange={() => setCatFilters(prev => { const c = prev[col.key] || []; const next = c.includes(opt) ? c.filter(x => x !== opt) : [...c, opt]; return { ...prev, [col.key]: next } })} />{opt}
-                              </label>) })}
-                          </div>
-                        ) : col.type === 'date' ? (
+                        {col.type === 'category' ? (() => {
+                          const all = catOptions[col.key] || []
+                          const q = (catSearch[col.key] || '').toLowerCase()
+                          const shown = q ? all.filter(o => o.toLowerCase().includes(q)) : all
+                          const cur = catFilters[col.key] || []
+                          const allShownOn = shown.length > 0 && shown.every(o => cur.includes(o))
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 5, minWidth: 180 }}>
+                              {all.length > 8 && (
+                                <input autoFocus value={catSearch[col.key] || ''} onChange={e => setCatSearch(prev => ({ ...prev, [col.key]: e.target.value }))} placeholder={`Search ${col.label}…`} style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', boxSizing: 'border-box' as const }} />
+                              )}
+                              <div style={{ display: 'flex', gap: 10, padding: '1px 2px' }}>
+                                <button onClick={() => setCatFilters(prev => { const merged = Array.from(new Set([...(prev[col.key] || []), ...shown])); return { ...prev, [col.key]: merged } })} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: 0 }}>{allShownOn ? 'All shown ✓' : 'Select all'}</button>
+                                {cur.length > 0 && <button onClick={() => setCatFilters(prev => ({ ...prev, [col.key]: [] }))} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Clear</button>}
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3, maxHeight: 220, overflowY: 'auto' as const }}>
+                                {shown.length === 0 ? <div style={{ fontSize: 12, color: 'var(--text3)', padding: '2px 0' }}>No matches</div> : shown.map(opt => { const on = cur.includes(opt); return (
+                                  <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--text2)', cursor: 'pointer', padding: '2px 0' }}>
+                                    <input type="checkbox" checked={on} onChange={() => setCatFilters(prev => { const c = prev[col.key] || []; const next = c.includes(opt) ? c.filter(x => x !== opt) : [...c, opt]; return { ...prev, [col.key]: next } })} />{opt}
+                                  </label>) })}
+                              </div>
+                            </div>
+                          )
+                        })() : col.type === 'date' ? (
                           (() => {
                             const tree = dateTrees[col.key] || {}
                             const years = Object.keys(tree).sort((a, b) => b.localeCompare(a))
