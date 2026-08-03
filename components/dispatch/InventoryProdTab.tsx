@@ -171,16 +171,19 @@ export default function InventoryProdTab() {
     setIsFetching(true)
     // Growable transactional tables are paged past the 1000-row cap; small
     // reference tables (bom_items, products_with_flags) stay single-shot.
-    const [sl, cl, pk, os] = await Promise.all([
+    const [sl, cl, pk, os, pc] = await Promise.all([
       fetchAllRows((from, to) => supabase.from('shipment_items').select('*, shipments!inner(status,supplier)').neq('shipments.status', 'deleted').order('id', { ascending: false }).range(from, to)),
       fetchAllRows((from, to) => supabase.from('coating_items').select('*, coating_trolleys!inner(status)').neq('coating_trolleys.status', 'deleted').order('id', { ascending: false }).range(from, to)),
       fetchAllRows((from, to) => supabase.from('pick_items').select('*, pick_sessions!inner(status)').neq('pick_sessions.status', 'deleted').order('id', { ascending: false }).range(from, to)),
       fetchAllRows((from, to) => supabase.from('opening_stock').select('*').order('id', { ascending: false }).range(from, to)),
+      // Per-piece live status — the source of truth for CURRENTLY coated / picked counts.
+      fetchAllRows((from, to) => supabase.from('pieces').select('shape, size, mattress, colour, status').order('id', { ascending: false }).range(from, to)),
     ])
     setData({
       shipmentItems: sl || [], coatingItems: cl || [], pickItems: pk || [],
       packPieces: [], // STUB: pack_pieces not in DispatchLens (old packing system)
       openingStock: os || [],
+      pieces: pc || [],
     })
     setIsLoading(false)
     setIsFetching(false)
@@ -191,7 +194,7 @@ export default function InventoryProdTab() {
   if (isLoading) return <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}><Spinner size="lg" /></div>
   if (!data) return null
 
-  const { shipmentItems, coatingItems, pickItems, packPieces, openingStock } = data
+  const { shipmentItems, coatingItems, pickItems, packPieces, openingStock, pieces } = data
 
   const receivedMap: Record<string, Row> = {}
   shipmentItems.filter((i: Row) => i.category !== 'parts').forEach((i: Row) => {
@@ -229,6 +232,24 @@ export default function InventoryProdTab() {
     pickedMap[k].picked += i.pieces
   })
 
+  // LIVE per-piece counts (source of truth for CURRENTLY coated / picked). Bucketed by
+  // shape/size/mattress so the per-shape pipeline uses them too. cumulative coating_items
+  // / pick_items above are kept only for the RAW (received − everCoated) math.
+  const liveCoatedMap: Record<string, Row> = {}
+  const livePickedMap: Record<string, Row> = {}
+  ;(pieces || []).forEach((p: Row) => {
+    const m = normaliseMattress(p.mattress), k = `${p.shape}|${p.size || ''}|${m}`
+    if (p.status === 'coated') {
+      if (!liveCoatedMap[k]) liveCoatedMap[k] = { shape: p.shape, size: p.size || '', mattress: m, coated: 0 }
+      liveCoatedMap[k].coated += 1
+    } else if (p.status === 'picked') {
+      if (!livePickedMap[k]) livePickedMap[k] = { shape: p.shape, size: p.size || '', mattress: m, picked: 0 }
+      livePickedMap[k].picked += 1
+    }
+  })
+  const liveCoatedFor = (shape: string, size: string, mattress: string) => liveCoatedMap[`${shape}|${size}|${mattress}`]?.coated || 0
+  const livePickedFor = (shape: string, size: string, mattress: string) => livePickedMap[`${shape}|${size}|${mattress}`]?.picked || 0
+
   const packedMap: Record<string, Row> = {}
   packPieces.forEach((p: Row) => {
     if (!packedMap[p.master_sku]) packedMap[p.master_sku] = { master_sku: p.master_sku, displayName: p.display_name, shape: p.shape, size: p.size, frameColour: p.frame_colour, mattressType: p.mattress_type, packed: 0, dispatched: 0 }
@@ -237,13 +258,16 @@ export default function InventoryProdTab() {
   })
 
   const totalReceived = Object.values(receivedMap).reduce((s, r) => s + r.received, 0)
-  const totalCoated = Object.values(coatedMap).reduce((s, r) => s + r.coated, 0)
-  const totalPicked = Object.values(pickedMap).reduce((s, r) => s + r.picked, 0)
+  const totalCoated = Object.values(coatedMap).reduce((s, r) => s + r.coated, 0)      // cumulative — RAW math only
+  const totalPicked = Object.values(pickedMap).reduce((s, r) => s + r.picked, 0)      // cumulative — unused by cards now
   const totalPacked = Object.values(packedMap).reduce((s, r) => s + r.packed, 0)
   const totalDispatched = Object.values(packedMap).reduce((s, r) => s + r.dispatched, 0)
-  const rawStock = Math.max(0, totalReceived - totalCoated)
-  const coatedStock = Math.max(0, totalCoated - totalPicked)
-  const pickedStock = Math.max(0, totalPicked - totalPacked)
+  // Live counts for the COATED / PICKED cards (pieces.status = source of truth).
+  const liveCoated = Object.values(liveCoatedMap).reduce((s, r) => s + r.coated, 0)
+  const livePicked = Object.values(livePickedMap).reduce((s, r) => s + r.picked, 0)
+  const rawStock = Math.max(0, totalReceived - totalCoated)   // unchanged (received − ever-coated)
+  const coatedStock = liveCoated                               // = count(pieces status='coated')
+  const pickedStock = livePicked                               // = count(pieces status='picked')
   const finishedStock = Math.max(0, totalPacked - totalDispatched)
   const hasOpeningStock = openingStock.length > 0
 
@@ -261,7 +285,9 @@ export default function InventoryProdTab() {
   const pipelineRows = Object.values(ssMap).map(r => ({
     ...r,
     rawLeft: r.received - r.totalCoated,
-    coatedLeft: r.totalCoated - Object.values(pickedMap).filter(p => `${p.shape}|${p.size}|${p.mattress}` === `${r.shape}|${r.size}|${r.mattress}`).reduce((s, p) => s + p.picked, 0),
+    // "Coated left" = pieces still physically in coated status for this shape/size (live truth),
+    // not cumulative-coated minus cumulative-picked (which drifts after any correction).
+    coatedLeft: liveCoatedFor(r.shape, r.size, r.mattress),
   }))
 
 
