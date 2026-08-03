@@ -9,6 +9,7 @@ import { useProductStore } from './useProductStore'
 import FramePicker, { type FrameItem } from './FramePicker'
 import LineItemList, { getItemErrors } from './LineItemList'
 import PickScanTerminal from './PickScanTerminal'
+import PickDayStats from './PickDayStats'
 import { LogTable } from './CoatingTab'
 
 const TABS = ['scan', 'entry', 'log'] as const
@@ -26,6 +27,7 @@ export default function PicksTab({ userId }: { userId: string }) {
   const supabase = useMemo(() => createClient(), [])
   const { getBomForProduct } = useProductStore()
   const [tab, setTab] = useState<'scan' | 'entry' | 'log'>('scan')
+  const [pickRefreshKey, setPickRefreshKey] = useState(0)
   const [lineItems, setLineItems] = useState<FrameItem[]>([])
   const [label, setLabel] = useState('')
   const [notes, setNotes] = useState('')
@@ -183,7 +185,12 @@ export default function PicksTab({ userId }: { userId: string }) {
       </div>
 
       {tab === 'scan' && (
-        <PickScanTerminal userId={userId} onToast={showToast} onSessionClosed={() => { /* refresh handled on log open */ }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <PickDayStats userId={userId} refreshKey={pickRefreshKey} />
+          <PickScanTerminal userId={userId} onToast={showToast}
+            onPicked={() => setPickRefreshKey(k => k + 1)}
+            onSessionClosed={() => setPickRefreshKey(k => k + 1)} />
+        </div>
       )}
 
       {tab === 'entry' && (

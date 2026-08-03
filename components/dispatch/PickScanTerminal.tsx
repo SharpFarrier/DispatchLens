@@ -11,8 +11,8 @@ interface ScannedRow { barcode: string; shape: string | null; size: string | nul
 const sectionTitle = { fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }
 const inputField = { width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' as const }
 
-export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
-  userId: string; onToast?: (msg: string, type?: string) => void; onSessionClosed?: () => void
+export default function PickScanTerminal({ userId, onToast, onSessionClosed, onPicked }: {
+  userId: string; onToast?: (msg: string, type?: string) => void; onSessionClosed?: () => void; onPicked?: () => void
 }) {
   const supabase = useMemo(() => createClient(), [])
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -24,6 +24,8 @@ export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
   const inputRef = useRef<HTMLInputElement>(null)
   const scannedRef = useRef(new Set<string>())
   const processingRef = useRef(false)
+  const [lastPick, setLastPick] = useState<{ barcode: string; pieceId: string; pickItemId: string } | null>(null)
+  const [undoing, setUndoing] = useState(false)
 
   useEffect(() => {
     if (!cameraOn) {
@@ -70,21 +72,49 @@ export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
       }).eq('id', piece.id).eq('status', 'coated')
       if (upErr) throw upErr
 
-      const { error: piErr } = await supabase.from('pick_items').insert({
+      const { data: pickItem, error: piErr } = await supabase.from('pick_items').insert({
         session_id: sid, category: piece.category, shape: piece.shape, size: piece.size,
         mattress: piece.mattress, colour: piece.colour, pieces: 1, product_id: piece.product_id, piece_id: piece.id,
-      })
+      }).select('id').single()
       if (piErr) throw piErr
 
       scannedRef.current.add(barcode)
       setScanned(prev => [{ barcode, shape: piece.shape, size: piece.size, colour: piece.colour, mattress: piece.mattress }, ...prev])
+      setLastPick({ barcode, pieceId: piece.id, pickItemId: pickItem?.id })
       flash('success', `${barcode} · ${piece.shape}${piece.size ? ' ' + piece.size : ''}`)
+      onPicked?.()
     } catch (e) {
       flash('error', 'Error: ' + (e as Error).message)
     } finally {
       processingRef.current = false
     }
-  }, [sessionId, label, userId, supabase])
+  }, [sessionId, label, userId, supabase, onPicked])
+
+  const undoLast = useCallback(async () => {
+    if (!lastPick || undoing || processingRef.current) return
+    setUndoing(true)
+    processingRef.current = true
+    try {
+      if (lastPick.pickItemId) {
+        const { error: delErr } = await supabase.from('pick_items').delete().eq('id', lastPick.pickItemId)
+        if (delErr) throw delErr
+      }
+      const { error: revErr } = await supabase.from('pieces').update({
+        status: 'coated', pick_session_id: null, picked_at: null,
+      }).eq('id', lastPick.pieceId).eq('status', 'picked')
+      if (revErr) throw revErr
+      scannedRef.current.delete(lastPick.barcode)
+      setScanned(prev => prev.filter(s => s.barcode !== lastPick.barcode))
+      flash('warn', `Undone · ${lastPick.barcode} back to coated`)
+      setLastPick(null)
+      onPicked?.()
+    } catch (e) {
+      flash('error', 'Undo failed: ' + (e as Error).message)
+    } finally {
+      processingRef.current = false
+      setUndoing(false)
+    }
+  }, [lastPick, undoing, supabase, onPicked])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
@@ -108,7 +138,7 @@ export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
       if (error) throw error
       onToast?.(`Session confirmed · ${scanned.length} frame(s)`)
       await stopCamera()
-      setSessionId(null); setScanned([]); setLabel(''); setLastResult(null)
+      setSessionId(null); setScanned([]); setLabel(''); setLastResult(null); setLastPick(null)
       scannedRef.current = new Set()
       onSessionClosed?.()
       inputRef.current?.focus()
@@ -148,6 +178,13 @@ export default function PickScanTerminal({ userId, onToast, onSessionClosed }: {
       <div style={{ borderRadius: 10, border: '1px solid', padding: '16px', textAlign: 'center', fontWeight: 700, fontSize: 13, ...bannerStyle }}>
         {lastResult?.msg || 'Ready to scan'}
       </div>
+
+      {lastPick && (
+        <button onClick={() => void undoLast()} disabled={undoing}
+          style={{ width: '100%', padding: 12, borderRadius: 10, border: '2px solid var(--critical)', color: 'var(--critical)', fontWeight: 700, fontSize: 13, background: 'var(--surface)', cursor: 'pointer', opacity: undoing ? 0.5 : 1 }}>
+          {undoing ? 'Undoing…' : `↶ Undo last scan (${lastPick.barcode})`}
+        </button>
+      )}
 
       <div>
         {!cameraOn ? (
