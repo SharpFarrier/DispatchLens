@@ -154,7 +154,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Session-only dispatch checklist — populated after Generate Docs, ticks reset on refresh.
   const [checklist, setChecklist] = useState<{ seq: number; courier: string; order_id: string; sku: string; awb: string; daysLeft: number | null }[]>([])
   const [checklistTicks, setChecklistTicks] = useState<Record<string, boolean>>({})
-  const [showChecklist, setShowChecklist] = useState(false)
+  const [genOverlayOpen, setGenOverlayOpen] = useState(false)
+  const [genRows, setGenRows] = useState<{ orderId: string; sku: string; courier: string; status: 'pending' | 'working' | 'ok' | 'failed'; error: string | null }[]>([])
+  const [genError, setGenError] = useState<string | null>(null)
+  const [genSummary, setGenSummary] = useState<{ labels: number; invoices: number; failed: number } | null>(null)
   // Tracking source — decoupled from the view window: everything not delivered/RTO, any age.
   const [trackOrders, setTrackOrders] = useState<DBOrder[]>([])
   // Tracking
@@ -1917,6 +1920,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (base.length === 0) { alert('No orders to generate.'); return }
     if (base.length > 200 && !confirm(`Generate docs for ${base.length} orders? This can take a while.`)) return
     setGenDocs(true); setGenProgress('Loading libraries…')
+    setGenOverlayOpen(true); setGenError(null); setGenSummary(null)
+    setGenRows(base.map(o => ({ orderId: o.order_id, sku: o.barcode_sku || o.sku || '', courier: isBluedart(o) ? 'Bluedart' : 'Shiprocket', status: 'pending' as const, error: null })))
     try {
       await Promise.all([
         loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'),
@@ -1946,6 +1951,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         const o = base[i]
         done++
         setGenProgress(`Order ${done}/${base.length} — ${o.order_id}`)
+        setGenRows(prev => prev.map(r => r.orderId === o.order_id ? { ...r, status: 'working' } : r))
         const issues: string[] = []
         // Invoice for every order (uses imported invoice fields).
         try { invoiceParts.push(await invoicePdfBytes(o, { signatureDataUrl })) }
@@ -1967,6 +1973,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         genOutcome[o.order_id] = issues.length
           ? { status: 'failed', error: issues.join(' · ') }
           : { status: 'ok', error: null }
+        setGenRows(prev => prev.map(r => r.orderId === o.order_id ? { ...r, status: genOutcome[o.order_id].status, error: genOutcome[o.order_id].error } : r))
       }
 
       // Fetch all Bluedart labels in parallel (one call each, concurrent = fast),
@@ -1981,6 +1988,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           } catch (e) {
             failed.push(`${order.order_id} label: ${(e as Error).message}`)
             genOutcome[order.order_id] = { status: 'failed', error: [genOutcome[order.order_id]?.error, 'label failed'].filter(Boolean).join(' · ') }
+            setGenRows(prev => prev.map(r => r.orderId === order.order_id ? { ...r, status: 'failed', error: genOutcome[order.order_id].error } : r))
           }
         }))
       }
@@ -2035,12 +2043,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const stamp = new Date().toISOString().slice(0, 10)
       if (labelParts.length) { setGenProgress('Merging labels…'); downloadBytes(await mergePdfs(labelParts), `labels-${stamp}.pdf`) }
       if (invoiceParts.length) { setGenProgress('Merging invoices…'); downloadBytes(await mergePdfs(invoiceParts), `invoices-${stamp}.pdf`) }
-      // Show the session checklist (session-only; ticks reset on refresh).
-      if (newChecklist.length) { setChecklist(newChecklist); setChecklistTicks({}); setShowChecklist(true) }
-      const msg = `Done. ${labelParts.length} labels, ${invoiceParts.length} invoices.` + (failed.length ? `\n\n${failed.length} issue(s):\n` + failed.slice(0, 12).join('\n') + (failed.length > 12 ? `\n…and ${failed.length - 12} more` : '') : '')
-      if (failed.length) alert(msg)
+      // Session checklist (session-only; ticks reset on refresh) — shown in the overlay.
+      if (newChecklist.length) { setChecklist(newChecklist); setChecklistTicks({}) }
+      setGenSummary({ labels: labelParts.length, invoices: invoiceParts.length, failed: failedEntries.length })
     } catch (e) {
-      alert('Generation failed: ' + (e as Error).message)
+      setGenError((e as Error).message)
     } finally {
       setGenDocs(false); setGenProgress('')
     }
@@ -4863,7 +4870,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       )}
 
       {/* Dispatch checklist — appears after Generate Docs. Session-only ticks. */}
-      {showChecklist && checklist.length > 0 && typeof document !== 'undefined' && createPortal((() => {
+      {genOverlayOpen && typeof document !== 'undefined' && createPortal((() => {
+        const total = genRows.length
+        const doneCount = genRows.filter(r => r.status === 'ok' || r.status === 'failed').length
+        const okCount = genRows.filter(r => r.status === 'ok').length
+        const failCount = genRows.filter(r => r.status === 'failed').length
+        const leftCount = total - doneCount
+        const pct = total ? Math.round((doneCount / total) * 100) : 0
+        const closeOverlay = () => { setGenOverlayOpen(false); setGenRows([]); setGenError(null); setGenSummary(null) }
+
         const byCourier: Record<string, typeof checklist> = {}
         for (const r of checklist) (byCourier[r.courier] ??= []).push(r)
         const couriers = Object.keys(byCourier).sort()
@@ -4882,46 +4897,108 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           window.addEventListener('afterprint', cleanup)
           setTimeout(() => window.print(), 60)
         }
+        const statusCell = (s: string) => {
+          if (s === 'ok') return <span style={{ color: 'var(--dispatched)', fontWeight: 800, fontSize: 14, width: 18, textAlign: 'center' as const, display: 'inline-block' }}>✓</span>
+          if (s === 'failed') return <span style={{ color: 'var(--critical)', fontWeight: 800, fontSize: 14, width: 18, textAlign: 'center' as const, display: 'inline-block' }}>✗</span>
+          if (s === 'working') return <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border2)', borderTopColor: 'var(--accent)', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />
+          return <span style={{ color: 'var(--text3)', fontSize: 12, width: 18, textAlign: 'center' as const, display: 'inline-block' }}>○</span>
+        }
+
         return (
-          <div className="dl-checklist-overlay" onClick={() => setShowChecklist(false)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, overflowY: 'auto' as const }}>
-            <div className="dl-checklist-card" onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)', padding: 24, maxWidth: 760, width: '100%', margin: '24px 0', boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Dispatch checklist</h3>
-                <span className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{totalTicked} / {checklist.length} stuck</span>
-                <button className="no-print" onClick={doPrint} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print</button>
-                <button className="no-print" onClick={() => setShowChecklist(false)} style={{ padding: '5px 12px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Close</button>
+          <div className="dl-checklist-overlay" onClick={() => { if (!genDocs) closeOverlay() }} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 20, overflowY: 'auto' as const }}>
+            <div className="dl-checklist-card" onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--border)', padding: 24, maxWidth: 820, width: '100%', margin: '24px 0', boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <Printer size={16} style={{ color: 'var(--accent)' }} />
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Generate Dispatch</h3>
+                <span className="no-print" style={{ fontSize: 12, color: genError ? 'var(--critical)' : genDocs ? 'var(--text3)' : 'var(--dispatched)', fontFamily: 'DM Mono' }}>
+                  {genDocs ? (genProgress || 'Working…') : genError ? 'Failed' : 'Done'}
+                </span>
+                <button className="no-print" disabled={genDocs} onClick={closeOverlay} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: 'none', background: genDocs ? 'var(--bg2)' : 'var(--accent)', color: genDocs ? 'var(--text3)' : '#fff', fontSize: 12, fontWeight: 700, cursor: genDocs ? 'not-allowed' : 'pointer', opacity: genDocs ? 0.6 : 1 }}>Close</button>
               </div>
-              <p className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text3)' }}>Tick each label as you stick it on its box. The number on the label matches the number here. (Ticks reset if you refresh.)</p>
-              {couriers.map(courier => {
-                const rows = byCourier[courier]
-                const stuck = rows.filter(r => checklistTicks[keyOf(r)]).length
-                return (
-                  <div key={courier} style={{ marginBottom: 18, breakInside: 'avoid' as const }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '8px 8px 0 0', borderBottom: 'none' }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '3px 9px', borderRadius: 20, background: courier === 'Bluedart' ? '#e8eef7' : '#eef3e8', color: courier === 'Bluedart' ? '#2b5a9e' : '#5a7a2b' }}>{courier.toUpperCase()}</span>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{rows.length} label{rows.length === 1 ? '' : 's'}</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{stuck} / {rows.length} stuck</span>
-                    </div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px', overflow: 'hidden', tableLayout: 'fixed' as const }}>
-                      <thead><tr>{[['✓', 40], ['#', 48], ['SKU', 0], ['AWB', 0], ['Days left', 110]].map(([h, wdt]) => <th key={h as string} style={{ textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', fontWeight: 500, padding: '7px 12px', background: 'var(--surface)', width: (wdt as number) ? (wdt as number) : 'auto' }}>{h}</th>)}</tr></thead>
-                      <tbody>
-                        {rows.map(r => {
-                          const k = keyOf(r), on = !!checklistTicks[k], b = daysBadge(r.daysLeft)
-                          return (
-                            <tr key={k} onClick={() => setChecklistTicks(p => ({ ...p, [k]: !p[k] }))} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', opacity: on ? 0.5 : 1, breakInside: 'avoid' as const }}>
-                              <td style={{ padding: '8px 12px' }}><span style={{ width: 20, height: 20, borderRadius: 5, border: on ? 'none' : '2px solid var(--border2)', background: on ? 'var(--dispatched)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, boxSizing: 'border-box' as const }}>{on ? '✓' : ''}</span></td>
-                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontWeight: 800, fontSize: 15 }}>{r.seq}</td>
-                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.sku || '—'}</td>
-                              <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.awb || '—'}</td>
-                              <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '2px 8px', borderRadius: 5, background: b.bg, color: b.fg, whiteSpace: 'nowrap' as const }}>{b.txt}</span></td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
+
+              {/* Progress bar + tally */}
+              {total > 0 && (
+                <div className="no-print" style={{ marginBottom: 12 }}>
+                  <div style={{ height: 6, borderRadius: 3, background: 'var(--bg2)', overflow: 'hidden', marginBottom: 6 }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: 'var(--dispatched)', transition: 'width 0.2s' }} />
                   </div>
-                )
-              })}
+                  <div style={{ display: 'flex', gap: 14, fontSize: 12, fontFamily: 'DM Mono' }}>
+                    <span style={{ color: 'var(--dispatched)' }}>{okCount} generated</span>
+                    <span style={{ color: failCount ? 'var(--critical)' : 'var(--text3)' }}>{failCount} failed</span>
+                    <span style={{ color: 'var(--text3)' }}>{leftCount} left</span>
+                  </div>
+                </div>
+              )}
+
+              {genError && (
+                <div className="no-print" style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'var(--critical-bg)', border: '1px solid #fecaca', color: 'var(--critical)', fontSize: 13 }}>
+                  Generation error: {genError}
+                </div>
+              )}
+
+              {/* Live per-label list */}
+              {total > 0 && (
+                <div className="no-print" style={{ maxHeight: 260, overflowY: 'auto' as const, border: '1px solid var(--border)', borderRadius: 8, marginBottom: (!genDocs && checklist.length > 0) ? 18 : 0 }}>
+                  {genRows.map((r, i) => (
+                    <div key={r.orderId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderTop: i === 0 ? 'none' : '1px solid var(--border)', background: r.status === 'failed' ? 'var(--critical-bg)' : 'transparent' }}>
+                      {statusCell(r.status)}
+                      <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, padding: '2px 6px', borderRadius: 4, color: r.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: r.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff' }}>{r.courier === 'Bluedart' ? 'BD' : 'SR'}</span>
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{r.sku || '—'}</span>
+                      {r.status === 'failed' && r.error && <span style={{ fontSize: 11, color: 'var(--critical)', marginLeft: 'auto', textAlign: 'right' as const }}>{r.error}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Summary line */}
+              {!genDocs && genSummary && (
+                <div className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono', margin: '4px 0 14px' }}>
+                  {genSummary.labels} labels · {genSummary.invoices} invoices{genSummary.failed ? ` · ${genSummary.failed} issue(s)` : ''} — PDFs downloaded.
+                </div>
+              )}
+
+              {/* Checklist (once generation is done) */}
+              {!genDocs && checklist.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Dispatch checklist</h4>
+                    <span className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{totalTicked} / {checklist.length} stuck</span>
+                    <button className="no-print" onClick={doPrint} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print</button>
+                  </div>
+                  <p className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text3)' }}>Tick each label as you stick it on its box. The number on the label matches the number here. (Ticks reset if you refresh.)</p>
+                  {couriers.map(courier => {
+                    const rows = byCourier[courier]
+                    const stuck = rows.filter(r => checklistTicks[keyOf(r)]).length
+                    return (
+                      <div key={courier} style={{ marginBottom: 18, breakInside: 'avoid' as const }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '8px 8px 0 0', borderBottom: 'none' }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '3px 9px', borderRadius: 20, background: courier === 'Bluedart' ? '#e8eef7' : '#eef3e8', color: courier === 'Bluedart' ? '#2b5a9e' : '#5a7a2b' }}>{courier.toUpperCase()}</span>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>{rows.length} label{rows.length === 1 ? '' : 's'}</span>
+                          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{stuck} / {rows.length} stuck</span>
+                        </div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px', overflow: 'hidden', tableLayout: 'fixed' as const }}>
+                          <thead><tr>{[['✓', 40], ['#', 48], ['SKU', 0], ['AWB', 0], ['Days left', 110]].map(([h, wdt]) => <th key={h as string} style={{ textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', fontWeight: 500, padding: '7px 12px', background: 'var(--surface)', width: (wdt as number) ? (wdt as number) : 'auto' }}>{h}</th>)}</tr></thead>
+                          <tbody>
+                            {rows.map(r => {
+                              const k = keyOf(r), on = !!checklistTicks[k], b = daysBadge(r.daysLeft)
+                              return (
+                                <tr key={k} onClick={() => setChecklistTicks(p => ({ ...p, [k]: !p[k] }))} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', opacity: on ? 0.5 : 1, breakInside: 'avoid' as const }}>
+                                  <td style={{ padding: '8px 12px' }}><span style={{ width: 20, height: 20, borderRadius: 5, border: on ? 'none' : '2px solid var(--border2)', background: on ? 'var(--dispatched)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, boxSizing: 'border-box' as const }}>{on ? '✓' : ''}</span></td>
+                                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontWeight: 800, fontSize: 15 }}>{r.seq}</td>
+                                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.sku || '—'}</td>
+                                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.awb || '—'}</td>
+                                  <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '2px 8px', borderRadius: 5, background: b.bg, color: b.fg, whiteSpace: 'nowrap' as const }}>{b.txt}</span></td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )
