@@ -170,6 +170,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [courierPopoverPos, setCourierPopoverPos] = useState({ top: 0, left: 0 })
   const [skuFilter, setSkuFilter] = useState<Set<string>>(new Set())
   const [showSkuPopover, setShowSkuPopover] = useState(false)
+  const [dispatchByFilter, setDispatchByFilter] = useState<Set<string>>(new Set())
+  const [showDispatchByPopover, setShowDispatchByPopover] = useState(false)
+  const [dispatchByPopoverPos, setDispatchByPopoverPos] = useState({ top: 0, left: 0 })
   const [skuPopoverPos, setSkuPopoverPos] = useState({ top: 0, left: 0 })
   const [skuSearch, setSkuSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -1394,6 +1397,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     base.forEach(o => vals.add(o.scheduled_date || 'none'))
     return Array.from(vals).sort()
   }, [activeOrders, activeFilter, courierFilter, daysFilter, today])
+
+  const uniqueDispatchByDates = useMemo(() => {
+    const vals = new Set<string>()
+    let base = [...activeOrders]
+    if (activeFilter === 'scheduled_today') base = base.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
+    else if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
+    else if (activeFilter === 'hold') base = base.filter(o => isHeld(o))
+    else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
+    else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
+    else if (activeFilter !== 'ALL') base = base.filter(o => liveUrgency(o) === (activeFilter as string))
+    if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
+    if (skuFilter.size > 0) base = base.filter(o => skuFilter.has(o.sku))
+    base.forEach(o => vals.add(o.dispatch_by_date || 'none'))
+    return Array.from(vals).sort()
+  }, [activeOrders, activeFilter, courierFilter, skuFilter, today])
   const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
 
   // ── Resolve the active date window into [fromISO, toISO] (null = no bound) ──
@@ -1707,6 +1725,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     if (courierFilter.size > 0) list = list.filter(o => courierFilter.has(o.courier))
     if (skuFilter.size > 0) list = list.filter(o => skuFilter.has(o.sku))
     if (dispatchDateFilter.size > 0) list = list.filter(o => dispatchDateFilter.has(o.scheduled_date || 'none'))
+    if (dispatchByFilter.size > 0) list = list.filter(o => dispatchByFilter.has(o.dispatch_by_date || 'none'))
     if (genFilter === 'generated') list = list.filter(o => !!o.dispatch_generated_at)
     else if (genFilter === 'not') list = list.filter(o => !o.dispatch_generated_at)
     // Sort
@@ -2729,7 +2748,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               </div>
             ) : (
               <div style={{ ...card, overflow: 'hidden' }}>
-                <div style={{ overflowX: 'auto', overflowY: 'auto' as const, maxHeight: 'calc(100vh - 300px)' }} onScroll={() => { if (showSkuPopover) setShowSkuPopover(false); if (showCourierPopover) setShowCourierPopover(false); if (showDaysPopover) setShowDaysPopover(false); if (showDispatchDatePopover) setShowDispatchDatePopover(false) }}>
+                <div style={{ overflowX: 'auto', overflowY: 'auto' as const, maxHeight: 'calc(100vh - 300px)' }} onScroll={() => { if (showSkuPopover) setShowSkuPopover(false); if (showCourierPopover) setShowCourierPopover(false); if (showDaysPopover) setShowDaysPopover(false); if (showDispatchDatePopover) setShowDispatchDatePopover(false); if (showDispatchByPopover) setShowDispatchByPopover(false) }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
                     <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
                       <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
@@ -2886,6 +2905,61 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                     })}
                                   </div>
                                   <button onClick={() => setShowCourierPopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                                </div>
+                              )}
+                            </th>
+                          )
+                          if (label === 'Dispatch By') return (
+                            <th key="dispatch_by" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span onClick={() => handleColSort('dispatch_by')} style={{ color: sortCol === 'dispatch_by' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}>
+                                  Dispatch By{sortCol === 'dispatch_by' ? <span style={{ marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
+                                </span>
+                                <button onClick={e => {
+                                  e.stopPropagation()
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  setDispatchByPopoverPos({ top: rect.bottom + 6, left: rect.left })
+                                  setShowDispatchByPopover(v => !v)
+                                  setShowSkuPopover(false); setShowCourierPopover(false); setShowDaysPopover(false); setShowDispatchDatePopover(false)
+                                }} style={{
+                                  background: dispatchByFilter.size > 0 ? 'var(--accent-bg)' : 'none',
+                                  border: dispatchByFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                  borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
+                                  color: dispatchByFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
+                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                }}>
+                                  {dispatchByFilter.size > 0 ? `${dispatchByFilter.size} ▾` : '▾'}
+                                </button>
+                                {dispatchByFilter.size > 0 && <button onClick={() => setDispatchByFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
+                              </div>
+                              {showDispatchByPopover && (
+                                <div style={{ position: 'fixed' as const, top: dispatchByPopoverPos.top, left: dispatchByPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DISPATCH BY</span>
+                                    <button onClick={() => { setDispatchByFilter(new Set()); setShowDispatchByPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
+                                    {uniqueDispatchByDates.map(date => {
+                                      const isSelected = dispatchByFilter.has(date)
+                                      const isToday = date === today
+                                      const label = date === 'none' ? 'No date set'
+                                        : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+                                      const color = date === 'none' ? 'var(--text3)' : isToday ? '#059669' : 'var(--today)'
+                                      const count = activeFilterBase.filter(o => (o.dispatch_by_date || 'none') === date).length
+                                      return (
+                                        <button key={date} onClick={() => {
+                                          setDispatchByFilter(prev => { const n = new Set(prev); n.has(date) ? n.delete(date) : n.add(date); return n })
+                                        }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
+                                          <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                            {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+                                          </span>
+                                          <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color, flex: 1 }}>{label}{isToday && ' (Today)'}</span>
+                                          <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                  <button onClick={() => setShowDispatchByPopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
                                 </div>
                               )}
                             </th>
