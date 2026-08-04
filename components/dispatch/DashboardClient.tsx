@@ -1606,6 +1606,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [demandView, setDemandView] = useState<'weekly' | 'daily'>('weekly')
   const [pickCourierFilter, setPickCourierFilter] = useState<'all' | 'Bluedart' | 'Delhivery'>('all')
   const [demandSkuFilter, setDemandSkuFilter] = useState<Set<string>>(new Set())
+  const [demandSort, setDemandSort] = useState<{ key: 'sku' | 'total' | 'stock'; dir: 'asc' | 'desc' }>({ key: 'total', dir: 'desc' })
+  const [pickSortKey, setPickSortKey] = useState<'date' | 'courier' | 'sku' | 'qty' | 'count' | null>(null)
+  const [pickSortDir, setPickSortDir] = useState<'asc' | 'desc'>('asc')
+  const [pickDateFilter, setPickDateFilter] = useState<Set<string>>(new Set())
+  const [pickSkuFilter, setPickSkuFilter] = useState<Set<string>>(new Set())
+  const [showPickDatePopover, setShowPickDatePopover] = useState(false)
+  const [showPickSkuPopover, setShowPickSkuPopover] = useState(false)
+  const [pickPopoverPos, setPickPopoverPos] = useState({ top: 0, left: 0 })
+  const [pickSkuSearch, setPickSkuSearch] = useState('')
   const [showDemandSkuPopover, setShowDemandSkuPopover] = useState(false)
   const [demandSkuSearch, setDemandSkuSearch] = useState('')
 
@@ -1851,6 +1860,29 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const shownPicklist = useMemo(
     () => pickCourierFilter === 'all' ? flatPicklist : flatPicklist.filter(r => r.courier === pickCourierFilter),
     [flatPicklist, pickCourierFilter])
+
+  // Distinct dates/SKUs for the picklist column filters.
+  const pickDates = useMemo(() => Array.from(new Set(shownPicklist.map(r => r.date))).sort(), [shownPicklist])
+  const pickSkus = useMemo(() => Array.from(new Set(shownPicklist.map(r => r.sku))).sort(), [shownPicklist])
+
+  // The picklist rows actually shown: courier chips (shownPicklist) + Date/SKU column
+  // filters + optional column sort. Falls back to the default date→courier→sku order.
+  const pickView = useMemo(() => {
+    let rows = shownPicklist
+    if (pickDateFilter.size > 0) rows = rows.filter(r => pickDateFilter.has(r.date))
+    if (pickSkuFilter.size > 0) rows = rows.filter(r => pickSkuFilter.has(r.sku))
+    if (pickSortKey) {
+      const dir = pickSortDir === 'asc' ? 1 : -1
+      rows = [...rows].sort((a, b) => {
+        let av: string | number, bv: string | number
+        if (pickSortKey === 'qty') { av = a.qty; bv = b.qty }
+        else if (pickSortKey === 'count') { av = a.count; bv = b.count }
+        else { av = String(a[pickSortKey]).toLowerCase(); bv = String(b[pickSortKey]).toLowerCase() }
+        return av < bv ? -dir : av > bv ? dir : 0
+      })
+    }
+    return rows
+  }, [shownPicklist, pickDateFilter, pickSkuFilter, pickSortKey, pickSortDir])
 
   const allVisibleSelected = filteredActive.length > 0 && filteredActive.every(o => selectedIds.has(o.id))
   const toggleSelectAll = () => {
@@ -3476,13 +3508,94 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 720 }}>
                     <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
                       <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-                        {['Date', 'Courier', 'SKU', 'Qty', 'Orders', 'Action'].map((h, hi) => (
-                          <th key={hi} style={{ padding: '9px 16px', textAlign: (h === 'Qty' || h === 'Orders') ? 'right' as const : 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>
-                        ))}
+                        {/* Date — sortable + filter */}
+                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span onClick={() => { setPickSortDir(d => pickSortKey === 'date' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('date') }} style={{ cursor: 'pointer', userSelect: 'none' as const, color: pickSortKey === 'date' ? 'var(--accent)' : 'var(--text3)' }}>
+                              Date {pickSortKey === 'date' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
+                            </span>
+                            <button onClick={e => { e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect(); setPickPopoverPos({ top: rect.bottom + 6, left: rect.left }); setShowPickDatePopover(v => !v); setShowPickSkuPopover(false) }} style={{ background: pickDateFilter.size > 0 ? 'var(--accent-bg)' : 'none', border: pickDateFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: '1px 5px', color: pickDateFilter.size > 0 ? 'var(--accent)' : 'var(--text3)', fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4 }}>
+                              {pickDateFilter.size > 0 ? `${pickDateFilter.size} ▾` : '▾'}
+                            </button>
+                            {pickDateFilter.size > 0 && <button onClick={() => setPickDateFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
+                          </div>
+                          {showPickDatePopover && (
+                            <div style={{ position: 'fixed' as const, top: pickPopoverPos.top, left: pickPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DATE</span>
+                                <button onClick={() => { setPickDateFilter(new Set()); setShowPickDatePopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
+                                {pickDates.map(date => {
+                                  const isSelected = pickDateFilter.has(date)
+                                  const label = date === 'Unscheduled' ? 'No date' : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+                                  const count = shownPicklist.filter(r => r.date === date).length
+                                  return (
+                                    <button key={date} onClick={() => setPickDateFilter(prev => { const n = new Set(prev); n.has(date) ? n.delete(date) : n.add(date); return n })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
+                                      <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{isSelected && <span style={{ color: '#fff', fontSize: 9 }}>✓</span>}</span>
+                                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: date === today ? '#059669' : 'var(--text)', flex: 1 }}>{date === today ? `Today · ${label}` : label}</span>
+                                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              <button onClick={() => setShowPickDatePopover(false)} style={{ marginTop: 10, width: '100%', padding: '6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                            </div>
+                          )}
+                        </th>
+                        {/* Courier — sortable */}
+                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'courier' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('courier') }} style={{ padding: '9px 16px', textAlign: 'left' as const, color: pickSortKey === 'courier' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
+                          Courier {pickSortKey === 'courier' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
+                        </th>
+                        {/* SKU — sortable + filter */}
+                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span onClick={() => { setPickSortDir(d => pickSortKey === 'sku' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('sku') }} style={{ cursor: 'pointer', userSelect: 'none' as const, color: pickSortKey === 'sku' ? 'var(--accent)' : 'var(--text3)' }}>
+                              SKU {pickSortKey === 'sku' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
+                            </span>
+                            <button onClick={e => { e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect(); setPickPopoverPos({ top: rect.bottom + 6, left: rect.left }); setShowPickSkuPopover(v => !v); setShowPickDatePopover(false) }} style={{ background: pickSkuFilter.size > 0 ? 'var(--accent-bg)' : 'none', border: pickSkuFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: '1px 5px', color: pickSkuFilter.size > 0 ? 'var(--accent)' : 'var(--text3)', fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4 }}>
+                              {pickSkuFilter.size > 0 ? `${pickSkuFilter.size} ▾` : '▾'}
+                            </button>
+                            {pickSkuFilter.size > 0 && <button onClick={() => setPickSkuFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
+                          </div>
+                          {showPickSkuPopover && (
+                            <div style={{ position: 'fixed' as const, top: pickPopoverPos.top, left: pickPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 220, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>SKU</span>
+                                <button onClick={() => { setPickSkuFilter(new Set()); setShowPickSkuPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
+                              </div>
+                              <input value={pickSkuSearch} onChange={e => setPickSkuSearch(e.target.value)} placeholder="Search SKUs…" style={{ width: '100%', padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, outline: 'none', marginBottom: 6, fontFamily: 'DM Mono' }} />
+                              <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
+                                {pickSkus.filter(s => !pickSkuSearch || s.toLowerCase().includes(pickSkuSearch.toLowerCase())).map(sku => {
+                                  const isSelected = pickSkuFilter.has(sku)
+                                  const count = shownPicklist.filter(r => r.sku === sku).length
+                                  return (
+                                    <button key={sku} onClick={() => setPickSkuFilter(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
+                                      <span style={{ width: 13, height: 13, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{isSelected && <span style={{ color: '#fff', fontSize: 8 }}>✓</span>}</span>
+                                      <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
+                                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>{count}</span>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              <button onClick={() => setShowPickSkuPopover(false)} style={{ marginTop: 8, width: '100%', padding: '5px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer', fontSize: 12 }}>Done</button>
+                            </div>
+                          )}
+                        </th>
+                        {/* Qty — sortable */}
+                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'qty' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('qty') }} style={{ padding: '9px 16px', textAlign: 'right' as const, color: pickSortKey === 'qty' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
+                          Qty {pickSortKey === 'qty' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
+                        </th>
+                        {/* Orders — sortable */}
+                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'count' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('count') }} style={{ padding: '9px 16px', textAlign: 'right' as const, color: pickSortKey === 'count' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
+                          Orders {pickSortKey === 'count' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
+                        </th>
+                        {/* Action */}
+                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {shownPicklist.map((row, i) => {
+                      {pickView.map((row, i) => {
                         const isToday = row.date === today
                         const dateLabel = row.date === 'Unscheduled' ? 'No date'
                           : new Date(row.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
@@ -3520,13 +3633,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <tfoot>
                       <tr className="pick-total-row" style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)', position: 'sticky' as const, bottom: 0 }}>
                         <td style={{ padding: '10px 16px', fontWeight: 700, fontSize: 13 }} colSpan={3}>
-                          Total{pickCourierFilter !== 'all' ? ` · ${pickCourierFilter === 'Bluedart' ? 'BD' : 'DL'}` : ''} · {shownPicklist.length} lines
+                          Total{pickCourierFilter !== 'all' ? ` · ${pickCourierFilter === 'Bluedart' ? 'BD' : 'DL'}` : ''} · {pickView.length} lines
                         </td>
                         <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
-                          {shownPicklist.reduce((sum, r) => sum + r.qty, 0)}
+                          {pickView.reduce((sum, r) => sum + r.qty, 0)}
                         </td>
                         <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 14, color: 'var(--text2)' }}>
-                          {shownPicklist.reduce((sum, r) => sum + r.count, 0)}
+                          {pickView.reduce((sum, r) => sum + r.count, 0)}
                         </td>
                         <td />
                       </tr>
@@ -3612,6 +3725,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               {(() => {
                 const cols = demandView === 'weekly' ? upcomingDemand.weeklyCols : upcomingDemand.dailyCols
                 const visibleSkus = demandSkuFilter.size > 0 ? upcomingDemand.allSkus.filter(s => demandSkuFilter.has(s)) : upcomingDemand.allSkus
+                const stockAvailOf = (sku: string) => { const stk = stockByPlatformSku[sku]; return stk === undefined ? -Infinity : stk - (picklistCommittedBySku[sku] || 0) }
+                const sortedSkus = [...visibleSkus].sort((a, b) => {
+                  const dir = demandSort.dir === 'asc' ? 1 : -1
+                  let av: string | number, bv: string | number
+                  if (demandSort.key === 'sku') { av = a.toLowerCase(); bv = b.toLowerCase() }
+                  else if (demandSort.key === 'stock') { av = stockAvailOf(a); bv = stockAvailOf(b) }
+                  else { av = upcomingDemand.skuTotals[a] || 0; bv = upcomingDemand.skuTotals[b] || 0 }
+                  return av < bv ? -dir : av > bv ? dir : 0
+                })
+                const demandArrow = (k: 'sku' | 'total' | 'stock') => demandSort.key === k ? (demandSort.dir === 'asc' ? ' ↑' : ' ↓') : ''
                 const getQty = (sku: string, colKey: string) => demandView === 'weekly'
                   ? upcomingDemand.weekSkuQty[colKey]?.[sku] || 0
                   : upcomingDemand.dateSkuQty[colKey]?.[sku] || 0
@@ -3625,9 +3748,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12 }}>
                       <thead>
                         <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
-                          <th style={{ padding: '9px 16px', textAlign: 'left' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'sticky' as const, left: 0, background: 'var(--bg2)', zIndex: 1, minWidth: 160 }}>SKU</th>
-                          <th style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const }}>Total</th>
-                          <th style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const }} title="Stock remaining after the picklist is fulfilled (stock − committed to picklist)">Stock avail.</th>
+                          <th onClick={() => setDemandSort(s => ({ key: 'sku', dir: s.key === 'sku' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'asc' }))} style={{ padding: '9px 16px', textAlign: 'left' as const, fontFamily: 'DM Mono', fontSize: 11, color: demandSort.key === 'sku' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'sticky' as const, left: 0, background: 'var(--bg2)', zIndex: 1, minWidth: 160, cursor: 'pointer', userSelect: 'none' as const }}>SKU{demandArrow('sku') || (demandSort.key !== 'sku' ? ' ↕' : '')}</th>
+                          <th onClick={() => setDemandSort(s => ({ key: 'total', dir: s.key === 'total' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'desc' }))} style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: demandSort.key === 'total' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }}>Total{demandArrow('total') || (demandSort.key !== 'total' ? ' ↕' : '')}</th>
+                          <th onClick={() => setDemandSort(s => ({ key: 'stock', dir: s.key === 'stock' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'desc' }))} style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: demandSort.key === 'stock' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }} title="Stock remaining after the picklist is fulfilled (stock − committed to picklist)">Stock avail.{demandArrow('stock') || (demandSort.key !== 'stock' ? ' ↕' : '')}</th>
                           {cols.map(col => (
                             <th key={col.key} style={{
                               padding: '9px 12px', textAlign: 'center' as const,
@@ -3647,7 +3770,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </tr>
                       </thead>
                       <tbody>
-                        {visibleSkus.map((sku, i) => {
+                        {sortedSkus.map((sku, i) => {
                           const rowTotal = upcomingDemand.skuTotals[sku] || 0
                           return (
                             <tr key={sku} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
