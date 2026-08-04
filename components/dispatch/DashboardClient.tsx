@@ -1764,7 +1764,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       })
     }
     return list
-  }, [activeOrders, activeFilter, daysFilter, courierFilter, skuFilter, dispatchDateFilter, genFilter, sortCol, sortDir])
+  }, [activeOrders, activeFilter, daysFilter, courierFilter, skuFilter, dispatchDateFilter, dispatchByFilter, genFilter, sortCol, sortDir])
 
   // Orders matching ONLY the active KPI/urgency card (no courier/days/sku sub-filters).
   // Used so sub-filter dropdowns (courier, days) show counts scoped to the selected card.
