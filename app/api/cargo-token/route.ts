@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getCargoTokenStatus } from '@/lib/cargoToken'
 
 // Decode a JWT's exp claim (unix seconds) without any library.
 function decodeExp(token: string): number | null {
@@ -22,6 +23,7 @@ export async function GET() {
   const dbToken = (data?.value as string) || ''
   const token = dbToken || process.env.CARGO_TOKEN || ''
   const exp = token ? decodeExp(token) : null
+  const refreshStatus = await getCargoTokenStatus(supabase)
 
   return NextResponse.json({
     hasToken: !!token,
@@ -29,6 +31,7 @@ export async function GET() {
     expiresAt: exp ? new Date(exp * 1000).toISOString() : null,
     setAt: data?.updated_at || null,
     updatedBy: data?.updated_by || null,
+    ...refreshStatus,
   })
 }
 
@@ -41,16 +44,31 @@ export async function POST(request: Request) {
   const { data: access } = await supabase.from('dispatch_user_access').select('can_users').eq('email', user.email).maybeSingle()
   if (!access?.can_users) return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
 
-  const body = await request.json().catch(() => ({})) as { token?: string }
+  const body = await request.json().catch(() => ({})) as { token?: string; refreshToken?: string }
   const clean = (body.token || '').trim()
-  if (!clean) return NextResponse.json({ error: 'Token is empty' }, { status: 400 })
+  const cleanRefresh = (body.refreshToken || '').trim()
+  if (!clean && !cleanRefresh) return NextResponse.json({ error: 'Provide a token and/or refreshToken' }, { status: 400 })
 
-  const exp = decodeExp(clean)
-  const { error } = await supabase.from('app_config').upsert(
-    { key: 'cargo_token', value: clean, updated_at: new Date().toISOString(), updated_by: user.email },
-    { onConflict: 'key' }
-  )
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (clean) {
+    const { error } = await supabase.from('app_config').upsert(
+      { key: 'cargo_token', value: clean, updated_at: new Date().toISOString(), updated_by: user.email },
+      { onConflict: 'key' }
+    )
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+  if (cleanRefresh) {
+    const { error: rErr } = await supabase.from('app_config').upsert(
+      { key: 'cargo_refresh_token', value: cleanRefresh, updated_at: new Date().toISOString(), updated_by: user.email },
+      { onConflict: 'key' }
+    )
+    if (rErr) return NextResponse.json({ error: rErr.message }, { status: 500 })
+  }
 
-  return NextResponse.json({ ok: true, expiresAt: exp ? new Date(exp * 1000).toISOString() : null })
+  const exp = clean ? decodeExp(clean) : null
+  const refreshExp = cleanRefresh ? decodeExp(cleanRefresh) : null
+  return NextResponse.json({
+    ok: true,
+    expiresAt: exp ? new Date(exp * 1000).toISOString() : null,
+    refreshExpiresAt: refreshExp ? new Date(refreshExp * 1000).toISOString() : null,
+  })
 }

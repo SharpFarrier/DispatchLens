@@ -1873,9 +1873,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'),
         loadScript('https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js'),
       ])
-      // Cargo token + e-signature from app_config.
-      const { data: cfg } = await supabase.from('app_config').select('value').eq('key', 'cargo_token').maybeSingle()
-      const token = (cfg?.value as string) || ''
+      // Cargo access token from the server endpoint (auto-refreshes server-side;
+      // the refresh token never reaches the browser). E-signature from app_config.
+      const tokRes = await fetch('/api/cargo-token/access')
+      const token = tokRes.ok ? (((await tokRes.json()).token as string) || '') : ''
       const { data: sigCfg } = await supabase.from('app_config').select('value').eq('key', 'invoice_signature').maybeSingle()
       const signatureDataUrl = (sigCfg?.value as string) || null
 

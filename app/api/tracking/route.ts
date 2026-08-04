@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getCargoAccessToken } from '@/lib/cargoToken'
 
 const WORKER = 'https://tracklens-proxy.adityaramnani91581.workers.dev'
 
@@ -64,12 +65,9 @@ async function trackDelhiveryPublic(awb: string, debugLog: string[]): Promise<{ 
 }
 
 async function getCargoToken(supabase: Awaited<ReturnType<typeof createClient>>): Promise<string> {
-  try {
-    const { data } = await supabase.from('app_config').select('value').eq('key', 'cargo_token').maybeSingle()
-    const dbToken = (data?.value as string) || ''
-    if (dbToken) return dbToken
-  } catch { /* fall through to env */ }
-  return process.env.CARGO_TOKEN || ''
+  // Refresh-aware: returns a valid access token, auto-renewing via the stored
+  // refresh token when the current one is near expiry. Falls back gracefully.
+  return getCargoAccessToken(supabase)
 }
 
 export async function POST(request: Request) {

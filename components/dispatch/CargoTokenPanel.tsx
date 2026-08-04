@@ -9,6 +9,8 @@ interface Meta {
   expiresAt: string | null
   setAt: string | null
   updatedBy: string | null
+  hasRefreshToken?: boolean
+  refreshExpiresAt?: string | null
 }
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
@@ -21,6 +23,9 @@ export default function CargoTokenPanel() {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
+  const [refreshInput, setRefreshInput] = useState('')
+  const [savingRefresh, setSavingRefresh] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
   const supabase = createClient()
   const [signature, setSignature] = useState<string | null>(null)
   const [sigMsg, setSigMsg] = useState<string | null>(null)
@@ -75,6 +80,18 @@ export default function CargoTokenPanel() {
       else setSaveMsg(d.error || 'Save failed')
     } catch (e) { setSaveMsg(String(e)) }
     setSaving(false)
+  }
+
+  const saveRefresh = async () => {
+    if (!refreshInput.trim()) return
+    setSavingRefresh(true); setRefreshMsg(null)
+    try {
+      const r = await fetch('/api/cargo-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: refreshInput.trim() }) })
+      const d = await r.json()
+      if (r.ok) { setRefreshMsg('Refresh token saved — auto-refresh is on.'); setRefreshInput(''); await loadMeta() }
+      else setRefreshMsg(d.error || 'Save failed')
+    } catch (e) { setRefreshMsg(String(e)) }
+    setSavingRefresh(false)
   }
 
   const test = async () => {
@@ -148,6 +165,36 @@ export default function CargoTokenPanel() {
               Last updated {new Date(meta.setAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}{meta.updatedBy ? ` by ${meta.updatedBy}` : ''}
             </span>
           )}
+
+          {/* ── Automatic refresh (long-lived refresh token) ── */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+              <RefreshCw size={14} style={{ color: 'var(--accent)' }} /> Automatic refresh
+            </div>
+            {meta?.hasRefreshToken ? (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 600, color: 'var(--dispatched)' }}>
+                <CheckCircle size={13} /> Auto-refresh on{meta.refreshExpiresAt ? ` · refresh token valid until ${new Date(meta.refreshExpiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+              </div>
+            ) : (
+              <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0, lineHeight: 1.5 }}>
+                Set the long-lived <strong>refresh token</strong> once and the access token above renews itself — no more manual pasting. Get it from the Cargo portal login response (the <code>refresh</code> field).
+              </p>
+            )}
+            <textarea
+              value={refreshInput}
+              onChange={e => { setRefreshInput(e.target.value); setRefreshMsg(null) }}
+              placeholder="Paste the Cargo refresh token (starts with eyJ…)"
+              style={{ width: '100%', height: 70, padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', fontFamily: 'DM Mono', fontSize: 11, resize: 'vertical' as const, outline: 'none', lineHeight: 1.5 }}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border)'}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+              <button onClick={saveRefresh} disabled={savingRefresh || !refreshInput.trim()} style={{ padding: '8px 18px', borderRadius: 7, border: 'none', background: savingRefresh || !refreshInput.trim() ? 'var(--bg2)' : 'var(--accent)', color: savingRefresh || !refreshInput.trim() ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 600, cursor: savingRefresh || !refreshInput.trim() ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CheckCircle size={14} /> {savingRefresh ? 'Saving…' : 'Save refresh token'}
+              </button>
+              {refreshMsg && <span style={{ fontSize: 12, fontWeight: 500, color: refreshMsg.includes('saved') ? 'var(--dispatched)' : 'var(--critical)' }}>{refreshMsg}</span>}
+            </div>
+          </div>
 
           {/* ── Invoice e-signature ── */}
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
