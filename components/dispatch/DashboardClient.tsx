@@ -4944,7 +4944,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <div key={r.orderId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderTop: i === 0 ? 'none' : '1px solid var(--border)', background: r.status === 'failed' ? 'var(--critical-bg)' : 'transparent' }}>
                       {statusCell(r.status)}
                       <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, padding: '2px 6px', borderRadius: 4, color: r.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: r.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff' }}>{r.courier === 'Bluedart' ? 'BD' : 'SR'}</span>
-                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{r.sku || '—'}</span>
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.orderId}</span>
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{r.sku || '—'}</span>
                       {r.status === 'failed' && r.error && <span style={{ fontSize: 11, color: 'var(--critical)', marginLeft: 'auto', textAlign: 'right' as const }}>{r.error}</span>}
                     </div>
                   ))}
