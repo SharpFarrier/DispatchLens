@@ -1386,35 +1386,49 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     return 'HOLD'
   }
 
+  // Faceted filtering for the Plan column filters: each filter's options + counts reflect the
+  // rows left after the OTHER active column filters (plus the KPI chip and generated toggle),
+  // so the values you see always match what filtering by them would actually yield. A filter is
+  // excluded from its OWN facet, so all of its still-compatible values stay listed. Selected
+  // values are unioned back into each option list below, so you can always deselect them.
+  const planFacet = useCallback((except: 'courier' | 'sku' | 'days' | 'dispatchDate' | 'dispatchBy') => {
+    let list = [...activeOrders]
+    if (activeFilter === 'scheduled') list = list.filter(o => o.plan_decision === 'scheduled')
+    else if (activeFilter === 'scheduled_today') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
+    else if (activeFilter === 'slipped') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today)
+    else if (activeFilter === 'hold') list = list.filter(o => isHeld(o))
+    else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
+    else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
+    else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
+    else if (activeFilter !== 'ALL') list = list.filter(o => liveUrgency(o) === activeFilter)
+    if (except !== 'courier' && courierFilter.size > 0) list = list.filter(o => courierFilter.has(o.courier))
+    if (except !== 'sku' && skuFilter.size > 0) list = list.filter(o => skuFilter.has(o.sku))
+    if (except !== 'days' && daysFilter.size > 0) list = list.filter(o => daysFilter.has(displayDaysLeft(o) ?? -999))
+    if (except !== 'dispatchDate' && dispatchDateFilter.size > 0) list = list.filter(o => dispatchDateFilter.has(o.scheduled_date || 'none'))
+    if (except !== 'dispatchBy' && dispatchByFilter.size > 0) list = list.filter(o => dispatchByFilter.has(o.dispatch_by_date || 'none'))
+    if (genFilter === 'generated') list = list.filter(o => !!o.dispatch_generated_at)
+    else if (genFilter === 'not') list = list.filter(o => !o.dispatch_generated_at)
+    return list
+  }, [activeOrders, activeFilter, today, courierFilter, skuFilter, daysFilter, dispatchDateFilter, dispatchByFilter, genFilter])
+  const skuFacet = useMemo(() => planFacet('sku'), [planFacet])
+  const courierFacet = useMemo(() => planFacet('courier'), [planFacet])
+  const daysFacet = useMemo(() => planFacet('days'), [planFacet])
+  const dispatchDateFacet = useMemo(() => planFacet('dispatchDate'), [planFacet])
+  const dispatchByFacet = useMemo(() => planFacet('dispatchBy'), [planFacet])
+
   const uniqueDispatchDates = useMemo(() => {
     const vals = new Set<string>()
-    let base = [...activeOrders]
-    if (activeFilter === 'scheduled_today') base = base.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
-    else if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
-    else if (activeFilter === 'hold') base = base.filter(o => isHeld(o))
-    else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
-    else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
-    else if (activeFilter !== 'ALL') base = base.filter(o => liveUrgency(o) === (activeFilter as string))
-    if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
-    if (daysFilter.size > 0) base = base.filter(o => daysFilter.has(displayDaysLeft(o) ?? -999))
-    base.forEach(o => vals.add(o.scheduled_date || 'none'))
+    dispatchDateFacet.forEach(o => vals.add(o.scheduled_date || 'none'))
+    dispatchDateFilter.forEach(v => vals.add(v))
     return Array.from(vals).sort()
-  }, [activeOrders, activeFilter, courierFilter, daysFilter, today])
+  }, [dispatchDateFacet, dispatchDateFilter])
 
   const uniqueDispatchByDates = useMemo(() => {
     const vals = new Set<string>()
-    let base = [...activeOrders]
-    if (activeFilter === 'scheduled_today') base = base.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
-    else if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
-    else if (activeFilter === 'hold') base = base.filter(o => isHeld(o))
-    else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
-    else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
-    else if (activeFilter !== 'ALL') base = base.filter(o => liveUrgency(o) === (activeFilter as string))
-    if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
-    if (skuFilter.size > 0) base = base.filter(o => skuFilter.has(o.sku))
-    base.forEach(o => vals.add(o.dispatch_by_date || 'none'))
+    dispatchByFacet.forEach(o => vals.add(o.dispatch_by_date || 'none'))
+    dispatchByFilter.forEach(v => vals.add(v))
     return Array.from(vals).sort()
-  }, [activeOrders, activeFilter, courierFilter, skuFilter, today])
+  }, [dispatchByFacet, dispatchByFilter])
   const dispatchedOrders = useMemo(() => orders.filter(o => o.is_dispatched && !o.is_cancelled), [orders])
 
   // ── Resolve the active date window into [fromISO, toISO] (null = no bound) ──
@@ -1771,34 +1785,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // Orders matching ONLY the active KPI/urgency card (no courier/days/sku sub-filters).
   // Used so sub-filter dropdowns (courier, days) show counts scoped to the selected card.
-  const activeFilterBase = useMemo(() => {
-    let list = [...activeOrders]
-    if (activeFilter === 'scheduled') list = list.filter(o => o.plan_decision === 'scheduled')
-    else if (activeFilter === 'scheduled_today') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
-    else if (activeFilter === 'slipped') list = list.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date < today)
-    else if (activeFilter === 'hold') list = list.filter(o => isHeld(o))
-    else if (activeFilter === 'unfulfillable') list = list.filter(o => o.plan_decision === 'unfulfillable')
-    else if (activeFilter === 'undecided') list = list.filter(o => o.plan_decision === 'undecided')
-    else if (activeFilter === 'unmapped') list = list.filter(o => !o.barcode_sku)
-    else if (activeFilter !== 'ALL') list = list.filter(o => liveUrgency(o) === activeFilter)
-    return list
-  }, [activeOrders, activeFilter, today])
-
-  // Unique display days left values — based on currently filtered list (respects active KPI/urgency filter)
+  // Unique display days left values — faceted (respects the other active filters).
   const uniqueDaysLeft = useMemo(() => {
     const vals = new Set<number>()
-    // Use filteredActive but without the daysFilter applied to avoid circular dependency
-    let baseList = [...activeOrders]
-    if (activeFilter === 'scheduled_today') baseList = baseList.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date === today)
-    else if (activeFilter === 'scheduled') baseList = baseList.filter(o => o.plan_decision === 'scheduled')
-    else if (activeFilter === 'hold') baseList = baseList.filter(o => isHeld(o))
-    else if (activeFilter === 'unfulfillable') baseList = baseList.filter(o => o.plan_decision === 'unfulfillable')
-    else if (activeFilter === 'undecided') baseList = baseList.filter(o => o.plan_decision === 'undecided')
-    else if (activeFilter !== 'ALL') baseList = baseList.filter(o => liveUrgency(o) === activeFilter)
-    if (courierFilter.size > 0) baseList = baseList.filter(o => courierFilter.has(o.courier))
-    baseList.forEach(o => { const d = displayDaysLeft(o); if (d !== null) vals.add(d) })
+    daysFacet.forEach(o => { const d = displayDaysLeft(o); if (d !== null) vals.add(d) })
+    daysFilter.forEach(v => vals.add(v))
     return Array.from(vals).sort((a, b) => a - b)
-  }, [activeOrders, activeFilter, courierFilter, today])
+  }, [daysFacet, daysFilter])
 
   const handleColSort = (col: string) => {
     if (sortCol === col) {
@@ -2844,9 +2837,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   <input value={skuSearch} onChange={e => setSkuSearch(e.target.value)} placeholder="Search SKUs…"
                                     style={{ width: '100%', padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, outline: 'none', marginBottom: 6, fontFamily: 'DM Mono' }} />
                                   <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
-                                    {Array.from(new Set(activeOrders.map(o => o.sku))).filter(s => !skuSearch || s.toLowerCase().includes(skuSearch.toLowerCase())).sort().map(sku => {
+                                    {Array.from(new Set([...skuFacet.map(o => o.sku), ...skuFilter])).filter(s => !skuSearch || s.toLowerCase().includes(skuSearch.toLowerCase())).sort().map(sku => {
                                       const isSelected = skuFilter.has(sku)
-                                      const count = activeFilterBase.filter(o => o.sku === sku).length
+                                      const count = skuFacet.filter(o => o.sku === sku).length
                                       return (
                                         <button key={sku} onClick={() => setSkuFilter(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n })}
                                           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
@@ -2918,7 +2911,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
                                     {(['Bluedart', 'Delhivery'] as const).map(courier => {
                                       const isSelected = courierFilter.has(courier)
-                                      const count = activeFilterBase.filter(o => o.courier === courier).length
+                                      const count = courierFacet.filter(o => o.courier === courier).length
                                       const color = courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
                                       return (
                                         <button key={courier} onClick={() => {
@@ -2984,7 +2977,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                       const label = date === 'none' ? 'No date set'
                                         : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
                                       const color = date === 'none' ? 'var(--text3)' : isToday ? '#059669' : 'var(--today)'
-                                      const count = activeFilterBase.filter(o => (o.dispatch_by_date || 'none') === date).length
+                                      const count = dispatchByFacet.filter(o => (o.dispatch_by_date || 'none') === date).length
                                       return (
                                         <button key={date} onClick={() => {
                                           setDispatchByFilter(prev => { const n = new Set(prev); n.has(date) ? n.delete(date) : n.add(date); return n })
@@ -3097,16 +3090,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                       </span>
                                       <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color }}>{d}</span>
                                       <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 'auto' }}>
-                                        {(() => {
-                                        let base = [...activeOrders]
-                                        if (activeFilter === 'scheduled') base = base.filter(o => o.plan_decision === 'scheduled')
-                                        else if (activeFilter === 'hold') base = base.filter(o => isHeld(o))
-                                        else if (activeFilter === 'unfulfillable') base = base.filter(o => o.plan_decision === 'unfulfillable')
-                                        else if (activeFilter === 'undecided') base = base.filter(o => o.plan_decision === 'undecided')
-                                        else if (activeFilter !== 'ALL' && activeFilter !== 'scheduled_today') base = base.filter(o => liveUrgency(o) === activeFilter)
-                                        if (courierFilter.size > 0) base = base.filter(o => courierFilter.has(o.courier))
-                                        return base.filter(o => displayDaysLeft(o) === d).length
-                                      })()}
+                                        {daysFacet.filter(o => displayDaysLeft(o) === d).length}
                                       </span>
                                     </button>
                                   )
@@ -3167,7 +3151,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   const label = date === 'none' ? 'No date set'
                                     : new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
                                   const color = date === 'none' ? 'var(--text3)' : isToday ? '#059669' : 'var(--hold)'
-                                  const count = activeOrders.filter(o => (o.scheduled_date || 'none') === date).length
+                                  const count = dispatchDateFacet.filter(o => (o.scheduled_date || 'none') === date).length
                                   return (
                                     <button key={date} onClick={() => {
                                       setDispatchDateFilter(prev => {
