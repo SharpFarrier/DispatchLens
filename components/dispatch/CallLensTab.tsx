@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { DBOrder } from '@/types'
 import { logOrderEvent } from '@/lib/orderEvents'
-import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download } from 'lucide-react'
+import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download, ExternalLink } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -146,7 +146,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     { key: 'callback_date', label: 'Callback', type: 'date', queues: ['callbacks'], get: r => r.o.callback_date || '', render: r => { const d = r.o.callback_date; if (!d) return '—'; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{overdue ? `${fmtDate(d)} · overdue` : due ? `${fmtDate(d)} · today` : fmtDate(d)}</span> } },
     { key: 'order_id', label: 'Order', type: 'text', get: r => r.o.order_id },
     { key: 'platform', label: 'Platform', type: 'category', get: r => platformOf(r.o.order_id), render: r => { const p = platformOf(r.o.order_id); const c = p === 'Amazon' ? { fg: '#b45309', bg: '#fef3c7' } : p === 'Flipkart' ? { fg: '#2563eb', bg: '#eff6ff' } : p === 'Website' ? { fg: '#7c3aed', bg: '#f5f3ff' } : { fg: 'var(--text3)', bg: 'var(--bg2)' }; return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: c.fg, background: c.bg, padding: '2px 7px', borderRadius: 4 }}>{p}</span> } },
-    { key: 'tracking', label: 'Tracking ID', type: 'text', get: r => r.o.tracking_number || '', render: r => r.o.tracking_number ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{r.o.tracking_number}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
+    { key: 'tracking', label: 'AWB', type: 'text', get: r => r.o.tracking_number || '', render: r => r.o.tracking_number ? <a href={r.o.courier === 'Bluedart' ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${r.o.tracking_number}` : `https://www.delhivery.com/track/package/${r.o.tracking_number}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }} onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{r.o.tracking_number} <ExternalLink size={9} /></a> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
     { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '' },
     { key: 'sku', label: 'SKU', type: 'category', get: r => r.o.sku || '(none)' },
     { key: 'oda', label: 'ODA', type: 'category', get: r => r.o.oda === 'ODA' ? 'ODA' : '(no)', render: r => r.o.oda === 'ODA' ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', padding: '2px 7px', borderRadius: 4 }}>ODA</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
