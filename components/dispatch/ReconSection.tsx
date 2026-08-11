@@ -8,9 +8,10 @@ import {
   parseRazorpayText, parseCashfreeText, detectWebsiteAggregator,
   type SettlementRow,
 } from '@/lib/settlements'
+import RateCardEditor from './RateCardEditor'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }
-type Tab = 'inbox' | 'orders'
+type Tab = 'inbox' | 'orders' | 'ratecard'
 
 interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string; total_settled?: number | null; order_count?: number | null; deposit_date?: string | null; period_start?: string | null; period_end?: string | null }
 type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
@@ -170,11 +171,11 @@ export default function ReconSection() {
   return (
     <div style={{ maxWidth: 1280 }}>
       <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
-        {(['inbox', 'orders'] as Tab[]).map(t => (
+        {(['inbox', 'orders', 'ratecard'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
             background: tab === t ? 'var(--accent)' : 'var(--surface)', color: tab === t ? '#fff' : 'var(--text2)',
-          }}>{t === 'inbox' ? 'Settlement Inbox' : 'Orders'}</button>
+          }}>{t === 'inbox' ? 'Settlement Inbox' : t === 'orders' ? 'Orders' : 'Rate Card'}</button>
         ))}
         <button onClick={() => loadInbox()} style={{ marginLeft: 'auto', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
           <RefreshCw size={13} /> Refresh
@@ -189,8 +190,10 @@ export default function ReconSection() {
 
       {tab === 'inbox' ? (
         <InboxView uploads={uploads} totals={totals} fileAgg={fileAgg} loading={loading} busy={busy} onFiles={handleFiles} />
-      ) : (
+      ) : tab === 'orders' ? (
         <OrdersView />
+      ) : (
+        <RateCardEditor />
       )}
     </div>
   )
