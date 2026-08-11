@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
-import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X } from 'lucide-react'
+import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X, Download } from 'lucide-react'
 import {
   parseAmazonText, parseFlipkartBuffer, readFileText, readFileBuffer,
   parseRazorpayText, parseCashfreeText, detectWebsiteAggregator,
@@ -619,6 +619,21 @@ function OrdersView() {
   const anyFilter = Object.values(textFilters).some(Boolean) || Object.values(catFilters).some(a => a?.length) || Object.values(dateFilters).some(a => a?.length)
   const clearAll = () => { setTextFilters({}); setCatFilters({}); setDateFilters({}) }
 
+  // Export the currently filtered/sorted rows (all of them, not just the visible page).
+  const exportCsv = () => {
+    const csvCell = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const headers = [...COLS.map(c => c.label), 'SKU', 'Net settled']
+    const lines = [headers.join(',')]
+    for (const r of filtered) lines.push([...COLS.map(c => csvCell(c.get(r))), csvCell(r.sku || ''), csvCell(r.net)].join(','))
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `recon-orders-${win}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const monthName = (mo: string) => ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(mo, 10)] || mo
   const dayNum = (day: string) => parseInt(day.slice(8, 10), 10)
   const toggleDays = (colKey: string, days: string[], on: boolean) => {
@@ -672,9 +687,14 @@ function OrdersView() {
             color: bucket === t.key ? '#fff' : 'var(--text2)',
           }}>{t.label} {loading ? '' : t.n.toLocaleString()}</button>
         ))}
-        {anyFilter && (
-          <button onClick={clearAll} style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}><X size={12} /> Clear filters</button>
-        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button onClick={exportCsv} disabled={loading || !filtered.length} title={anyFilter ? 'Export the filtered rows' : 'Export all rows in this window'} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: filtered.length ? 'var(--text2)' : 'var(--text3)', cursor: filtered.length ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Download size={12} /> Export CSV{anyFilter ? ' (filtered)' : ''}
+          </button>
+          {anyFilter && (
+            <button onClick={clearAll} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}><X size={12} /> Clear filters</button>
+          )}
+        </div>
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
