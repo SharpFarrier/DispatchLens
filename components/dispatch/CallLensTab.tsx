@@ -70,6 +70,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [queue, setQueue] = useState<Queue>('predispatch')
+  const [callsToday, setCallsToday] = useState<number | null>(null)
   const [logs, setLogs] = useState<Record<string, CallLog[]>>({})
   const [expanded, setExpanded] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
@@ -217,6 +218,49 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     })
     return out
   }, [base, colByKey, textFilters, catFilters, dateFilters, sortKey, sortDir, isLocked])
+
+  // Calls logged today (IST) for the current queue — throughput KPI (not column-filtered).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const now = new Date()
+      const istNow = new Date(now.getTime() + 5.5 * 3600 * 1000)
+      const startMs = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate(), 0, 0, 0) - 5.5 * 3600 * 1000
+      const { count } = await supabase.from('call_logs').select('id', { count: 'exact', head: true }).eq('queue', queue).gte('created_at', new Date(startMs).toISOString())
+      if (!cancelled && typeof count === 'number') setCallsToday(count)
+    })()
+    return () => { cancelled = true }
+  }, [queue, supabase])
+
+  // KPI cards: reflect the current queue AND the active column filters (computed from `rows`).
+  const kpis = useMemo<{ label: string; value: number | string; fg: string; bg: string }[]>(() => {
+    const today = todayStr()
+    const n = (f: (o: DBOrder) => boolean) => rows.filter(r => f(r.o)).length
+    const callsCard = { label: 'Calls today', value: callsToday ?? '—', fg: 'var(--accent)', bg: 'var(--accent-bg)' }
+    if (queue === 'callbacks') return [
+      { label: 'In queue', value: rows.length, fg: 'var(--text)', bg: 'var(--bg2)' },
+      { label: 'Due today', value: n(o => o.callback_date === today), fg: 'var(--today)', bg: 'var(--today-bg)' },
+      { label: 'Overdue', value: n(o => !!o.callback_date && o.callback_date < today), fg: 'var(--critical)', bg: 'var(--critical-bg)' },
+      { label: 'Upcoming', value: n(o => !!o.callback_date && o.callback_date > today), fg: 'var(--text)', bg: 'var(--bg2)' },
+      callsCard,
+    ]
+    if (queue === 'delay') return [
+      { label: 'In queue', value: rows.length, fg: 'var(--text)', bg: 'var(--bg2)' },
+      { label: 'Okay with delay', value: n(o => o.last_disposition === 'Okay with delay'), fg: 'var(--dispatched)', bg: 'var(--dispatched-bg)' },
+      { label: 'Cancel requested', value: n(o => !!o.cancellation_requested), fg: 'var(--critical)', bg: 'var(--critical-bg)' },
+      { label: 'Escalated', value: n(o => !!o.escalated), fg: '#b45309', bg: '#fff7ed' },
+      { label: 'Delivery overdue', value: n(o => { const d = deliveryDaysLeft(o); return d !== null && d < 0 }), fg: 'var(--critical)', bg: 'var(--critical-bg)' },
+      callsCard,
+    ]
+    const confirmed = (o: DBOrder) => o.confirmation_status === 'confirmed' || o.confirmation_status === 'whatsapp_confirmed'
+    return [
+      { label: 'In queue', value: rows.length, fg: 'var(--text)', bg: 'var(--bg2)' },
+      { label: 'Confirmed', value: n(confirmed), fg: 'var(--dispatched)', bg: 'var(--dispatched-bg)' },
+      { label: 'To call', value: n(o => !confirmed(o)), fg: 'var(--today)', bg: 'var(--today-bg)' },
+      { label: 'Overdue', value: n(o => !!o.dispatch_by_date && o.dispatch_by_date < today), fg: 'var(--critical)', bg: 'var(--critical-bg)' },
+      callsCard,
+    ]
+  }, [rows, queue, callsToday])
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(key); setSortDir('asc') } }
   const hasFilter = (key: string) => !!textFilters[key] || (catFilters[key]?.length ?? 0) > 0 || (dateFilters[key]?.length ?? 0) > 0
@@ -430,6 +474,16 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
         <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
         <button onClick={exportCsv} disabled={loading || !rows.length} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> Export{anyFilter ? ' (filtered)' : ''}</button>
+      </div>
+
+      {/* KPI cards — reflect the current queue AND the active column filters */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+        {kpis.map(k => (
+          <div key={k.label} style={{ background: k.bg, borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: k.fg, fontFamily: 'DM Mono' }}>{k.value}</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)' }}>{k.label}</div>
+          </div>
+        ))}
       </div>
 
       {selected.size > 0 && (
