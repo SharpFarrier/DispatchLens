@@ -107,18 +107,24 @@ export async function parseFlipkartBuffer(buf: ArrayBuffer): Promise<ParsedFile>
     headers.forEach((h, i) => { obj[h] = row[i] !== undefined ? row[i] : '' })
     const oid = String(obj['Order item ID'] || '').trim()
     if (!oid || oid === 'Order item ID') continue
-    const neft = String(obj['NEFT ID'] || '').trim()
-    if (neft) dedupSet.add(neft)
+    const amt = parseFloat(String(obj[bankCol] || 0)) || 0
+    const payDate = String(obj['Payment Date'] || '').trim()
+    // Dedup per settlement LINE, not by NEFT ID. In newer Flipkart "disbursement" reports the
+    // "NEFT ID" column holds a status (e.g. "DISBURSEMENT_CREATED") that repeats on every row,
+    // which collapses a whole file to one dedup id and makes every later file look duplicate.
+    // Order item ID + payment date + amount uniquely identifies a line across payouts/returns.
+    const rowKey = `${oid}|${payDate}|${amt.toFixed(2)}`
+    dedupSet.add(rowKey)
     rows.push({
       platform: 'flipkart',
       order_id: String(obj['Order ID'] || '').trim() || null,
       order_item_code: oid || null,
       sku: String(obj['Seller SKU'] || '').trim() || null,
-      amount: parseFloat(String(obj[bankCol] || 0)) || 0,
+      amount: amt,
       transaction_type: (v => (v === 'Customer Return' || v === 'Logistics Return') ? v : 'Order')(String(obj['Return Type'] ?? '').trim()),
       amount_description: null,
-      dedup_key: neft,
-      settlement_date: String(obj['Payment Date'] || '') || null,
+      dedup_key: rowKey,
+      settlement_date: payDate || null,
       raw: obj,
     })
   }
