@@ -75,6 +75,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [tab, setTab] = useState<Tab>('import')
   const [orders, setOrders] = useState<DBOrder[]>(initialOrders)
   const [loadingOrders, setLoadingOrders] = useState(false)
+  const [dispatchedCount, setDispatchedCount] = useState<number | null>(null)
+  const [fullLoaded, setFullLoaded] = useState(false)
   const [skuMaps, setSkuMaps] = useState<SkuMap[]>([])
   // Bumped after a return is created in the history overlay, so the Returns tab reloads.
   const [returnsReload, setReturnsReload] = useState(0)
@@ -274,22 +276,46 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setLoadingOrders(true)
     const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     setOrders(data)
+    setFullLoaded(true)
     setLoadingOrders(false)
     setSelectedIds(new Set())
+  }, [supabase])
+
+  // Fast first paint: load only the active pool (the Plan tab lands here) so the app is
+  // usable almost immediately, instead of waiting on all ~thousands of dispatched rows.
+  // The full set then loads in the background (see the mount effect) to keep search,
+  // All Orders, import de-dup and the dispatched count correct.
+  const loadActive = useCallback(async () => {
+    setLoadingOrders(true)
+    const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').eq('is_dispatched', false).eq('is_cancelled', false).order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
+    setOrders(data)
+    setLoadingOrders(false)
+  }, [supabase])
+
+  // Dispatched badge count without pulling every row — shown until the full set lands.
+  const loadDispatchedCount = useCallback(async () => {
+    const { count } = await supabase.from('dispatch_orders').select('id', { count: 'exact', head: true }).eq('is_dispatched', true).eq('is_cancelled', false)
+    if (typeof count === 'number') setDispatchedCount(count)
   }, [supabase])
 
   // Silent refresh — re-pull orders without a loading flash or clearing selections.
   // Used to keep the End-of-Day batch/courier counts live while another device dispatches.
   const silentRefreshOrders = useCallback(async () => {
     const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
-    if (data.length) setOrders(data)
+    if (data.length) { setOrders(data); setFullLoaded(true) }
   }, [supabase])
 
   // Auto-load on mount if initialOrders is empty
 
   useEffect(() => {
-    // Always load fresh from DB to ensure all columns (incl. scheduled_date) are present
-    loadOrders()
+    // Fast first paint: load the active pool first (Plan lands here), then fetch the
+    // Dispatched badge count and the full set in the background so nothing that reads
+    // the complete order pool (search, All Orders, import de-dup) goes stale.
+    void (async () => {
+      await loadActive()
+      void loadDispatchedCount()
+      void silentRefreshOrders()
+    })()
     // Load SKU map for import-time barcode resolution + scan-out verification
     supabase.from('dispatch_sku_map').select('*').then(({ data }) => {
       if (data) setSkuMaps(data as SkuMap[])
@@ -2454,7 +2480,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'plan', label: 'Plan', count: activeOrders.length, show: effectiveAccess.can_plan },
             { key: 'review', label: 'Review', count: reviewCount, show: effectiveAccess.can_review },
             { key: 'picklist', label: 'Picklist', count: dispatchTodayCount, show: effectiveAccess.can_picklist },
-            { key: 'dispatched', label: 'Dispatched', count: dispatchedOrders.length, show: effectiveAccess.can_dispatched },
+            { key: 'dispatched', label: 'Dispatched', count: fullLoaded ? dispatchedOrders.length : (dispatchedCount ?? dispatchedOrders.length), show: effectiveAccess.can_dispatched },
             { key: 'eod', label: 'EOD', count: 0, show: effectiveAccess.can_eod },
           ] as { key: Tab; label: string; count: number; show: boolean }[]).filter(t => t.show).map(({ key, label, count }, i) => (
             <span key={key} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
