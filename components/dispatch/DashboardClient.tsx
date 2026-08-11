@@ -1,21 +1,13 @@
 'use client'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
-import AllOrdersTab from './AllOrdersTab'
-import CallLensTab from './CallLensTab'
 import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart, fetchBluedartLabels, stampLabelStrip } from '@/lib/dispatchDocs'
 import { fetchTracking, type TrackResult } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
-import UsersTab from './UsersTab'
-import SkuMapTab from './SkuMapTab'
-import ReturnsTab from './ReturnsTab'
-import CargoTokenPanel from './CargoTokenPanel'
-import WarehouseSection from './WarehouseSection'
-import ReconSection from './ReconSection'
-import OrderHistoryPanel from './OrderHistoryPanel'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { User } from '@supabase/supabase-js'
 import {
@@ -24,6 +16,20 @@ import {
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
   Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
 } from 'lucide-react'
+
+// Non-Plan tabs are code-split so they are NOT in the initial bundle (which lands on
+// Plan). Each loads its own chunk the first time it's opened — this also keeps jsPDF and
+// jsbarcode (pulled in by the Warehouse packing tabs) out of the first load.
+const TabLoading = () => <div style={{ padding: 48, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading…</div>
+const AllOrdersTab = dynamic(() => import('./AllOrdersTab'), { loading: TabLoading })
+const CallLensTab = dynamic(() => import('./CallLensTab'), { loading: TabLoading })
+const UsersTab = dynamic(() => import('./UsersTab'), { loading: TabLoading })
+const SkuMapTab = dynamic(() => import('./SkuMapTab'), { loading: TabLoading })
+const ReturnsTab = dynamic(() => import('./ReturnsTab'), { loading: TabLoading })
+const CargoTokenPanel = dynamic(() => import('./CargoTokenPanel'))
+const WarehouseSection = dynamic(() => import('./WarehouseSection'), { loading: TabLoading })
+const ReconSection = dynamic(() => import('./ReconSection'), { loading: TabLoading })
+const OrderHistoryPanel = dynamic(() => import('./OrderHistoryPanel'))
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
@@ -4844,7 +4850,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {tab === 'returns' && effectiveAccess.can_returns && (
           <ReturnsTab
             canSeeAmount={effectiveAccess.can_returns}
-            onOpenOrder={order => setHistoryOrder(order)}
+            onOpenOrder={(order: DBOrder) => setHistoryOrder(order)}
             reloadSignal={returnsReload}
           />
         )}
