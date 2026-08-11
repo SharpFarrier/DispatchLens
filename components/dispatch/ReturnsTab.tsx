@@ -5,7 +5,7 @@ import { fetchAllRows } from './fetchAll'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder } from '@/types'
 import { logOrderEvent } from '@/lib/orderEvents'
-import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, ChevronDown, Download, ArrowUp, ArrowDown, Filter } from 'lucide-react'
+import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, ChevronDown, Download, ArrowUp, ArrowDown, Filter, ExternalLink } from 'lucide-react'
 
 // Reasons shared by both RTO and customer returns (physical-condition reasons).
 const SHARED_REASONS = [
@@ -903,7 +903,7 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
               <div style={{ overflowX: 'auto' as const }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 720 }}>
                   <thead style={{ background: 'var(--surface)' }}>
-                    <tr>{['Order', 'Platform', 'SKU', 'Type', 'Received at', 'Handled by', 'Refund', ''].map(h => (
+                    <tr>{['Order', 'Platform', 'SKU', 'Reverse AWB', 'Type', 'Received at', 'Handled by', 'Refund', ''].map(h => (
                       <th key={h} style={{ padding: '7px 10px', textAlign: h === 'Refund' || h === '' ? 'right' as const : 'left' as const, fontSize: 11, fontWeight: 700, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{h}</th>
                     ))}</tr>
                   </thead>
@@ -915,6 +915,12 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
                           <td style={{ padding: '7px 10px' }}><span onClick={() => openOrder(r.order_id)} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
                           <td style={{ padding: '7px 10px', color: 'var(--text2)' }}>{platformOf(r.order_id)}</td>
                           <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
+                          <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11 }}>{r.reverse_tracking_id ? (() => {
+                            const url = r.reverse_courier === 'Bluedart' ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${r.reverse_tracking_id}` : r.reverse_courier === 'Delhivery' ? `https://www.delhivery.com/track/package/${r.reverse_tracking_id}` : null
+                            return url
+                              ? <a href={url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--accent)', textDecoration: 'none' }} onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{r.reverse_tracking_id} <ExternalLink size={9} /></a>
+                              : <span style={{ color: 'var(--text2)' }}>{r.reverse_tracking_id}</span>
+                          })() : <span style={{ color: 'var(--text3)' }}>—</span>}</td>
                           <td style={{ padding: '7px 10px', color: 'var(--text2)', textTransform: 'capitalize' as const }}>{r.return_type || r.source.replace('_', ' ')}</td>
                           <td style={{ padding: '7px 10px', color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{fmtTime(r.warehouse_received_at)}</td>
                           <td style={{ padding: '7px 10px', color: 'var(--text3)', fontSize: 11 }}>{r.created_by_email ? r.created_by_email.split('@')[0] : '—'}</td>
