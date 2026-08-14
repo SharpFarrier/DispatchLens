@@ -2021,7 +2021,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       // compute days-left, stamp a "COURIER #N · X days left" strip on the label, and
       // build the checklist rows (same order as the printed stack).
       const courierOf = (o: DBOrder) => isBluedart(o) ? 'Bluedart' : 'Shiprocket'
-      const shortCourier = (c: string) => c === 'Bluedart' ? 'BD' : 'SR'
       const daysLeftOf = (o: DBOrder): number | null => {
         if (!o.dispatch_by_date) return null
         const due = new Date(o.dispatch_by_date + 'T00:00:00')
@@ -2029,7 +2028,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         const today = new Date(); today.setHours(0, 0, 0, 0)
         return Math.round((due.getTime() - today.getTime()) / 86400000)
       }
-      const daysLeftLabel = (d: number | null) => d == null ? '' : d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? 'due today' : `${d} day${d === 1 ? '' : 's'} left`
       const perCourierSeq: Record<string, number> = {}
       const newChecklist: { seq: number; courier: string; order_id: string; sku: string; awb: string; daysLeft: number | null }[] = []
       setGenProgress('Numbering labels…')
@@ -2040,8 +2038,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         const courier = courierOf(o)
         const seq = (perCourierSeq[courier] = (perCourierSeq[courier] || 0) + 1)
         const d = daysLeftOf(o)
-        const strip = `${shortCourier(courier)} #${seq}` + (d != null ? ` · ${daysLeftLabel(d)}` : '')
-        labelParts.push(await stampLabelStrip(slot, strip))
+        const byDate = o.dispatch_by_date ? (() => { const dt = new Date(o.dispatch_by_date + 'T00:00:00'); return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) })() : '—'
+        const stripSegs = [
+          { label: 'Courier', value: courier },
+          { label: 'Seq', value: `#${seq}` },
+          { label: 'Dispatch by', value: byDate },
+        ]
+        labelParts.push(await stampLabelStrip(slot, stripSegs))
         newChecklist.push({ seq, courier, order_id: o.order_id, sku: o.barcode_sku || o.sku || '', awb: o.tracking_number || o.lr_number || '', daysLeft: d })
       }
       // Persist generation status on every processed order (chunked).

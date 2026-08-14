@@ -307,38 +307,47 @@ export async function stripAdPage(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 // Stamp a labelled strip across the top of every page of a label PDF.
-// Used to print a per-courier sequence number + days-left on each dispatch label,
+// Used to print per-courier sequence + courier + dispatch-by date on each label,
 // matching the on-screen checklist. Works for both Bluedart and Cargo/Shiprocket
 // labels since both are plain PDFs here. Returns the original bytes on any failure
 // (never blocks label generation).
-export async function stampLabelStrip(bytes: Uint8Array, text: string): Promise<Uint8Array> {
+export async function stampLabelStrip(bytes: Uint8Array, segments: { label: string; value: string }[]): Promise<Uint8Array> {
   try {
     const PDFLib = (window as W).PDFLib
     if (!PDFLib || !bytes || bytes.length < 5) return bytes
     const src = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true })
     const out = await PDFLib.PDFDocument.create()
-    const font = await out.embedFont(PDFLib.StandardFonts.HelveticaBold)
+    const bold = await out.embedFont(PDFLib.StandardFonts.HelveticaBold)
+    const reg = await out.embedFont(PDFLib.StandardFonts.Helvetica)
     const srcPages = src.getPageCount()
     const embedded = await out.embedPdf(src, Array.from({ length: srcPages }, (_, i) => i))
+    const segs = segments.filter(s => s && (s.value || s.label))
+    const n = Math.max(1, segs.length)
+    type PdfFont = { widthOfTextAtSize: (t: string, s: number) => number }
+    const fit = (font: PdfFont, text: string, size: number, maxW: number) => { let s = size; while (s > 6 && font.widthOfTextAtSize(text, s) > maxW) s -= 0.5; return s }
     for (const emb of embedded) {
       const w = emb.width, h = emb.height
-      // Add a header band ABOVE the label so nothing overlaps the label content.
-      const bandH = Math.max(34, Math.round(h * 0.075))
+      // Header band ABOVE the label — a bit taller than a single line so each cell fits a
+      // small label over its value. Nothing overlaps the label content below.
+      const bandH = Math.max(42, Math.round(h * 0.09))
       const page = out.addPage([w, h + bandH])
-      // Draw the original label in the lower part, unchanged.
       page.drawPage(emb, { x: 0, y: 0, width: w, height: h })
-      // Dark band fills the new space at the very top, full width.
       page.drawRectangle({ x: 0, y: h, width: w, height: bandH, color: PDFLib.rgb(0.11, 0.10, 0.09) })
-      // Big, full-width text — size scales to the band, capped so long text still fits.
-      let fontSize = Math.floor(bandH * 0.6)
-      const maxW = w - 16
-      while (fontSize > 8 && font.widthOfTextAtSize(text, fontSize) > maxW) fontSize -= 1
-      const textW = font.widthOfTextAtSize(text, fontSize)
-      page.drawText(text, {
-        x: Math.max(8, (w - textW) / 2),  // centred, full-width band
-        y: h + (bandH - fontSize) / 2 + fontSize * 0.12,
-        size: fontSize, font, color: PDFLib.rgb(1, 1, 1),
-      })
+      const cellW = w / n
+      for (let i = 0; i < n; i++) {
+        const seg = segs[i] || { label: '', value: '' }
+        const cx = i * cellW + cellW / 2
+        const maxW = cellW - 10
+        const labelText = (seg.label || '').toUpperCase()
+        const labelSize = fit(reg, labelText, Math.min(9, Math.max(6, bandH * 0.2)), maxW)
+        const labelW = reg.widthOfTextAtSize(labelText, labelSize)
+        page.drawText(labelText, { x: cx - labelW / 2, y: h + bandH * 0.58, size: labelSize, font: reg, color: PDFLib.rgb(0.72, 0.72, 0.72) })
+        const valText = seg.value || ''
+        const valSize = fit(bold, valText, Math.min(16, Math.max(9, bandH * 0.42)), maxW)
+        const valW = bold.widthOfTextAtSize(valText, valSize)
+        page.drawText(valText, { x: cx - valW / 2, y: h + bandH * 0.16, size: valSize, font: bold, color: PDFLib.rgb(1, 1, 1) })
+        if (i > 0) page.drawRectangle({ x: i * cellW - 0.25, y: h + 5, width: 0.5, height: bandH - 10, color: PDFLib.rgb(0.30, 0.30, 0.30) })
+      }
     }
     return await out.save()
   } catch {
