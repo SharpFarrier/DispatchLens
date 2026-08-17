@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
-import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart, fetchBluedartLabels, stampLabelStrip } from '@/lib/dispatchDocs'
+import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart, fetchBluedartLabels, stampLabelStrip, type InvoiceLine } from '@/lib/dispatchDocs'
 import { fetchTracking, type TrackResult } from '@/lib/tracking'
 import { DBOrder, DispatchSession, PlanDecision, UrgencyTier, Courier, UnfulfillableReason, SkuMap, UserAccess } from '@/types'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
@@ -2010,6 +2010,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       // in parallel AFTER the loop (fast) but written back into their slot by index.
       const labelSlots: (Uint8Array | null)[] = base.map(() => null)
       const bdJobs: { idx: number; order: DBOrder }[] = []
+      // One invoice per ORDER (not per piece). Multi-qty orders are stored as several
+      // piece-rows (one AWB each) that repeat the line total, so group by order_id and
+      // build the invoice's line items from the distinct product lines within the order.
+      const rowsByOrder = new Map<string, DBOrder[]>()
+      for (const ord of base) { const g = rowsByOrder.get(ord.order_id); if (g) g.push(ord); else rowsByOrder.set(ord.order_id, [ord]) }
+      const invoiceLinesFor = (grp: DBOrder[]): InvoiceLine[] => {
+        const m = new Map<string, DBOrder[]>()
+        for (const r of grp) { const k = `${r.barcode_sku || r.sku || ''}|${r.taxable_value ?? ''}|${r.tax_amount ?? ''}`; const g = m.get(k); if (g) g.push(r); else m.set(k, [r]) }
+        return Array.from(m.values()).map(rs => { const r = rs[0]; return { name: r.sku || '', sku: r.barcode_sku || r.sku || '', qty: rs.reduce((s, x) => s + (x.qty || 1), 0), taxable: +(r.taxable_value || 0), tax: +(r.tax_amount || 0), igst: +(r.igst || 0), cgst: +(r.cgst || 0), sgst: +(r.sgst || 0) } })
+      }
+      const invoicedOrders = new Set<string>()
       let done = 0
       for (let i = 0; i < base.length; i++) {
         const o = base[i]
@@ -2017,9 +2028,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         setGenProgress(`Order ${done}/${base.length} — ${o.order_id}`)
         setGenRows(prev => prev.map(r => r.orderId === o.order_id ? { ...r, status: 'working' } : r))
         const issues: string[] = []
-        // Invoice for every order (uses imported invoice fields).
-        try { invoiceParts.push(await invoicePdfBytes(o, { signatureDataUrl })) }
-        catch (e) { failed.push(`${o.order_id} invoice: ${(e as Error).message}`); issues.push('invoice failed') }
+        // Invoice: one per order_id (generated on the first piece we reach), with a line
+        // item per distinct product in the order.
+        if (!invoicedOrders.has(o.order_id)) {
+          invoicedOrders.add(o.order_id)
+          try { invoiceParts.push(await invoicePdfBytes(o, { signatureDataUrl, lines: invoiceLinesFor(rowsByOrder.get(o.order_id) || [o]) })) }
+          catch (e) { failed.push(`${o.order_id} invoice: ${(e as Error).message}`); issues.push('invoice failed') }
+        }
         // Label: Bluedart comes from the label app (fetched in parallel after the loop);
         // everything else is Cargo-fetchable inline.
         if (isBluedart(o)) {

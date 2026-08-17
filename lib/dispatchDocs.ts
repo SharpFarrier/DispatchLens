@@ -74,20 +74,24 @@ function orderStateCode(o: DBOrder): string {
   return ''  // interstate, unknown exact state
 }
 
-export interface InvoiceOpts { signatureDataUrl?: string | null }
+export interface InvoiceLine { name: string; sku: string; qty: number; taxable: number; tax: number; igst?: number; cgst?: number; sgst?: number }
+export interface InvoiceOpts { signatureDataUrl?: string | null; lines?: InvoiceLine[] }
 
 export function buildInvoiceHtml(o: DBOrder, opts: InvoiceOpts = {}): string {
-  const qty = o.qty || 1
-  const totalTaxable = +(o.taxable_value || 0)
-  const totalTax = +(o.tax_amount || 0)
+  const lines: InvoiceLine[] = (opts.lines && opts.lines.length)
+    ? opts.lines
+    : [{ name: o.sku || '', sku: o.barcode_sku || o.sku || '', qty: o.qty || 1, taxable: +(o.taxable_value || 0), tax: +(o.tax_amount || 0), igst: +(o.igst || 0), cgst: +(o.cgst || 0), sgst: +(o.sgst || 0) }]
+  const qty = lines.reduce((s, l) => s + (l.qty || 1), 0)
+  const totalTaxable = +(lines.reduce((s, l) => s + l.taxable, 0).toFixed(2))
+  const totalTax = +(lines.reduce((s, l) => s + l.tax, 0).toFixed(2))
   const total = +((totalTaxable + totalTax).toFixed(2))
 
   const stateCode = orderStateCode(o)
   const stateName = getStateName(stateCode)
   // GST split: use the imported IGST/SGST/CGST directly (mutually exclusive per source).
-  const igst = +(o.igst || 0)
-  const cgst = +(o.cgst || 0)
-  const sgst = +(o.sgst || 0)
+  const igst = +(lines.reduce((s, l) => s + (l.igst || 0), 0).toFixed(2))
+  const cgst = +(lines.reduce((s, l) => s + (l.cgst || 0), 0).toFixed(2))
+  const sgst = +(lines.reduce((s, l) => s + (l.sgst || 0), 0).toFixed(2))
   const isInter = igst > 0 || (cgst === 0 && sgst === 0 && stateCode !== 'MH' && stateCode !== 'MAHARASHTRA')
 
   const invNo = o.order_id || ''
@@ -106,20 +110,22 @@ export function buildInvoiceHtml(o: DBOrder, opts: InvoiceOpts = {}): string {
 
   const addrLine = o.ship_address || ''
   const phone = o.contact_number || ''
-  const unitPriceDisplay = qty > 1 ? +(((o.unit_price || total)) / qty).toFixed(2) : (o.unit_price || total)
-
-  const itemRows = `
+  const itemRows = lines.map((l, idx) => {
+    const lineAmount = +((l.taxable + l.tax).toFixed(2))
+    const unitPrice = l.qty > 0 ? +((l.taxable / l.qty).toFixed(2)) : l.taxable
+    return `
     <tr>
-      <td style="text-align:center;padding:11px 10px;font-size:11px;color:#3d2817;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">1</td>
+      <td style="text-align:center;padding:11px 10px;font-size:11px;color:#3d2817;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">${idx + 1}</td>
       <td style="padding:11px 10px;font-size:11px;color:#3d2817;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">
-        <div style="font-weight:600;color:#3d2817;line-height:1.4;">${esc(o.sku || '')}</div>
-        <div style="font-style:italic;font-size:10px;color:#8a6f55;margin-top:2px;">SKU ${esc(o.barcode_sku || o.sku || '')} · HSN 9403</div>
+        <div style="font-weight:600;color:#3d2817;line-height:1.4;">${esc(l.name || '')}</div>
+        <div style="font-style:italic;font-size:10px;color:#8a6f55;margin-top:2px;">SKU ${esc(l.sku || '')} · HSN 9403</div>
       </td>
-      <td style="text-align:center;padding:11px 10px;font-size:11px;color:#3d2817;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">${qty}</td>
-      <td style="text-align:right;padding:11px 10px;font-size:11px;color:#3d2817;font-variant-numeric:tabular-nums;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">${fmt(unitPriceDisplay)}</td>
-      <td style="text-align:right;padding:11px 10px;font-size:11px;color:#3d2817;font-variant-numeric:tabular-nums;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">${fmt(totalTaxable)}</td>
-      <td style="text-align:right;padding:11px 10px;font-size:11px;color:#3d2817;font-variant-numeric:tabular-nums;border-bottom:1px solid #e3cfa6;">${fmt(total)}</td>
+      <td style="text-align:center;padding:11px 10px;font-size:11px;color:#3d2817;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">${l.qty}</td>
+      <td style="text-align:right;padding:11px 10px;font-size:11px;color:#3d2817;font-variant-numeric:tabular-nums;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">${fmt(unitPrice)}</td>
+      <td style="text-align:right;padding:11px 10px;font-size:11px;color:#3d2817;font-variant-numeric:tabular-nums;border-right:1px solid #e3cfa6;border-bottom:1px solid #e3cfa6;">${fmt(l.taxable)}</td>
+      <td style="text-align:right;padding:11px 10px;font-size:11px;color:#3d2817;font-variant-numeric:tabular-nums;border-bottom:1px solid #e3cfa6;">${fmt(lineAmount)}</td>
     </tr>`
+  }).join('')
 
   const taxLines = isInter
     ? `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:8px 14px;border-bottom:1px solid #f3e6cc;font-size:11px;"><span style="color:#6b5340;">IGST</span><span style="font-variant-numeric:tabular-nums;color:#3d2817;font-weight:500;">${fmt(igst || totalTax)}</span></div>`
