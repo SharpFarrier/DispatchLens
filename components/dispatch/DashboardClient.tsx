@@ -973,11 +973,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const dateStr = now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
     const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
     const totalPcs = list.reduce((s, o) => s + (o.qty || 1), 0)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const courierCode = c === 'Delhivery' ? 'DL' : c === 'Bluedart' ? 'BD' : c === 'Shiprocket' ? 'SR' : String(c).slice(0, 2).toUpperCase()
+    const manifestId = `MF-${courierCode}-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
     const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     const rows = list.map((o, i) => `<tr>
       <td class="num">${i + 1}</td>
       <td class="mono">${esc(o.tracking_number)}</td>
-      <td class="mono">${esc(o.barcode_sku || o.sku)}</td>
+      <td class="mono">${esc(manifestId)}</td>
     </tr>`).join('')
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Dispatch Manifest — ${esc(c)} — ${dateStr}</title>
@@ -1013,11 +1016,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       <div class="courier">${esc(c)}</div>
       <div>${dateStr}</div>
       <div>Generated ${timeStr}</div>
+      <div style="margin-top:5px;font-weight:700;font-family:'SF Mono',Menlo,Consolas,monospace;">${esc(manifestId)}</div>
     </div>
   </div>
   <h1>DISPATCH MANIFEST</h1>
   <table>
-    <thead><tr><th class="num">#</th><th>AWB / Tracking ID</th><th>Barcode SKU</th></tr></thead>
+    <thead><tr><th class="num">#</th><th>AWB / Tracking ID</th><th>Manifest ID</th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr><td colspan="3">Total shipments: ${list.length} &nbsp;·&nbsp; Total pieces: ${totalPcs}</td></tr></tfoot>
   </table>
@@ -1761,6 +1765,41 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
     return { allSkus, dailyCols, weeklyCols, dateSkuQty, dateSkuOrders, weekSkuQty, weekSkuOrders, skuTotals, totalOrders, totalQty }
   }, [orders, displayDaysLeft, today])
+
+  // Export the Upcoming Demand matrix as CSV — matches the current view (weekly/daily),
+  // SKU filter and sort: one row per SKU, a column per period, plus total / stock / short.
+  const exportDemandCsv = () => {
+    const ud = upcomingDemand
+    if (!ud.totalOrders) return
+    const cols: { key: string; label: string; sublabel?: string }[] = demandView === 'weekly' ? ud.weeklyCols : ud.dailyCols
+    const stockAvailOf = (sku: string): number | null => { const stk = stockByPlatformSku[sku]; return stk === undefined ? null : stk - (picklistCommittedBySku[sku] || 0) }
+    const visibleSkus = demandSkuFilter.size > 0 ? ud.allSkus.filter(s => demandSkuFilter.has(s)) : ud.allSkus
+    const sortedSkus = [...visibleSkus].sort((a, b) => {
+      const dir = demandSort.dir === 'asc' ? 1 : -1
+      let av: string | number, bv: string | number
+      if (demandSort.key === 'sku') { av = a.toLowerCase(); bv = b.toLowerCase() }
+      else if (demandSort.key === 'stock') { av = stockAvailOf(a) ?? -Infinity; bv = stockAvailOf(b) ?? -Infinity }
+      else { av = ud.skuTotals[a] || 0; bv = ud.skuTotals[b] || 0 }
+      return av < bv ? -dir : av > bv ? dir : 0
+    })
+    const getQty = (sku: string, colKey: string) => demandView === 'weekly' ? (ud.weekSkuQty[colKey]?.[sku] || 0) : (ud.dateSkuQty[colKey]?.[sku] || 0)
+    const csvCell = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const headers = ['SKU', ...cols.map(c => (c.label + (c.sublabel ? ' ' + c.sublabel : '')).trim()), 'Total demand', 'Stock available', 'Short']
+    const lines = [headers.join(',')]
+    for (const sku of sortedSkus) {
+      const total = ud.skuTotals[sku] || 0
+      const stk = stockAvailOf(sku)
+      const short = stk === null ? '' : Math.max(0, total - stk)
+      lines.push([csvCell(sku), ...cols.map(c => csvCell(getQty(sku, c.key))), csvCell(total), csvCell(stk === null ? 'n/a' : stk), csvCell(short)].join(','))
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `upcoming-demand-${demandView}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
 
   const filteredActive = useMemo(() => {
@@ -3745,6 +3784,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     }}>{v.charAt(0).toUpperCase() + v.slice(1)}</button>
                   ))}
                 </div>
+                <button onClick={exportDemandCsv} title="Export the demand matrix (current view, filter & sort)" style={{ marginLeft: 'auto', padding: '5px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 500, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text2)' }}>⤓ Export CSV</button>
               </div>
 
               {/* Matrix table */}
