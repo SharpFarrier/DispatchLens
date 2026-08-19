@@ -29,9 +29,10 @@ const ReturnsTab = dynamic(() => import('./ReturnsTab'), { loading: TabLoading }
 const CargoTokenPanel = dynamic(() => import('./CargoTokenPanel'))
 const WarehouseSection = dynamic(() => import('./WarehouseSection'), { loading: TabLoading })
 const ReconSection = dynamic(() => import('./ReconSection'), { loading: TabLoading })
+const OtdrTab = dynamic(() => import('./OtdrTab'), { loading: TabLoading })
 const OrderHistoryPanel = dynamic(() => import('./OrderHistoryPanel'))
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'otdr' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -2576,6 +2577,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'recon', label: 'Recon', show: effectiveAccess.can_recon },
+            { key: 'otdr', label: 'OTDR', show: effectiveAccess.can_recon },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -4925,6 +4927,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {tab === 'recon' && effectiveAccess.can_recon && (
           <ReconSection />
+        )}
+
+        {tab === 'otdr' && effectiveAccess.can_recon && (
+          <OtdrTab />
         )}
 
         {/* ════ USERS ════ */}
