@@ -2,10 +2,8 @@
 // Pure: no React state. Callers own persistence and UI.
 
 const WORKER = 'https://tracklens-proxy.adityaramnani91581.workers.dev'
-const BD_API_KEY = 'WxObKDF1pSM0GWYCBBjnemimMH7Ed3Gp'
-const BD_API_SECRET = 'j2FGlGEWnGcgVYDs'
-const BD_LOGIN_ID = 'BOM41184'
-const BD_LICENCE_KEY = 'hkfoiszukslp0umqriqgn2bolmgovtge'
+// Bluedart credentials (ClientID / ClientSecret / loginid / lickey) are injected
+// server-side by the TrackLens Worker from its secrets. The browser never carries them.
 
 export interface TrackResult { status: string; label: string; lastUpdate: string; reverseAwb?: string | null }
 export type TrackResults = Record<string, TrackResult>
@@ -90,7 +88,6 @@ export async function fetchTracking(
     try {
       const tokenRes = await fetch(`${WORKER}/bluedart/in/transportation/token/v1/login`, {
         method: 'GET',
-        headers: { 'ClientID': BD_API_KEY, 'ClientSecret': BD_API_SECRET },
       })
       const tokenData = await tokenRes.json()
       bdToken = tokenData?.JWTToken || null
@@ -105,11 +102,9 @@ export async function fetchTracking(
             const params = new URLSearchParams({
               handler: 'tnt',
               action: 'custawbquery',
-              loginid: BD_LOGIN_ID,
               awb: 'awb',
               numbers: o.awb.trim(),
               format: 'xml',
-              lickey: BD_LICENCE_KEY,
               verno: '1.3',
               scan: '1',
             })
