@@ -54,7 +54,7 @@ export const RETURN_REASONS = [
 
 export interface ReturnRow {
   id: string
-  order_id: string
+  order_id: string | null
   source: 'manual' | 'rto_auto' | 'rto'
   return_type: 'customer' | 'rto' | null
   reason: string | null
@@ -99,7 +99,7 @@ function isRtoRow(r: ReturnRow) { return r.return_type === 'rto' || r.source ===
 // Column value-getters used for filtering & sorting (rendering stays in the table body).
 function returnCols(canSeeAmount: boolean): RetCol[] {
   const cols: RetCol[] = [
-    { key: 'order_id', label: 'Order', type: 'text', get: r => r.order_id },
+    { key: 'order_id', label: 'Order', type: 'text', get: r => r.order_id ?? '' },
     { key: 'barcode', label: 'SKU', type: 'text', get: r => r.barcode || '' },
     { key: 'reason', label: 'Reason', type: 'category', get: r => (!r.reason || r.reason === 'Pending review') ? '(no reason)' : r.reason },
     { key: 'type', label: 'Type', type: 'category', get: r => isRtoRow(r) ? 'RTO' : 'Customer' },
@@ -239,12 +239,79 @@ function RetHeaderCell({ col, ctx }: { col: RetCol; ctx: RetFilterCtx }) {
 }
 
 
+// ── One received-but-unmapped return: enter forward AWB -> find order -> confirm link ──
+function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: ReturnType<typeof createClient>; onLinked: (r: ReturnRow) => void }) {
+  const [awb, setAwb] = useState('')
+  const [found, setFound] = useState<DBOrder | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const findOrder = async () => {
+    const q = awb.trim()
+    if (!q) { setError('Enter a forward AWB'); return }
+    setBusy(true); setError(null); setFound(null)
+    const { data } = await supabase.from('dispatch_orders').select('*').eq('tracking_number', q).limit(1).maybeSingle()
+    if (!data) { setError('No match — check the number'); setBusy(false); return }
+    setFound(data as DBOrder); setBusy(false)
+  }
+
+  const confirmLink = async () => {
+    if (!found) return
+    setBusy(true); setError(null)
+    const { data: existing } = await supabase.from('returns').select('id').eq('order_id', found.order_id).neq('id', row.id).limit(1).maybeSingle()
+    if (existing) { setError(`Order ${found.order_id} already has a return — not linked`); setBusy(false); return }
+    const { data } = await supabase.from('returns').update({
+      order_id: found.order_id,
+      barcode: found.scanned_barcode || row.barcode || null,
+      return_type: row.return_type || 'customer',
+      updated_at: new Date().toISOString(),
+    }).eq('id', row.id).select().maybeSingle()
+    if (data) {
+      void logOrderEvent(found.order_id, 'return', 'Return mapped to order via forward AWB', row.reverse_tracking_id ? `reverse ${row.reverse_tracking_id}` : null)
+      onLinked(data as ReturnRow)
+    } else { setError('Could not link — try again'); setBusy(false) }
+  }
+
+  const recvAt = row.warehouse_received_at ? new Date(row.warehouse_received_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+
+  return (
+    <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+        <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text)' }}>{row.reverse_tracking_id}</span>
+        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: 4 }}>RECEIVED · UNMAPPED</span>
+        {recvAt && <span style={{ fontSize: 12, color: 'var(--text3)' }}>received {recvAt}</span>}
+        <input value={awb} onChange={e => { setAwb(e.target.value); setError(null); setFound(null) }}
+          onKeyDown={e => { if (e.key === 'Enter') findOrder() }}
+          placeholder="Enter forward AWB to map"
+          style={{ flex: 1, minWidth: 200, border: '1px solid var(--border)', background: 'var(--bg2)', borderRadius: 7, padding: '7px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono', outline: 'none' }} />
+        <button onClick={findOrder} disabled={busy || !awb.trim()}
+          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text2)', cursor: busy || !awb.trim() ? 'default' : 'pointer', padding: '7px 14px', fontSize: 12, fontWeight: 600 }}>Find order</button>
+      </div>
+      {error && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--critical)', marginTop: 8 }}>{error}</div>}
+      {found && (
+        <div style={{ marginTop: 10, background: 'var(--bg2)', border: '1px solid var(--accent)', borderRadius: 7, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+          <div style={{ fontSize: 13 }}>
+            <span style={{ fontFamily: 'DM Mono', color: 'var(--text)' }}>{found.order_id}</span>
+            <span style={{ color: 'var(--text3)' }}> · {found.sku || found.scanned_barcode || '—'}{found.dispatched_at ? ` · dispatched ${new Date(found.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}</span>
+          </div>
+          <button onClick={confirmLink} disabled={busy}
+            style={{ background: 'var(--accent)', border: 'none', borderRadius: 7, color: '#fff', cursor: busy ? 'default' : 'pointer', padding: '7px 14px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <CheckCircle size={13} /> Confirm link
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: Props) {
   const supabase = createClient()
   const [returns, setReturns] = useState<ReturnRow[]>([])
   const [subTab, setSubTab] = useState<'returns' | 'daily'>('returns')
   const cols = useMemo(() => returnCols(canSeeAmount), [canSeeAmount])
-  const flt = useReturnFilters(returns, cols)
+  const mapped = useMemo(() => returns.filter(r => r.order_id), [returns])
+  const unmapped = useMemo(() => returns.filter(r => !r.order_id), [returns])
+  const flt = useReturnFilters(mapped, cols)
   const shownReturns = flt.filtered
   const [rtoOrders, setRtoOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(false)
@@ -252,6 +319,9 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   const [searchHits, setSearchHits] = useState<DBOrder[]>([])
   const [searching, setSearching] = useState(false)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [rxId, setRxId] = useState('')
+  const [rxMsg, setRxMsg] = useState<{ type: 'error' | 'ok'; text: string } | null>(null)
+  const [rxBusy, setRxBusy] = useState(false)
   const [revSyncing, setRevSyncing] = useState(false)
   const [revSyncMsg, setRevSyncMsg] = useState<string | null>(null)
   const [amountDraft, setAmountDraft] = useState<Record<string, string>>({})
@@ -267,7 +337,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
     const rows = (ret || []) as ReturnRow[]
     setReturns(rows)
     // Auto-RTO candidates: dispatched orders the courier flagged rto, not already in returns.
-    const tracked = new Set(rows.map(r => r.order_id))
+    const tracked = new Set(rows.filter(r => r.order_id).map(r => r.order_id as string))
     const rto = await fetchAllRows<DBOrder>((from, to) =>
       supabase.from('dispatch_orders').select('*')
         .eq('is_dispatched', true).eq('is_cancelled', false)
@@ -352,9 +422,45 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
       const row = data as ReturnRow
       setReturns(prev => [row, ...prev.filter(r => r.order_id !== o.order_id)])
       setRtoOrders(prev => prev.filter(x => x.id !== o.id))
-      void logOrderEvent(row.order_id, 'return', `Return created${row.return_type ? ` · ${row.return_type === 'rto' ? 'RTO' : 'Customer'}` : ''}`, row.reason || null)
+      void logOrderEvent(row.order_id ?? '', 'return', `Return created${row.return_type ? ` · ${row.return_type === 'rto' ? 'RTO' : 'Customer'}` : ''}`, row.reason || null)
     }
     setSavingId(null)
+  }
+
+  // ── Receive a return by reverse tracking ID, before any order is known ──
+  const receiveReturn = async () => {
+    const id = rxId.trim()
+    if (!id) { setRxMsg({ type: 'error', text: 'Enter a reverse tracking ID' }); return }
+    setRxBusy(true); setRxMsg(null)
+    const { data: dup } = await supabase.from('returns').select('id, order_id').eq('reverse_tracking_id', id).limit(1).maybeSingle()
+    if (dup) {
+      const d = dup as { id: string; order_id: string | null }
+      setRxMsg({ type: 'error', text: d.order_id ? `Already received — on order ${d.order_id}` : 'Already received — awaiting order mapping' })
+      setRxBusy(false); return
+    }
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data } = await supabase.from('returns').insert({
+      reverse_tracking_id: id,
+      warehouse_received: true,
+      warehouse_received_at: new Date().toISOString(),
+      order_id: null,
+      source: 'manual',
+      created_by: user?.id ?? null,
+      created_by_email: user?.email ?? null,
+      updated_at: new Date().toISOString(),
+    }).select().maybeSingle()
+    if (data) {
+      setReturns(prev => [data as ReturnRow, ...prev])
+      setRxId(''); setRxMsg({ type: 'ok', text: 'Received — awaiting order mapping' })
+    } else {
+      setRxMsg({ type: 'error', text: 'Could not receive — try again' })
+    }
+    setRxBusy(false)
+  }
+
+  // Move a return from unmapped -> mapped after it's linked to an order.
+  const onReturnLinked = (updated: ReturnRow) => {
+    setReturns(prev => prev.map(r => r.id === updated.id ? updated : r))
   }
 
   // ── Update refund status / amount / reason ──
@@ -395,14 +501,14 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
       setReturns(prev => prev.map(r => r.id === id ? row : r))
       // Mirror meaningful return changes onto the order timeline.
       if ('warehouse_received' in patch) {
-        void logOrderEvent(row.order_id, 'return', patch.warehouse_received ? 'Return received at factory' : 'Return receipt undone', row.barcode ? `piece ${row.barcode}` : null)
+        void logOrderEvent(row.order_id ?? '', 'return', patch.warehouse_received ? 'Return received at factory' : 'Return receipt undone', row.barcode ? `piece ${row.barcode}` : null)
       }
       if ('refund_status' in patch) {
-        if (patch.refund_status === 'refunded') void logOrderEvent(row.order_id, 'return', `Refund issued${row.refund_type ? ` · ${row.refund_type}` : ''}`, row.refund_amount != null ? `₹${row.refund_amount}` : null)
-        else void logOrderEvent(row.order_id, 'return', 'Refund reverted (back to pending)')
+        if (patch.refund_status === 'refunded') void logOrderEvent(row.order_id ?? '', 'return', `Refund issued${row.refund_type ? ` · ${row.refund_type}` : ''}`, row.refund_amount != null ? `₹${row.refund_amount}` : null)
+        else void logOrderEvent(row.order_id ?? '', 'return', 'Refund reverted (back to pending)')
       }
       if ('reason' in patch && patch.reason && before && before.reason !== patch.reason) {
-        void logOrderEvent(row.order_id, 'return', `Return reason set · ${patch.reason}`)
+        void logOrderEvent(row.order_id ?? '', 'return', `Return reason set · ${patch.reason}`)
       }
     }
     setSavingId(null)
@@ -435,7 +541,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 18, fontWeight: 600 }}>Returns</h1>
-        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{subTab === 'returns' && flt.anyFilter ? `${shownReturns.length} of ${returns.length}` : `${returns.length} tracked`}</span>
+        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{subTab === 'returns' && flt.anyFilter ? `${shownReturns.length} of ${mapped.length}` : `${mapped.length} tracked`}</span>
         {subTab === 'returns' && flt.anyFilter && <button onClick={flt.clearAll} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}><X size={12} /> Clear filters</button>}
         <button onClick={load} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
           <RefreshCw size={12} /> Refresh
@@ -474,8 +580,39 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
       </div>
 
       {subTab === 'daily' ? (
-        <DailyReview returns={returns} canSeeAmount={canSeeAmount} savingId={savingId} onRefund={patchReturn} onOpenOrder={onOpenOrder} />
+        <DailyReview returns={mapped} canSeeAmount={canSeeAmount} savingId={savingId} onRefund={patchReturn} onOpenOrder={onOpenOrder} />
       ) : (<>
+
+      {/* ── Receive a return by reverse tracking ID (no order needed) ── */}
+      <div style={{ ...card, padding: 18, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+        <div style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text2)', letterSpacing: '0.04em' }}>RECEIVE A RETURN</div>
+        <div style={{ fontSize: 12, color: 'var(--text3)' }}>Scan or enter the reverse tracking ID. Marks it received and adds it below, waiting for an order to be mapped.</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', maxWidth: 520, flexWrap: 'wrap' as const }}>
+          <input value={rxId} onChange={e => { setRxId(e.target.value); setRxMsg(null) }}
+            onKeyDown={e => { if (e.key === 'Enter') receiveReturn() }}
+            placeholder="Reverse tracking ID"
+            style={{ flex: 1, minWidth: 220, border: '1px solid var(--border)', background: 'var(--bg2)', borderRadius: 7, padding: '8px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono', outline: 'none' }} />
+          <button onClick={receiveReturn} disabled={rxBusy || !rxId.trim()}
+            style={{ background: rxBusy || !rxId.trim() ? 'var(--bg2)' : 'var(--accent)', border: 'none', borderRadius: 7, color: rxBusy || !rxId.trim() ? 'var(--text3)' : '#fff', cursor: rxBusy || !rxId.trim() ? 'default' : 'pointer', padding: '8px 16px', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Package size={14} /> Receive
+          </button>
+        </div>
+        {rxMsg && <div style={{ fontSize: 12, fontWeight: 600, color: rxMsg.type === 'error' ? 'var(--critical)' : 'var(--dispatched)' }}>{rxMsg.text}</div>}
+      </div>
+
+      {/* ── Awaiting order mapping (received, no order yet) ── */}
+      {unmapped.length > 0 && (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)', background: 'var(--today-bg)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+            <Clock size={14} style={{ color: 'var(--today)' }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--today)' }}>Awaiting order mapping ({unmapped.length})</span>
+            <span style={{ fontSize: 12, color: 'var(--text3)' }}>received — enter the forward AWB to link each to its order</span>
+          </div>
+          {unmapped.map(r => (
+            <UnmappedRow key={r.id} row={r} supabase={supabase} onLinked={onReturnLinked} />
+          ))}
+        </div>
+      )}
 
       {/* ── Manual add: search dispatched orders ── */}
       <div style={{ ...card, padding: 18, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
@@ -912,8 +1049,8 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
                       const refunded = r.refund_status === 'refunded'
                       return (
                         <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                          <td style={{ padding: '7px 10px' }}><span onClick={() => openOrder(r.order_id)} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
-                          <td style={{ padding: '7px 10px', color: 'var(--text2)' }}>{platformOf(r.order_id)}</td>
+                          <td style={{ padding: '7px 10px' }}><span onClick={() => openOrder(r.order_id ?? '')} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
+                          <td style={{ padding: '7px 10px', color: 'var(--text2)' }}>{platformOf(r.order_id ?? '')}</td>
                           <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
                           <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11 }}>{r.reverse_tracking_id ? (() => {
                             const url = r.reverse_courier === 'Bluedart' ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${r.reverse_tracking_id}` : r.reverse_courier === 'Delhivery' ? `https://www.delhivery.com/track/package/${r.reverse_tracking_id}` : null
