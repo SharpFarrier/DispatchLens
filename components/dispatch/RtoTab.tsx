@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { logOrderEvent } from '@/lib/orderEvents'
 import { beepSuccess, beepError, beepWarn } from './scanFeedback'
-import { Camera, Undo2, AlertTriangle, CheckCircle, XCircle, Package, Search } from 'lucide-react'
+import { Camera, Undo2, AlertTriangle, CheckCircle, XCircle, Package, Search, X } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -438,43 +438,49 @@ export default function RtoTab() {
               <span style={{ fontFamily: 'DM Mono', color: 'var(--text)' }}>{pending.barcode}</span> isn&apos;t a known return, order, or barcode. Receive it anyway, then record what came back.
             </div>
             {rxMode === null ? (
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
                 <button onClick={() => setRxMode('product')} disabled={committing}
-                  style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  <Package size={15} /> Mark received
+                  style={{ width: '100%', padding: '14px', borderRadius: 12, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <Package size={18} /> Mark received
                 </button>
                 <button onClick={cancelPending} disabled={committing}
-                  style={{ padding: '10px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                  style={{ width: '100%', padding: '12px', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)' }}>What did you receive?</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 12px' }}>
-                  <Search size={14} style={{ color: 'var(--text3)', flexShrink: 0 }} />
-                  <input value={skuQuery} onChange={e => setSkuQuery(e.target.value)} placeholder="Search barcode, SKU, or product name"
-                    style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', fontFamily: 'DM Sans' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border-strong)', borderRadius: 10, padding: '11px 12px' }}>
+                  <Search size={18} style={{ color: 'var(--text3)', flexShrink: 0 }} />
+                  <input autoFocus value={skuQuery} onChange={e => setSkuQuery(e.target.value)} placeholder="Search SKU or product name"
+                    style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 16, outline: 'none', width: '100%', fontFamily: 'DM Sans' }} />
+                  {skuQuery && <button onClick={() => { setSkuQuery(''); setSelSku(null) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0, display: 'flex' }}><X size={18} /></button>}
                 </div>
                 {skuQuery.trim().length >= 1 && (
-                  <div style={{ border: '1px solid var(--border)', borderRadius: 7, maxHeight: 200, overflowY: 'auto' as const }}>
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 10, maxHeight: 340, overflowY: 'auto' as const }}>
                     {skuHits.length === 0 ? (
-                      <div style={{ padding: 12, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 12 }}>No products match</div>
-                    ) : skuHits.map(m => (
-                      <button key={m.id} onClick={() => setSelSku(m.master_sku)}
-                        style={{ width: '100%', textAlign: 'left' as const, padding: '9px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: selSku === m.master_sku ? 'var(--accent-bg)' : 'var(--surface)', borderTop: 'none', borderLeft: 'none', borderRight: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: selSku === m.master_sku ? 'var(--accent)' : 'var(--text2)' }}>{m.master_sku}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text3)' }}>{m.product_name || ''}</span>
-                        {selSku === m.master_sku && <CheckCircle size={14} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
-                      </button>
-                    ))}
+                      <div style={{ padding: 14, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No products match</div>
+                    ) : skuHits.map(m => {
+                      const sel = selSku === m.master_sku
+                      return (
+                        <button key={m.id} onClick={() => setSelSku(m.master_sku)}
+                          style={{ width: '100%', textAlign: 'left' as const, padding: '11px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--accent-bg)' : 'var(--surface)', borderTop: 'none', borderLeft: 'none', borderRight: 'none', display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontFamily: 'DM Mono', fontSize: 14, color: sel ? 'var(--accent)' : 'var(--text)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.master_sku}</div>
+                            {m.product_name && <div style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 1 }}>{m.product_name}</div>}
+                          </div>
+                          {sel && <CheckCircle size={20} style={{ flexShrink: 0, color: 'var(--accent)' }} />}
+                        </button>
+                      )
+                    })}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginTop: 2 }}>
                   <button onClick={confirmUnmatchedReceive} disabled={committing || !selSku}
-                    style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: (committing || !selSku) ? 'var(--bg2)' : 'var(--dispatched)', color: (committing || !selSku) ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 700, cursor: (committing || !selSku) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                    <CheckCircle size={15} /> {committing ? 'Saving…' : selSku ? `Confirm received · ${selSku}` : 'Select a product'}
+                    style={{ width: '100%', padding: '14px', borderRadius: 12, border: 'none', background: (committing || !selSku) ? 'var(--bg2)' : 'var(--dispatched)', color: (committing || !selSku) ? 'var(--text3)' : '#fff', fontSize: 16, fontWeight: 700, cursor: (committing || !selSku) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <CheckCircle size={18} /> {committing ? 'Saving…' : selSku ? `Confirm · ${selSku}` : 'Select a product'}
                   </button>
                   <button onClick={cancelPending} disabled={committing}
-                    style={{ padding: '10px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                    style={{ width: '100%', padding: '12px', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
                 </div>
               </div>
             )}
