@@ -502,9 +502,19 @@ function ChargesView() {
   const [platformF, setPlatformF] = useState<'all' | 'Amazon' | 'Flipkart'>('all')
   const [retF, setRetF] = useState<'all' | 'clean' | 'returned'>('all')
   const [text, setText] = useState('')
+  const [pctFilter, setPctFilter] = useState<string[]>([])
+  const [pctOpen, setPctOpen] = useState(false)
+  const pctPopRef = useRef<HTMLDivElement>(null)
   const [sortKey, setSortKey] = useState('order_date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [expanded, setExpanded] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pctOpen) return
+    const h = (e: MouseEvent) => { if (pctPopRef.current && !pctPopRef.current.contains(e.target as Node)) setPctOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [pctOpen])
 
   const range = useMemo<{ from: string | null; to: string | null }>(() => {
     const now = new Date(); const iso = (d: Date) => d.toISOString().slice(0, 10)
@@ -551,13 +561,16 @@ function ChargesView() {
 
   const fmt = (d: string | null) => { if (!d) return '—'; const s = String(d); const dt = new Date(s.length <= 10 ? s + 'T00:00:00' : s); return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
   const money = (n: number | null | undefined) => (n == null || n === 0) ? '—' : Math.round(n).toLocaleString('en-IN')
+  const pctBucket = (p: number | null | undefined) => (p == null || p < 0) ? '—' : (Math.round(p * 2) / 2).toFixed(1)
+  const pctSub = (fee: number | null | undefined, sale: number | null | undefined) => (fee && sale) ? <span style={{ display: 'block', fontSize: 10, color: 'var(--text3)' }}>{(Math.abs(fee) / sale * 100).toFixed(1)}%</span> : null
 
   const COLS: ChgCol[] = useMemo(() => [
     { key: 'sale', label: 'Sale', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.sale)}</span> },
-    { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.commission)}{r.agg?.commissionPct != null && <span style={{ display: 'block', fontSize: 10, color: 'var(--text3)' }}>{r.agg.commissionPct.toFixed(1)}%</span>}</span> },
-    { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.closing)}</span> },
-    { key: 'shipping', label: 'Shipping', type: 'number', align: 'right', get: r => r.agg?.shipping ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.shipping)}</span> },
-    { key: 'fba', label: 'FBA', type: 'number', align: 'right', get: r => r.agg?.fba ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.fba)}</span> },
+    { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.commission)}</span> },
+    { key: 'commissionPct', label: 'Comm %', type: 'number', align: 'right', get: r => r.agg?.commissionPct ?? -1, render: r => r.agg?.commissionPct != null ? <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--accent)' }}>{r.agg.commissionPct.toFixed(1)}%</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
+    { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.closing)}{pctSub(r.agg?.closing, r.agg?.sale)}</span> },
+    { key: 'shipping', label: 'Shipping', type: 'number', align: 'right', get: r => r.agg?.shipping ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.shipping)}{pctSub(r.agg?.shipping, r.agg?.sale)}</span> },
+    { key: 'fba', label: 'FBA', type: 'number', align: 'right', get: r => r.agg?.fba ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.fba)}{pctSub(r.agg?.fba, r.agg?.sale)}</span> },
     { key: 'productTax', label: 'Tax', type: 'number', align: 'right', get: r => r.agg?.productTax ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.productTax)}</span> },
     { key: 'tcs', label: 'TCS', type: 'number', align: 'right', get: r => r.agg?.tcs ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.tcs)}</span> },
     { key: 'tds', label: 'TDS', type: 'number', align: 'right', get: r => r.agg?.tds ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.tds)}</span> },
@@ -565,21 +578,33 @@ function ChargesView() {
     { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
   ], [])
 
+  // Rows filtered by platform/returned/text — but NOT by the commission-% filter. The %
+  // distribution is computed from THIS set, so the counts reflect the current view.
+  const baseFiltered = useMemo(() => rows.filter(r => {
+    if (platformF !== 'all' && r.platform !== platformF) return false
+    if (retF === 'clean' && r.agg?.returned) return false
+    if (retF === 'returned' && !r.agg?.returned) return false
+    if (text.trim()) { const q = text.toLowerCase(); if (!r.order_id.toLowerCase().includes(q) && !(r.sku || '').toLowerCase().includes(q)) return false }
+    return true
+  }), [rows, platformF, retF, text])
+
+  // Commission-% distribution (rounded to nearest 0.5%) with order counts, over baseFiltered.
+  const pctDist = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const r of baseFiltered) { const bk = pctBucket(r.agg?.commissionPct); m[bk] = (m[bk] || 0) + 1 }
+    return Object.entries(m).sort((a, b) => a[0] === '—' ? 1 : b[0] === '—' ? -1 : parseFloat(a[0]) - parseFloat(b[0]))
+  }, [baseFiltered])
+
   const filtered = useMemo(() => {
-    let out = rows.filter(r => {
-      if (platformF !== 'all' && r.platform !== platformF) return false
-      if (retF === 'clean' && r.agg?.returned) return false
-      if (retF === 'returned' && !r.agg?.returned) return false
-      if (text.trim()) { const q = text.toLowerCase(); if (!r.order_id.toLowerCase().includes(q) && !(r.sku || '').toLowerCase().includes(q)) return false }
-      return true
-    })
+    let out = pctFilter.length ? baseFiltered.filter(r => pctFilter.includes(pctBucket(r.agg?.commissionPct))) : baseFiltered
     const col = COLS.find(c => c.key === sortKey)
     const getV = (r: ChargeRow): string | number => sortKey === 'order_date' ? (r.order_date || '') : sortKey === 'order_id' ? r.order_id : col ? col.get(r) : ''
     out = [...out].sort((a, b) => { const va = getV(a), vb = getV(b); const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb)); return sortDir === 'asc' ? cmp : -cmp })
     return out
-  }, [rows, platformF, retF, text, sortKey, sortDir, COLS])
+  }, [baseFiltered, pctFilter, sortKey, sortDir, COLS])
 
-  useEffect(() => { setPage(0) }, [platformF, retF, text])
+  useEffect(() => { setPage(0) }, [platformF, retF, text, pctFilter])
+  const togglePct = (bk: string) => setPctFilter(prev => prev.includes(bk) ? prev.filter(x => x !== bk) : [...prev, bk])
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageSafe = Math.min(page, pageCount - 1)
   const paged = useMemo(() => filtered.slice(pageSafe * PAGE_SIZE, (pageSafe + 1) * PAGE_SIZE), [filtered, pageSafe])
@@ -621,6 +646,39 @@ function ChargesView() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 10px' }}>
           <Search size={13} style={{ color: 'var(--text3)' }} />
           <input value={text} onChange={e => setText(e.target.value)} placeholder="Order ID or SKU" style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 12, outline: 'none', width: 150, fontFamily: 'DM Mono' }} />
+        </div>
+        <div style={{ position: 'relative' as const }} ref={pctPopRef}>
+          <button onClick={() => setPctOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: pctFilter.length ? 'var(--accent)' : 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '6px 11px', color: pctFilter.length ? '#fff' : 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            <Filter size={12} /> Commission %{pctFilter.length ? ` · ${pctFilter.length}` : ''}
+            <ChevronDown size={12} />
+          </button>
+          {pctOpen && (
+            <div style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, zIndex: 50, width: 240, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 10, boxShadow: '0 8px 28px rgba(0,0,0,0.16)', overflow: 'hidden' }}>
+              <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>Commission % charged</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>this window</span>
+              </div>
+              <div style={{ maxHeight: 240, overflowY: 'auto' as const }}>
+                {pctDist.length === 0 ? (
+                  <div style={{ padding: 14, fontSize: 12, color: 'var(--text3)', textAlign: 'center' as const }}>No orders</div>
+                ) : pctDist.map(([bk, n]) => {
+                  const on = pctFilter.includes(bk)
+                  return (
+                    <label key={bk} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--border)' }}>
+                      <input type="checkbox" checked={on} onChange={() => togglePct(bk)} style={{ width: 14, height: 14 }} />
+                      <span style={{ flex: 1, fontFamily: 'DM Mono', color: bk === '—' ? 'var(--text3)' : 'var(--text)' }}>{bk === '—' ? '— (no sale)' : bk + '%'}</span>
+                      <span style={{ fontFamily: 'DM Mono', color: 'var(--text3)' }}>{n}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              {pctFilter.length > 0 && (
+                <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
+                  <button onClick={() => setPctFilter([])} style={{ width: '100%', padding: 5, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Clear</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filtered.length} orders</span>
       </div>
