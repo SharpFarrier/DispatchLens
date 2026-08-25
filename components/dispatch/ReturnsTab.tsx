@@ -74,6 +74,8 @@ export interface ReturnRow {
   reverse_tracking_synced_at: string | null
   warehouse_received: boolean
   warehouse_received_at: string | null
+  received_sku: string | null
+  sku_mismatch: boolean
   notes: string | null
   created_at: string
   updated_at: string
@@ -106,6 +108,8 @@ function returnCols(canSeeAmount: boolean): RetCol[] {
     { key: 'reverse', label: 'Reverse', type: 'text', get: r => r.reverse_tracking_id || '' },
     { key: 'warehouse', label: 'Warehouse', type: 'category', get: r => r.warehouse_received ? 'Received' : 'Not received' },
     { key: 'refund', label: 'Refund', type: 'category', get: r => r.refund_status === 'refunded' ? 'Refunded' : 'Pending' },
+    { key: 'received_sku', label: 'Received SKU', type: 'text', get: r => r.received_sku || '' },
+    { key: 'flag', label: 'Flag', type: 'category', get: r => r.sku_mismatch ? 'SKU mismatch' : '' },
   ]
   if (canSeeAmount) cols.push({ key: 'amount', label: 'Amount', type: 'number', get: r => r.refund_amount ?? 0 })
   cols.push({ key: 'added', label: 'Added', type: 'date', get: r => r.created_at || '' })
@@ -260,10 +264,13 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
     setBusy(true); setError(null)
     const { data: existing } = await supabase.from('returns').select('id').eq('order_id', found.order_id).neq('id', row.id).limit(1).maybeSingle()
     if (existing) { setError(`Order ${found.order_id} already has a return — not linked`); setBusy(false); return }
+    const orderedSku = (found.barcode_sku || found.sku || '') as string
+    const mismatch = !!(row.received_sku && orderedSku && row.received_sku !== orderedSku)
     const { data } = await supabase.from('returns').update({
       order_id: found.order_id,
       barcode: found.scanned_barcode || row.barcode || null,
       return_type: row.return_type || 'customer',
+      sku_mismatch: mismatch,
       updated_at: new Date().toISOString(),
     }).eq('id', row.id).select().maybeSingle()
     if (data) {
@@ -278,6 +285,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
     <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
         <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text)' }}>{row.reverse_tracking_id}</span>
+        {row.received_sku && <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{row.received_sku}</span>}
         <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: 4 }}>RECEIVED · UNMAPPED</span>
         {recvAt && <span style={{ fontSize: 12, color: 'var(--text3)' }}>received {recvAt}</span>}
         <input value={awb} onChange={e => { setAwb(e.target.value); setError(null); setFound(null) }}
@@ -293,6 +301,9 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
           <div style={{ fontSize: 13 }}>
             <span style={{ fontFamily: 'DM Mono', color: 'var(--text)' }}>{found.order_id}</span>
             <span style={{ color: 'var(--text3)' }}> · {found.sku || found.scanned_barcode || '—'}{found.dispatched_at ? ` · dispatched ${new Date(found.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}</span>
+            {row.received_sku && (found.barcode_sku || found.sku) && row.received_sku !== (found.barcode_sku || found.sku) && (
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--critical)', marginTop: 4 }}>received {row.received_sku} \u2260 ordered {found.barcode_sku || found.sku} — will be flagged, refund held</div>
+            )}
           </div>
           <button onClick={confirmLink} disabled={busy}
             style={{ background: 'var(--accent)', border: 'none', borderRadius: 7, color: '#fff', cursor: busy ? 'default' : 'pointer', padding: '7px 14px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -311,6 +322,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   const cols = useMemo(() => returnCols(canSeeAmount), [canSeeAmount])
   const mapped = useMemo(() => returns.filter(r => r.order_id), [returns])
   const unmapped = useMemo(() => returns.filter(r => !r.order_id), [returns])
+  const mismatched = useMemo(() => returns.filter(r => r.order_id && r.sku_mismatch), [returns])
   const flt = useReturnFilters(mapped, cols)
   const shownReturns = flt.filtered
   const [rtoOrders, setRtoOrders] = useState<DBOrder[]>([])
@@ -319,9 +331,6 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   const [searchHits, setSearchHits] = useState<DBOrder[]>([])
   const [searching, setSearching] = useState(false)
   const [savingId, setSavingId] = useState<string | null>(null)
-  const [rxId, setRxId] = useState('')
-  const [rxMsg, setRxMsg] = useState<{ type: 'error' | 'ok'; text: string } | null>(null)
-  const [rxBusy, setRxBusy] = useState(false)
   const [revSyncing, setRevSyncing] = useState(false)
   const [revSyncMsg, setRevSyncMsg] = useState<string | null>(null)
   const [amountDraft, setAmountDraft] = useState<Record<string, string>>({})
@@ -427,37 +436,6 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
     setSavingId(null)
   }
 
-  // ── Receive a return by reverse tracking ID, before any order is known ──
-  const receiveReturn = async () => {
-    const id = rxId.trim()
-    if (!id) { setRxMsg({ type: 'error', text: 'Enter a reverse tracking ID' }); return }
-    setRxBusy(true); setRxMsg(null)
-    const { data: dup } = await supabase.from('returns').select('id, order_id').eq('reverse_tracking_id', id).limit(1).maybeSingle()
-    if (dup) {
-      const d = dup as { id: string; order_id: string | null }
-      setRxMsg({ type: 'error', text: d.order_id ? `Already received — on order ${d.order_id}` : 'Already received — awaiting order mapping' })
-      setRxBusy(false); return
-    }
-    const { data: { user } } = await supabase.auth.getUser()
-    const { data } = await supabase.from('returns').insert({
-      reverse_tracking_id: id,
-      warehouse_received: true,
-      warehouse_received_at: new Date().toISOString(),
-      order_id: null,
-      source: 'manual',
-      created_by: user?.id ?? null,
-      created_by_email: user?.email ?? null,
-      updated_at: new Date().toISOString(),
-    }).select().maybeSingle()
-    if (data) {
-      setReturns(prev => [data as ReturnRow, ...prev])
-      setRxId(''); setRxMsg({ type: 'ok', text: 'Received — awaiting order mapping' })
-    } else {
-      setRxMsg({ type: 'error', text: 'Could not receive — try again' })
-    }
-    setRxBusy(false)
-  }
-
   // Move a return from unmapped -> mapped after it's linked to an order.
   const onReturnLinked = (updated: ReturnRow) => {
     setReturns(prev => prev.map(r => r.id === updated.id ? updated : r))
@@ -491,6 +469,10 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
   }
 
   const patchReturn = async (id: string, patch: Partial<ReturnRow>) => {
+    if (patch.refund_status === 'refunded') {
+      const cur = returns.find(r => r.id === id)
+      if (cur?.sku_mismatch) { alert('This return has a SKU mismatch — clear the mismatch flag before marking it refunded.'); return }
+    }
     setSavingId(id)
     const before = returns.find(r => r.id === id)
     const { data } = await supabase.from('returns')
@@ -583,23 +565,6 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
         <DailyReview returns={mapped} canSeeAmount={canSeeAmount} savingId={savingId} onRefund={patchReturn} onOpenOrder={onOpenOrder} />
       ) : (<>
 
-      {/* ── Receive a return by reverse tracking ID (no order needed) ── */}
-      <div style={{ ...card, padding: 18, display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
-        <div style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text2)', letterSpacing: '0.04em' }}>RECEIVE A RETURN</div>
-        <div style={{ fontSize: 12, color: 'var(--text3)' }}>Scan or enter the reverse tracking ID. Marks it received and adds it below, waiting for an order to be mapped.</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', maxWidth: 520, flexWrap: 'wrap' as const }}>
-          <input value={rxId} onChange={e => { setRxId(e.target.value); setRxMsg(null) }}
-            onKeyDown={e => { if (e.key === 'Enter') receiveReturn() }}
-            placeholder="Reverse tracking ID"
-            style={{ flex: 1, minWidth: 220, border: '1px solid var(--border)', background: 'var(--bg2)', borderRadius: 7, padding: '8px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono', outline: 'none' }} />
-          <button onClick={receiveReturn} disabled={rxBusy || !rxId.trim()}
-            style={{ background: rxBusy || !rxId.trim() ? 'var(--bg2)' : 'var(--accent)', border: 'none', borderRadius: 7, color: rxBusy || !rxId.trim() ? 'var(--text3)' : '#fff', cursor: rxBusy || !rxId.trim() ? 'default' : 'pointer', padding: '8px 16px', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Package size={14} /> Receive
-          </button>
-        </div>
-        {rxMsg && <div style={{ fontSize: 12, fontWeight: 600, color: rxMsg.type === 'error' ? 'var(--critical)' : 'var(--dispatched)' }}>{rxMsg.text}</div>}
-      </div>
-
       {/* ── Awaiting order mapping (received, no order yet) ── */}
       {unmapped.length > 0 && (
         <div style={{ ...card, overflow: 'hidden' }}>
@@ -610,6 +575,27 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
           </div>
           {unmapped.map(r => (
             <UnmappedRow key={r.id} row={r} supabase={supabase} onLinked={onReturnLinked} />
+          ))}
+        </div>
+      )}
+
+      {/* ── SKU mismatch — refund held until cleared ── */}
+      {mismatched.length > 0 && (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)', background: 'var(--critical-bg)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+            <AlertTriangle size={14} style={{ color: 'var(--critical)' }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--critical)' }}>SKU mismatch — refund held ({mismatched.length})</span>
+            <span style={{ fontSize: 12, color: 'var(--text3)' }}>received item differs from the order — review, then clear to release the refund</span>
+          </div>
+          {mismatched.map(r => (
+            <div key={r.id} style={{ padding: '10px 18px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+              <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{r.order_id}</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>received <span style={{ fontFamily: 'DM Mono', color: 'var(--critical)' }}>{r.received_sku || '—'}</span></span>
+              <button onClick={() => patchReturn(r.id, { sku_mismatch: false })} disabled={savingId === r.id}
+                style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                {savingId === r.id ? 'Clearing…' : 'Clear mismatch'}
+              </button>
+            </div>
           ))}
         </div>
       )}

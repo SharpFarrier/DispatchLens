@@ -1,9 +1,9 @@
 'use client'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { logOrderEvent } from '@/lib/orderEvents'
 import { beepSuccess, beepError, beepWarn } from './scanFeedback'
-import { Camera, Undo2, AlertTriangle, CheckCircle, XCircle, Package } from 'lucide-react'
+import { Camera, Undo2, AlertTriangle, CheckCircle, XCircle, Package, Search } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -15,7 +15,7 @@ const REJECT_REASONS = ['Wrong item', 'Damaged beyond return', 'Not our order', 
 // A resolved-but-not-yet-committed RTO match. All three match paths produce one of these.
 interface Pending {
   barcode: string
-  path: 'reverse' | 'forward' | 'barcode'
+  path: 'reverse' | 'forward' | 'barcode' | 'unmatched'
   orderId: string | null
   sku: string | null
   customer: string | null
@@ -37,6 +37,19 @@ export default function RtoTab() {
   const [rejecting, setRejecting] = useState(false)
   const [rejectReason, setRejectReason] = useState<string>(REJECT_REASONS[0])
   const [committing, setCommitting] = useState(false)
+  const [skuMaps, setSkuMaps] = useState<{ id: string; master_sku: string; product_name: string | null; amazon_sku: string | null; flipkart_sku: string | null; website_sku: string | null }[]>([])
+  const [rxMode, setRxMode] = useState<'product' | null>(null)
+  const [skuQuery, setSkuQuery] = useState('')
+  const [selSku, setSelSku] = useState<string | null>(null)
+  useEffect(() => { supabase.from('dispatch_sku_map').select('id, master_sku, product_name, amazon_sku, flipkart_sku, website_sku').then((res: { data: typeof skuMaps | null }) => setSkuMaps(res.data || [])) }, [supabase])
+  const skuHits = useMemo(() => {
+    const q = skuQuery.trim().toLowerCase()
+    if (!q) return []
+    return skuMaps.filter(m =>
+      m.master_sku?.toLowerCase().includes(q) || m.product_name?.toLowerCase().includes(q) ||
+      m.amazon_sku?.toLowerCase().includes(q) || m.flipkart_sku?.toLowerCase().includes(q) || m.website_sku?.toLowerCase().includes(q)
+    ).slice(0, 20)
+  }, [skuQuery, skuMaps])
   const inputRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<{ stop: () => Promise<void>; clear: () => void } | null>(null)
   const processingRef = useRef(false)
@@ -110,7 +123,11 @@ export default function RtoTab() {
       // Path 3: packed_units barcode.
       const { data: unit, error } = await supabase.from('packed_units').select('*').eq('barcode', barcode).maybeSingle()
       if (error) throw error
-      if (!unit) { flash('error', `${barcode} not found (no return, forward AWB, or barcode match)`); return }
+      if (!unit) {
+        setPending({ barcode, path: 'unmatched', orderId: null, sku: null, customer: null, returnId: null, returnReason: null, packedBarcode: null, autoCreate: null, unit: null })
+        flash('warn', `${barcode} not found — receive as a new return below`)
+        return
+      }
       if (unit.status === 'rto') { flash('warn', `${barcode} already marked RTO`); return }
       // Resolve order for preview + a possible existing return / auto-create.
       const { data: bOrders } = await supabase.from('dispatch_orders')
@@ -190,6 +207,33 @@ export default function RtoTab() {
     }
   }
 
+  // Receive an UNMATCHED scan as a new unmapped return (order linked later via forward AWB).
+  async function confirmUnmatchedReceive() {
+    if (!pending || !selSku || committing) return
+    setCommitting(true)
+    try {
+      const now = new Date().toISOString()
+      const { data: dup } = await supabase.from('returns').select('id, order_id').eq('reverse_tracking_id', pending.barcode).limit(1).maybeSingle()
+      if (dup) {
+        const d = dup as { id: string; order_id: string | null }
+        flash('error', d.order_id ? `Already received — on order ${d.order_id}` : 'Already received — awaiting mapping')
+        setCommitting(false); return
+      }
+      const { data: auth } = await supabase.auth.getUser()
+      const { data: created } = await supabase.from('returns').insert({
+        order_id: null, source: 'manual', return_type: 'customer', reason: 'Pending review',
+        received_sku: selSku, reverse_tracking_id: pending.barcode,
+        warehouse_received: true, warehouse_received_at: now,
+        created_by: auth?.user?.id ?? null, created_by_email: auth?.user?.email ?? null, updated_at: now,
+      }).select('id').maybeSingle()
+      setScanned(prev => [{ barcode: pending.barcode, prevStatus: 'return', unitId: `ret:${created?.id || pending.barcode}`, returnId: created?.id ?? undefined }, ...prev])
+      flash('success', `Received: ${selSku} · reverse ${pending.barcode} — awaiting order mapping`)
+      setPending(null); setRxMode(null); setSelSku(null); setSkuQuery('')
+    } catch (e) {
+      flash('error', 'Receive error: ' + (e as Error).message)
+    } finally { setCommitting(false) }
+  }
+
   // ── PHASE 2b: commit REJECT. Marks the return rejected + reason (shows in Returns tab). ──
   async function confirmReject() {
     if (!pending || committing) return
@@ -237,7 +281,7 @@ export default function RtoTab() {
   }
 
   function cancelPending() {
-    setPending(null); setRejecting(false); setRejectReason(REJECT_REASONS[0])
+    setPending(null); setRejecting(false); setRejectReason(REJECT_REASONS[0]); setRxMode(null); setSelSku(null); setSkuQuery('')
     flash('warn', 'Cancelled — scan again')
     setTimeout(() => inputRef.current?.focus(), 50)
   }
@@ -329,7 +373,7 @@ export default function RtoTab() {
       </div>
 
       {/* Confirm card — appears after a successful scan match, before any DB write. */}
-      {pending && (
+      {pending && pending.path !== 'unmatched' && (
         <div style={{ ...card, border: '2px solid var(--accent)', padding: 0, overflow: 'hidden' }}>
           <div style={{ background: 'var(--accent-bg)', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent)', fontWeight: 700, fontSize: 13 }}>
             <Package size={15} /> Confirm this return
@@ -377,6 +421,60 @@ export default function RtoTab() {
                     style={{ padding: '9px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, cursor: 'pointer' }}>
                     Back
                   </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {pending && pending.path === 'unmatched' && (
+        <div style={{ ...card, border: '2px solid var(--today)', padding: 0, overflow: 'hidden' }}>
+          <div style={{ background: 'var(--today-bg)', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--today)', fontWeight: 700, fontSize: 13 }}>
+            <AlertTriangle size={15} /> Not found — receive as a new return
+          </div>
+          <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
+            <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+              <span style={{ fontFamily: 'DM Mono', color: 'var(--text)' }}>{pending.barcode}</span> isn&apos;t a known return, order, or barcode. Receive it anyway, then record what came back.
+            </div>
+            {rxMode === null ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setRxMode('product')} disabled={committing}
+                  style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <Package size={15} /> Mark received
+                </button>
+                <button onClick={cancelPending} disabled={committing}
+                  style={{ padding: '10px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)' }}>What did you receive?</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 12px' }}>
+                  <Search size={14} style={{ color: 'var(--text3)', flexShrink: 0 }} />
+                  <input value={skuQuery} onChange={e => setSkuQuery(e.target.value)} placeholder="Search barcode, SKU, or product name"
+                    style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', fontFamily: 'DM Sans' }} />
+                </div>
+                {skuQuery.trim().length >= 1 && (
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 7, maxHeight: 200, overflowY: 'auto' as const }}>
+                    {skuHits.length === 0 ? (
+                      <div style={{ padding: 12, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 12 }}>No products match</div>
+                    ) : skuHits.map(m => (
+                      <button key={m.id} onClick={() => setSelSku(m.master_sku)}
+                        style={{ width: '100%', textAlign: 'left' as const, padding: '9px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: selSku === m.master_sku ? 'var(--accent-bg)' : 'var(--surface)', borderTop: 'none', borderLeft: 'none', borderRight: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: selSku === m.master_sku ? 'var(--accent)' : 'var(--text2)' }}>{m.master_sku}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text3)' }}>{m.product_name || ''}</span>
+                        {selSku === m.master_sku && <CheckCircle size={14} style={{ marginLeft: 'auto', color: 'var(--accent)' }} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                  <button onClick={confirmUnmatchedReceive} disabled={committing || !selSku}
+                    style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: (committing || !selSku) ? 'var(--bg2)' : 'var(--dispatched)', color: (committing || !selSku) ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 700, cursor: (committing || !selSku) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <CheckCircle size={15} /> {committing ? 'Saving…' : selSku ? `Confirm received · ${selSku}` : 'Select a product'}
+                  </button>
+                  <button onClick={cancelPending} disabled={committing}
+                    style={{ padding: '10px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
                 </div>
               </div>
             )}
