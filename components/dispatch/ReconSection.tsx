@@ -1,8 +1,8 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
-import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X, Download } from 'lucide-react'
+import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X, Download, Search } from 'lucide-react'
 import {
   parseAmazonText, parseFlipkartBuffer, readFileText, readFileBuffer,
   parseRazorpayText, parseCashfreeText, detectWebsiteAggregator,
@@ -13,7 +13,7 @@ import PriceMaster from './PriceMaster'
 import DiscountEvents from './DiscountEvents'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }
-type Tab = 'inbox' | 'orders' | 'ratecard' | 'prices' | 'discounts'
+type Tab = 'inbox' | 'orders' | 'charges' | 'ratecard' | 'prices' | 'discounts'
 
 interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string; total_settled?: number | null; order_count?: number | null; deposit_date?: string | null; period_start?: string | null; period_end?: string | null }
 type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
@@ -173,11 +173,11 @@ export default function ReconSection() {
   return (
     <div style={{ maxWidth: 1280 }}>
       <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
-        {(['inbox', 'orders', 'ratecard', 'prices', 'discounts'] as Tab[]).map(t => (
+        {(['inbox', 'orders', 'charges', 'ratecard', 'prices', 'discounts'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
             background: tab === t ? 'var(--accent)' : 'var(--surface)', color: tab === t ? '#fff' : 'var(--text2)',
-          }}>{t === 'inbox' ? 'Settlement Inbox' : t === 'orders' ? 'Orders' : t === 'ratecard' ? 'Rate Card' : t === 'prices' ? 'Price Master' : 'Discounts'}</button>
+          }}>{t === 'inbox' ? 'Settlement Inbox' : t === 'orders' ? 'Orders' : t === 'charges' ? 'Charges' : t === 'ratecard' ? 'Rate Card' : t === 'prices' ? 'Price Master' : 'Discounts'}</button>
         ))}
         <button onClick={() => loadInbox()} style={{ marginLeft: 'auto', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
           <RefreshCw size={13} /> Refresh
@@ -194,6 +194,8 @@ export default function ReconSection() {
         <InboxView uploads={uploads} totals={totals} fileAgg={fileAgg} loading={loading} busy={busy} onFiles={handleFiles} />
       ) : tab === 'orders' ? (
         <OrdersView />
+      ) : tab === 'charges' ? (
+        <ChargesView />
       ) : tab === 'ratecard' ? (
         <RateCardEditor />
       ) : tab === 'prices' ? (
@@ -414,8 +416,277 @@ interface OrdCol {
   label: string
   type: 'text' | 'category' | 'date' | 'number'
   get: (r: OrderRow) => string | number
-  render?: (r: OrderRow) => React.ReactNode
+  render?: (r: OrderRow) => ReactNode
   align?: 'left' | 'right'
+}
+
+// ── Charge aggregation (actuals): normalize Amazon amount_description lines + Flipkart raw
+//    columns into the same buckets, splitting forward vs reverse. Fees kept at BASE (pre-GST).
+const cnum = (v: unknown) => { const n = parseFloat(String(v ?? '').replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n }
+function amazonBucket(desc: string): string {
+  const d = desc || ''
+  if (d === 'Principal') return 'sale'
+  if (d === 'Commission') return 'commission'
+  if (d === 'Fixed closing fee') return 'closing'
+  if (d === 'FBA Pick & Pack Fee' || d === 'FBA Weight Handling Fee') return 'fba'
+  if (d === 'Product Tax' || d === 'Shipping tax') return 'productTax'
+  if (d.startsWith('TCS')) return 'tcs'
+  if (d.startsWith('TDS')) return 'tds'
+  if (/(IGST|CGST|SGST)$/.test(d)) return 'gstOnFees'
+  if (d === 'Shipping' || d === 'Shipping commission') return 'shipping'
+  return 'other'
+}
+const FKCOL: Record<string, (r: Record<string, unknown>) => number> = {
+  sale: r => cnum(r['Sale Amount (Rs.)']) + cnum(r['Total Offer Amount (Rs.)']),
+  commission: r => cnum(r['Commission (Rs.)']),
+  closing: r => cnum(r['Fixed Fee  (Rs.)']),
+  shipping: r => cnum(r['Shipping Fee (Rs.)']) + cnum(r['Collection Fee (Rs.)']),
+  fba: r => cnum(r['Pick And Pack Fee (Rs.)']),
+  productTax: r => cnum(r['Taxes (Rs.)']),
+  tcs: r => cnum(r['TCS (Rs.)']),
+  tds: r => cnum(r['TDS (Rs.)']),
+  gstOnFees: r => cnum(r['GST on MP Fees (Rs.)']),
+  net: r => cnum(r['Bank Settlement Value (Rs.)  = SUM(I:Q)']),
+}
+export interface ChargeAgg {
+  sale: number; commission: number; closing: number; shipping: number; fba: number
+  productTax: number; tcs: number; tds: number; gstOnFees: number; net: number; other: number
+  reverseResidual: number; returned: boolean; commissionPct: number | null
+  detail: { label: string; amount: number }[]
+}
+type SettleLine = { amount: number | null; transaction_type: string | null; amount_description: string | null; raw: Record<string, unknown> | null }
+function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
+  const b = { sale: 0, commission: 0, closing: 0, shipping: 0, fba: 0, productTax: 0, tcs: 0, tds: 0, gstOnFees: 0, net: 0, other: 0 }
+  let reverseResidual = 0, returned = false
+  const detail: { label: string; amount: number }[] = []
+  if (platform === 'Amazon') {
+    for (const l of lines) {
+      const tt = (l.transaction_type || '').toLowerCase()
+      const amt = l.amount || 0
+      detail.push({ label: `${l.amount_description || l.transaction_type || 'line'}${tt !== 'order' ? ` (${l.transaction_type})` : ''}`, amount: amt })
+      if (tt !== 'order') { returned = true; reverseResidual += amt; continue }
+      const key = amazonBucket(l.amount_description || '') as keyof typeof b
+      b[key] += amt; b.net += amt
+    }
+  } else if (platform === 'Flipkart') {
+    for (const l of lines) {
+      const tt = l.transaction_type || ''
+      const isReturn = /return/i.test(tt)
+      const amt = l.amount || 0
+      const raw = l.raw || {}
+      const fwd = !isReturn || amt >= 0
+      if (isReturn) returned = true
+      detail.push({ label: `${isReturn ? 'Return ' : ''}${amt >= 0 ? 'forward' : 'reverse'} · settlement`, amount: FKCOL.net(raw) })
+      if (!fwd) { reverseResidual += FKCOL.net(raw); continue }
+      for (const k of Object.keys(FKCOL) as (keyof typeof b)[]) b[k] += FKCOL[k](raw)
+    }
+  }
+  const commissionPct = b.sale ? Math.abs(b.commission) / b.sale * 100 : null
+  return { ...b, reverseResidual, returned, commissionPct, detail }
+}
+
+interface ChargeRow {
+  order_id: string; sku: string | null; platform: string; order_date: string | null
+  payment_date: string | null; agg: ChargeAgg | null
+}
+type ChgCol = { key: string; label: string; type: 'text' | 'category' | 'number' | 'date'; align?: 'right'; get: (r: ChargeRow) => string | number; render?: (r: ChargeRow) => ReactNode }
+
+function ChargesView() {
+  const supabase = createClient()
+  const [loading, setLoading] = useState(true)
+  const [rows, setRows] = useState<ChargeRow[]>([])
+  const [page, setPage] = useState(0)
+  const PAGE_SIZE = 100
+  const [win, setWin] = useState<'7d' | '30d' | '3mo' | 'all' | 'custom'>('7d')
+  const [customFrom, setCustomFrom] = useState(''); const [customTo, setCustomTo] = useState('')
+  const [platformF, setPlatformF] = useState<'all' | 'Amazon' | 'Flipkart'>('all')
+  const [retF, setRetF] = useState<'all' | 'clean' | 'returned'>('all')
+  const [text, setText] = useState('')
+  const [sortKey, setSortKey] = useState('order_date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  const range = useMemo<{ from: string | null; to: string | null }>(() => {
+    const now = new Date(); const iso = (d: Date) => d.toISOString().slice(0, 10)
+    const back = (days: number) => iso(new Date(now.getTime() - days * 86400000))
+    if (win === '7d') return { from: back(6), to: null }
+    if (win === '30d') return { from: back(29), to: null }
+    if (win === '3mo') return { from: back(89), to: null }
+    if (win === 'all') return { from: null, to: null }
+    return { from: customFrom || null, to: customTo || null }
+  }, [win, customFrom, customTo])
+
+  const platformOf = (oid: string) => { const t = (oid || '').trim(); if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'; if (t.startsWith('OD')) return 'Flipkart'; if (/^\d{4,6}$/.test(t)) return 'Website'; return 'Other' }
+
+  const loadWindow = useCallback(async () => {
+    if (win === 'custom' && (!customFrom || !customTo)) { setRows([]); setLoading(false); return }
+    setLoading(true)
+    const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; order_date: string | null }>((from, to) => {
+      let q = supabase.from('dispatch_orders').select('order_id, sku, barcode_sku, order_date').eq('is_dispatched', true).eq('is_cancelled', false)
+      if (range.from) q = q.gte('order_date', range.from)
+      if (range.to) q = q.lte('order_date', range.to)
+      return q.order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to)
+    })
+    const oids = Array.from(new Set((orders || []).map(o => o.order_id).filter(Boolean)))
+    const byOrder: Record<string, SettleLine[]> = {}
+    const payDate: Record<string, string> = {}
+    const CH = 50
+    for (let i = 0; i < oids.length; i += CH) {
+      const slice = oids.slice(i, i + CH)
+      const chunk = await fetchAllRows<{ order_id: string | null; amount: number | null; transaction_type: string | null; amount_description: string | null; settlement_date: string | null; raw: Record<string, unknown> | null }>((from, to) =>
+        supabase.from('settlements').select('order_id, amount, transaction_type, amount_description, settlement_date, raw').in('order_id', slice).order('id', { ascending: true }).range(from, to))
+      for (const r of chunk) {
+        const oid = (r.order_id || '').trim(); if (!oid) continue
+        ;(byOrder[oid] ??= []).push({ amount: r.amount, transaction_type: r.transaction_type, amount_description: r.amount_description, raw: r.raw })
+        if (r.settlement_date && !payDate[oid]) payDate[oid] = r.settlement_date
+      }
+    }
+    const out: ChargeRow[] = (orders || []).filter(o => o.order_id).map(o => {
+      const oid = o.order_id.trim(); const plat = platformOf(oid); const lines = byOrder[oid]
+      return { order_id: o.order_id, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null }
+    })
+    setRows(out); setLoading(false)
+  }, [supabase, win, customFrom, customTo, range])
+  useEffect(() => { if (win !== 'custom') void loadWindow() }, [win, loadWindow])
+
+  const fmt = (d: string | null) => { if (!d) return '—'; const s = String(d); const dt = new Date(s.length <= 10 ? s + 'T00:00:00' : s); return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
+  const money = (n: number | null | undefined) => (n == null || n === 0) ? '—' : Math.round(n).toLocaleString('en-IN')
+
+  const COLS: ChgCol[] = useMemo(() => [
+    { key: 'sale', label: 'Sale', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.sale)}</span> },
+    { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.commission)}{r.agg?.commissionPct != null && <span style={{ display: 'block', fontSize: 10, color: 'var(--text3)' }}>{r.agg.commissionPct.toFixed(1)}%</span>}</span> },
+    { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.closing)}</span> },
+    { key: 'shipping', label: 'Shipping', type: 'number', align: 'right', get: r => r.agg?.shipping ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.shipping)}</span> },
+    { key: 'fba', label: 'FBA', type: 'number', align: 'right', get: r => r.agg?.fba ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.fba)}</span> },
+    { key: 'productTax', label: 'Tax', type: 'number', align: 'right', get: r => r.agg?.productTax ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.productTax)}</span> },
+    { key: 'tcs', label: 'TCS', type: 'number', align: 'right', get: r => r.agg?.tcs ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.tcs)}</span> },
+    { key: 'tds', label: 'TDS', type: 'number', align: 'right', get: r => r.agg?.tds ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.tds)}</span> },
+    { key: 'gstOnFees', label: 'GST on fees', type: 'number', align: 'right', get: r => r.agg?.gstOnFees ?? 0, render: r => <span style={{ fontFamily: 'DM Mono', color: 'var(--text3)' }}>{money(r.agg?.gstOnFees)}</span> },
+    { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
+  ], [])
+
+  const filtered = useMemo(() => {
+    let out = rows.filter(r => {
+      if (platformF !== 'all' && r.platform !== platformF) return false
+      if (retF === 'clean' && r.agg?.returned) return false
+      if (retF === 'returned' && !r.agg?.returned) return false
+      if (text.trim()) { const q = text.toLowerCase(); if (!r.order_id.toLowerCase().includes(q) && !(r.sku || '').toLowerCase().includes(q)) return false }
+      return true
+    })
+    const col = COLS.find(c => c.key === sortKey)
+    const getV = (r: ChargeRow): string | number => sortKey === 'order_date' ? (r.order_date || '') : sortKey === 'order_id' ? r.order_id : col ? col.get(r) : ''
+    out = [...out].sort((a, b) => { const va = getV(a), vb = getV(b); const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb)); return sortDir === 'asc' ? cmp : -cmp })
+    return out
+  }, [rows, platformF, retF, text, sortKey, sortDir, COLS])
+
+  useEffect(() => { setPage(0) }, [platformF, retF, text])
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageSafe = Math.min(page, pageCount - 1)
+  const paged = useMemo(() => filtered.slice(pageSafe * PAGE_SIZE, (pageSafe + 1) * PAGE_SIZE), [filtered, pageSafe])
+  const toggleSort = (key: string) => { if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(key); setSortDir('desc') } }
+
+  const winBtns = ([['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['3mo', 'Last 3 months'], ['all', 'All'], ['custom', 'Custom']] as [typeof win, string][])
+  const segBtn = (active: boolean, label: string, onClick: () => void) => (
+    <button onClick={onClick} style={{ padding: '5px 11px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--text2)' }}>{label}</button>
+  )
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--text3)', fontWeight: 700 }}>Order date:</span>
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+          {winBtns.map(([k, l]) => segBtn(win === k, l, () => setWin(k)))}
+        </div>
+        {win === 'custom' && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12 }} />
+            <span style={{ color: 'var(--text3)', fontSize: 12 }}>to</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12 }} />
+            <button onClick={() => void loadWindow()} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Load</button>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+          {segBtn(platformF === 'all', 'All platforms', () => setPlatformF('all'))}
+          {segBtn(platformF === 'Amazon', 'Amazon', () => setPlatformF('Amazon'))}
+          {segBtn(platformF === 'Flipkart', 'Flipkart', () => setPlatformF('Flipkart'))}
+        </div>
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+          {segBtn(retF === 'all', 'All', () => setRetF('all'))}
+          {segBtn(retF === 'clean', 'Clean', () => setRetF('clean'))}
+          {segBtn(retF === 'returned', 'Returned', () => setRetF('returned'))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 10px' }}>
+          <Search size={13} style={{ color: 'var(--text3)' }} />
+          <input value={text} onChange={e => setText(e.target.value)} placeholder="Order ID or SKU" style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 12, outline: 'none', width: 150, fontFamily: 'DM Mono' }} />
+        </div>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filtered.length} orders</span>
+      </div>
+
+      {loading ? (
+        <div style={{ ...card, padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading charges…</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ ...card, padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No orders with settlements in this window.</div>
+      ) : (
+        <div style={{ ...card, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' as const }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12, minWidth: 900 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left' as const, fontSize: 11, color: 'var(--text3)', cursor: 'pointer' }} onClick={() => toggleSort('order_id')}>Order {sortKey === 'order_id' ? (sortDir === 'asc' ? '▲' : '▼') : ''}</th>
+                  {COLS.map(c => (
+                    <th key={c.key} onClick={() => toggleSort(c.key)} style={{ padding: '8px 10px', textAlign: (c.align === 'right' ? 'right' : 'left') as 'right' | 'left', fontSize: 11, color: 'var(--text3)', cursor: 'pointer', whiteSpace: 'nowrap' as const }}>{c.label} {sortKey === c.key ? (sortDir === 'asc' ? '▲' : '▼') : ''}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {paged.map((r, i) => (
+                  <Fragment key={r.order_id}>
+                    <tr style={{ borderBottom: '1px solid var(--border)', background: r.agg?.returned ? 'var(--today-bg)' : (i % 2 ? 'var(--bg2)' : 'transparent'), cursor: 'pointer' }} onClick={() => setExpanded(expanded === r.order_id ? null : r.order_id)}>
+                      <td style={{ padding: '9px 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {expanded === r.order_id ? <ChevronDown size={13} style={{ color: 'var(--text3)' }} /> : <ChevronRight size={13} style={{ color: 'var(--text3)' }} />}
+                          <span style={{ fontFamily: 'DM Mono', fontSize: 11 }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</span>
+                          {r.agg?.returned && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--today)', border: '1px solid #fed7aa', borderRadius: 4, padding: '0 4px' }}>returned</span>}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 19, fontFamily: 'DM Mono' }}>{r.platform} · {r.sku || '—'}</div>
+                      </td>
+                      {COLS.map(c => (
+                        <td key={c.key} style={{ padding: '9px 10px', textAlign: (c.align === 'right' ? 'right' : 'left') as 'right' | 'left', whiteSpace: 'nowrap' as const }}>{c.render ? c.render(r) : c.get(r)}</td>
+                      ))}
+                    </tr>
+                    {expanded === r.order_id && r.agg && (
+                      <tr style={{ background: 'var(--bg2)' }}>
+                        <td colSpan={COLS.length + 1} style={{ padding: '4px 10px 12px 29px' }}>
+                          <div style={{ fontSize: 11, color: 'var(--text3)', margin: '6px 0 4px' }}>Full settlement lines{r.agg.returned ? ` · reverse residual ${money(r.agg.reverseResidual)}` : ''}</div>
+                          <table style={{ width: 'auto', borderCollapse: 'collapse' as const, fontSize: 11 }}>
+                            <tbody>
+                              {r.agg.detail.map((d, j) => (
+                                <tr key={j}><td style={{ padding: '3px 16px 3px 0', color: 'var(--text2)' }}>{d.label}</td><td style={{ padding: '3px 0', textAlign: 'right' as const, fontFamily: 'DM Mono', color: d.amount < 0 ? 'var(--critical)' : 'var(--text2)' }}>{d.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {pageCount > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={pageSafe === 0} style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe === 0 ? 'var(--text3)' : 'var(--text)', fontSize: 12, cursor: pageSafe === 0 ? 'default' : 'pointer' }}>Prev</button>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>Page {pageSafe + 1} of {pageCount}</span>
+              <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={pageSafe >= pageCount - 1} style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe >= pageCount - 1 ? 'var(--text3)' : 'var(--text)', fontSize: 12, cursor: pageSafe >= pageCount - 1 ? 'default' : 'pointer' }}>Next</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function OrdersView() {
