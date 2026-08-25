@@ -156,6 +156,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [bluedartText, setBluedartText] = useState('')
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ added: number; updated: number; skipped: number; unmapped: number; unmappedSkus: { sku: string; count: number }[] } | null>(null)
+  const [importPreview, setImportPreview] = useState<{ bdCount: number; dlCount: number; oldest: string; newest: string; staleCount: number; dupCount: number; total: number; blocks: string[]; warnings: string[] } | null>(null)
+  const [importAck, setImportAck] = useState(false)
+  const [preparingImport, setPreparingImport] = useState(false)
 
   // Plan
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>('ALL')
@@ -371,6 +374,61 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
 
   // ── Import ──
+  // Pre-import checks: hard-block a wrong-section paste, warn on stale dates / duplicates,
+  // and always show a summary. Confirm calls handleImport (the actual write) unchanged.
+  const BD_SIG = /^[56]\d{9,}$/
+  const prepareImport = async () => {
+    if (!delhiveryText.trim() && !bluedartText.trim()) return
+    setPreparingImport(true)
+    try {
+      const bd = [...parseOrders(bluedartText, 'Bluedart')]
+      const dl = [...parseOrders(delhiveryText, 'Delhivery')]
+      const all = [...bd, ...dl]
+      if (all.length === 0) { setPreparingImport(false); return }
+
+      const blocks: string[] = []
+      // HARD BLOCK: a box whose tracking IDs mostly belong to the other courier = wrong section.
+      const bdTracked = bd.filter(o => o.tracking_number)
+      const bdMatch = bdTracked.filter(o => BD_SIG.test(String(o.tracking_number)))
+      if (bdTracked.length >= 3 && bdMatch.length / bdTracked.length < 0.5) {
+        blocks.push(`Bluedart section: ${bdTracked.length - bdMatch.length} of ${bdTracked.length} tracking IDs aren't Bluedart format (509…/685…). This looks like the wrong file or the wrong section.`)
+      }
+      const dlTracked = dl.filter(o => o.tracking_number)
+      const dlAsBd = dlTracked.filter(o => BD_SIG.test(String(o.tracking_number)))
+      if (dlTracked.length >= 3 && dlAsBd.length / dlTracked.length > 0.5) {
+        blocks.push(`Delhivery section: ${dlAsBd.length} of ${dlTracked.length} tracking IDs look like Bluedart (509…/685…). Paste this in the Bluedart section instead.`)
+      }
+
+      // WARN: order dates more than 7 days old.
+      const warnings: string[] = []
+      const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10)
+      const dated = all.map(o => o.order_date).filter((d): d is string => !!d)
+      const oldest = dated.length ? dated.reduce((a, b) => (a < b ? a : b)) : ''
+      const newest = dated.length ? dated.reduce((a, b) => (a > b ? a : b)) : ''
+      const staleCount = dated.filter(d => d < weekAgo).length
+      if (staleCount > 0) {
+        const days = oldest ? Math.round((Date.now() - new Date(oldest + 'T00:00:00Z').getTime()) / 864e5) : 0
+        const od = oldest ? new Date(oldest + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : ''
+        warnings.push(`${staleCount} order${staleCount !== 1 ? 's' : ''} dated more than 7 days ago (oldest ${od}, ${days} days old). Is this the right file?`)
+      }
+
+      // INFO: how many already exist (DB check, chunked).
+      const ids = all.map(o => o.order_id)
+      const existing = new Set<string>()
+      for (let i = 0; i < ids.length; i += 300) {
+        const { data } = await supabase.from('dispatch_orders').select('order_id').in('order_id', ids.slice(i, i + 300))
+        for (const r of (data || [])) existing.add(r.order_id)
+      }
+      const dupCount = ids.filter(id => existing.has(id)).length
+
+      setImportAck(false)
+      setImportPreview({ bdCount: bd.length, dlCount: dl.length, oldest, newest, staleCount, dupCount, total: all.length, blocks, warnings })
+    } catch (e) {
+      console.error('[prepareImport]', e)
+    }
+    setPreparingImport(false)
+  }
+
   const handleImport = async () => {
     if (!delhiveryText.trim() && !bluedartText.trim()) return
     setImporting(true)
@@ -2810,9 +2868,71 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   ))}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <button onClick={handleImport} disabled={importing || (!delhiveryText.trim() && !bluedartText.trim())} style={{ padding: '9px 22px', borderRadius: 7, background: importing || (!delhiveryText.trim() && !bluedartText.trim()) ? 'var(--bg2)' : 'var(--accent)', border: 'none', color: importing || (!delhiveryText.trim() && !bluedartText.trim()) ? 'var(--text3)' : '#fff', fontWeight: 600, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Upload size={15} />{importing ? 'Importing…' : 'Import Orders'}
+                  <button onClick={prepareImport} disabled={importing || preparingImport || (!delhiveryText.trim() && !bluedartText.trim())} style={{ padding: '9px 22px', borderRadius: 7, background: importing || preparingImport || (!delhiveryText.trim() && !bluedartText.trim()) ? 'var(--bg2)' : 'var(--accent)', border: 'none', color: importing || preparingImport || (!delhiveryText.trim() && !bluedartText.trim()) ? 'var(--text3)' : '#fff', fontWeight: 600, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Upload size={15} />{importing ? 'Importing…' : preparingImport ? 'Checking…' : 'Import Orders'}
                   </button>
+                  {importPreview && (() => {
+                    const p = importPreview
+                    const canConfirm = p.blocks.length === 0 && (p.warnings.length === 0 || importAck)
+                    const fmtD = (d: string) => d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '\u2014'
+                    return (
+                      <div onMouseDown={() => setImportPreview(null)} style={{ position: 'fixed' as const, inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+                        <div onMouseDown={e => e.stopPropagation()} style={{ width: 'min(540px, 96vw)', maxHeight: '86vh', overflowY: 'auto' as const, background: 'var(--surface)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
+                          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Upload size={18} style={{ color: 'var(--accent)' }} />
+                            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Review before importing</span>
+                          </div>
+                          <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              <div style={{ flex: 1, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Bluedart</div><div style={{ fontSize: 24, fontWeight: 600, fontFamily: 'DM Mono' }}>{p.bdCount}</div></div>
+                              <div style={{ flex: 1, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Delhivery</div><div style={{ fontSize: 24, fontWeight: 600, fontFamily: 'DM Mono' }}>{p.dlCount}</div></div>
+                              <div style={{ flex: 1.4, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Order dates</div><div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{fmtD(p.oldest)} \u2013 {fmtD(p.newest)}</div></div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
+                              {p.blocks.map((b, i) => (
+                                <div key={'b' + i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 10, padding: '11px 12px' }}>
+                                  <Ban size={18} style={{ color: 'var(--critical)', flexShrink: 0, marginTop: 1 }} />
+                                  <div style={{ fontSize: 13, color: 'var(--critical)', fontWeight: 500 }}>{b}</div>
+                                </div>
+                              ))}
+                              {p.warnings.map((w, i) => (
+                                <div key={'w' + i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 10, padding: '11px 12px' }}>
+                                  <AlertTriangle size={18} style={{ color: 'var(--today)', flexShrink: 0, marginTop: 1 }} />
+                                  <div style={{ fontSize: 13, color: 'var(--today)', fontWeight: 500 }}>{w}</div>
+                                </div>
+                              ))}
+                              {p.dupCount > 0 && (
+                                <div style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--bg2)', borderRadius: 10, padding: '11px 12px' }}>
+                                  <AlertCircle size={18} style={{ color: 'var(--text3)', flexShrink: 0 }} />
+                                  <div style={{ fontSize: 13, color: 'var(--text2)' }}>{p.dupCount} of {p.total} order IDs already exist \u2014 they&apos;ll be updated, not added.</div>
+                                </div>
+                              )}
+                              {p.blocks.length === 0 && p.warnings.length === 0 && p.dupCount === 0 && (
+                                <div style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--dispatched-bg)', borderRadius: 10, padding: '11px 12px' }}>
+                                  <CheckCircle size={18} style={{ color: 'var(--dispatched)', flexShrink: 0 }} />
+                                  <div style={{ fontSize: 13, color: 'var(--dispatched)' }}>No issues found. {p.total} order{p.total !== 1 ? 's' : ''} ready to import.</div>
+                                </div>
+                              )}
+                            </div>
+                            {p.blocks.length === 0 && p.warnings.length > 0 && (
+                              <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: 'var(--text)', cursor: 'pointer' }}>
+                                <input type="checkbox" checked={importAck} onChange={e => setImportAck(e.target.checked)} style={{ width: 16, height: 16 }} />
+                                I&apos;ve checked this \u2014 import anyway
+                              </label>
+                            )}
+                            {p.blocks.length > 0 && (
+                              <div style={{ fontSize: 12, color: 'var(--critical)' }}>Fix the section or file above \u2014 this can&apos;t be imported as-is.</div>
+                            )}
+                          </div>
+                          <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                            <button onClick={() => setImportPreview(null)} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                            <button onClick={() => { if (!canConfirm) return; setImportPreview(null); handleImport() }} disabled={!canConfirm}
+                              style={{ padding: '8px 16px', borderRadius: 7, border: 'none', background: canConfirm ? 'var(--accent)' : 'var(--bg2)', color: canConfirm ? '#fff' : 'var(--text3)', fontSize: 13, fontWeight: 700, cursor: canConfirm ? 'pointer' : 'default' }}>Import {p.total} order{p.total !== 1 ? 's' : ''}</button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {importResult && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dispatched)', fontSize: 13, fontWeight: 500 }}>
                       <CheckCircle size={15} />{importResult.added} orders imported
