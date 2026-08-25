@@ -55,7 +55,7 @@ export const RETURN_REASONS = [
 export interface ReturnRow {
   id: string
   order_id: string | null
-  source: 'manual' | 'rto_auto' | 'rto'
+  source: 'manual' | 'rto_auto' | 'rto' | 'cancelled'
   return_type: 'customer' | 'rto' | null
   reason: string | null
   refund_status: 'pending' | 'refunded'
@@ -318,7 +318,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
 export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: Props) {
   const supabase = createClient()
   const [returns, setReturns] = useState<ReturnRow[]>([])
-  const [subTab, setSubTab] = useState<'returns' | 'daily'>('returns')
+  const [subTab, setSubTab] = useState<'returns' | 'daily' | 'cancelled'>('returns')
   const cols = useMemo(() => returnCols(canSeeAmount), [canSeeAmount])
   const mapped = useMemo(() => returns.filter(r => r.order_id), [returns])
   const unmapped = useMemo(() => returns.filter(r => !r.order_id), [returns])
@@ -552,17 +552,19 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
 
       {/* Sub-tab switcher */}
       <div style={{ display: 'flex', gap: 6 }}>
-        {(['returns', 'daily'] as const).map(t => (
+        {(['returns', 'daily', 'cancelled'] as const).map(t => (
           <button key={t} onClick={() => setSubTab(t)} style={{
             padding: '7px 16px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
             border: subTab === t ? '2px solid var(--accent)' : '1px solid var(--border)',
             background: subTab === t ? 'var(--accent)' : 'var(--surface)', color: subTab === t ? '#fff' : 'var(--text2)',
-          }}>{t === 'returns' ? 'Returns' : 'Daily review'}</button>
+          }}>{t === 'returns' ? 'Returns' : t === 'daily' ? 'Daily review' : 'Cancelled'}</button>
         ))}
       </div>
 
       {subTab === 'daily' ? (
         <DailyReview returns={mapped} canSeeAmount={canSeeAmount} savingId={savingId} onRefund={patchReturn} onOpenOrder={onOpenOrder} />
+      ) : subTab === 'cancelled' ? (
+        <CancelledReview canSeeAmount={canSeeAmount} onOpenOrder={onOpenOrder} />
       ) : (<>
 
       {/* ── Awaiting order mapping (received, no order yet) ── */}
@@ -888,6 +890,170 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
 }
 
 // ── Daily review: returns received per day + refund status, for the returns manager ──
+function CancelledReview({ canSeeAmount, onOpenOrder }: { canSeeAmount: boolean; onOpenOrder: (order: DBOrder) => void }) {
+  const supabase = createClient()
+  const [orders, setOrders] = useState<DBOrder[]>([])
+  const [retByOrder, setRetByOrder] = useState<Record<string, ReturnRow>>({})
+  const [loading, setLoading] = useState(true)
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [win, setWin] = useState<'7d' | '30d' | 'custom'>('7d')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [amtEdits, setAmtEdits] = useState<Record<string, string>>({})
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const cancelled = await fetchAllRows<DBOrder>((from, to) =>
+      supabase.from('dispatch_orders').select('*').eq('is_cancelled', true)
+        .order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
+    setOrders(cancelled)
+    const { data: rets } = await supabase.from('returns').select('*').eq('source', 'cancelled')
+    const map: Record<string, ReturnRow> = {}
+    for (const r of (rets || []) as ReturnRow[]) if (r.order_id) map[r.order_id] = r
+    setRetByOrder(map)
+    setLoading(false)
+  }, [supabase])
+  useEffect(() => { load() }, [load])
+
+  const platformOf = (oid: string) => { const t = (oid || '').trim(); if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'; if (t.startsWith('OD')) return 'Flipkart'; if (/^\d{4,6}$/.test(t)) return 'Website'; return 'Other' }
+  const cancelDate = (o: DBOrder) => o.manual_cancelled_at || o.cancellation_requested_at || o.created_at || ''
+  const orderAmount = (o: DBOrder) => (o.taxable_value || 0) + (o.tax_amount || 0)
+  const dayKey = (iso: string) => iso ? iso.slice(0, 10) : ''
+  const fmtDay = (key: string) => { const d = new Date(key + 'T00:00:00'); return isNaN(d.getTime()) ? key : d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }) }
+
+  const range = useMemo<{ from: string | null; to: string | null }>(() => {
+    const now = new Date(); const iso = (d: Date) => d.toISOString().slice(0, 10)
+    if (win === '7d') return { from: iso(new Date(now.getTime() - 6 * 86400000)), to: null }
+    if (win === '30d') return { from: iso(new Date(now.getTime() - 29 * 86400000)), to: null }
+    return { from: customFrom || null, to: customTo || null }
+  }, [win, customFrom, customTo])
+
+  const inWindow = useMemo(() => orders.filter(o => {
+    const k = dayKey(cancelDate(o))
+    if (!k) return false
+    if (range.from && k < range.from) return false
+    if (range.to && k > range.to) return false
+    return true
+  }), [orders, range])
+
+  const days = useMemo(() => {
+    const g: Record<string, DBOrder[]> = {}
+    for (const o of inWindow) { const k = dayKey(cancelDate(o)); (g[k] ||= []).push(o) }
+    return Object.keys(g).sort((a, b) => b.localeCompare(a)).map(k => ({ key: k, orders: g[k] }))
+  }, [inWindow])
+
+  const totalPending = useMemo(() => inWindow.reduce((s, o) => { const r = retByOrder[o.order_id]; return (r && r.refund_status === 'refunded') ? s : s + orderAmount(o) }, 0), [inWindow, retByOrder])
+
+  const markRefunded = async (o: DBOrder) => {
+    setSavingId(o.id)
+    const now = new Date().toISOString()
+    const raw = amtEdits[o.order_id]
+    const amt = raw != null ? (parseFloat(raw.replace(/[^0-9.]/g, '')) || 0) : orderAmount(o)
+    const existing = retByOrder[o.order_id]
+    try {
+      if (existing) {
+        const { data } = await supabase.from('returns').update({ refund_status: 'refunded', refund_amount: amt, refund_type: 'full', refunded_at: now, updated_at: now }).eq('id', existing.id).select().maybeSingle()
+        if (data) setRetByOrder(prev => ({ ...prev, [o.order_id]: data as ReturnRow }))
+      } else {
+        const { data: auth } = await supabase.auth.getUser()
+        const { data } = await supabase.from('returns').insert({
+          order_id: o.order_id, source: 'cancelled', return_type: null, reason: 'Order cancelled',
+          refund_status: 'refunded', refund_amount: amt, refund_type: 'full', refunded_at: now,
+          invoice_amount: orderAmount(o) || null, warehouse_received: false, reverse_tracking_id: null,
+          created_by: auth?.user?.id ?? null, created_by_email: auth?.user?.email ?? null, updated_at: now,
+        }).select().maybeSingle()
+        if (data) setRetByOrder(prev => ({ ...prev, [o.order_id]: data as ReturnRow }))
+      }
+      void logOrderEvent(o.order_id, 'return', 'Cancellation refund issued', `\u20b9${amt}`)
+    } catch { /* surfaced via row state */ }
+    setSavingId(null)
+  }
+
+  const undoRefund = async (o: DBOrder) => {
+    const existing = retByOrder[o.order_id]; if (!existing) return
+    setSavingId(o.id)
+    const { data } = await supabase.from('returns').update({ refund_status: 'pending', refund_type: null, refunded_at: null, updated_at: new Date().toISOString() }).eq('id', existing.id).select().maybeSingle()
+    if (data) setRetByOrder(prev => ({ ...prev, [o.order_id]: data as ReturnRow }))
+    setSavingId(null)
+  }
+
+  const openOrder = async (orderId: string) => { const { data } = await supabase.from('dispatch_orders').select('*').eq('order_id', orderId).limit(1).maybeSingle(); if (data) onOpenOrder(data as DBOrder) }
+
+  const winBtn = (k: '7d' | '30d' | 'custom', label: string) => (
+    <button key={k} onClick={() => setWin(k)} style={{ padding: '6px 14px', borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 700, border: win === k ? '2px solid var(--accent)' : '1px solid var(--border)', background: win === k ? 'var(--accent-bg)' : 'var(--surface)', color: win === k ? 'var(--accent)' : 'var(--text2)' }}>{label}</button>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const }}>
+        {winBtn('7d', 'Last 7 days')}{winBtn('30d', 'Last 30 days')}{winBtn('custom', 'Custom')}
+        {win === 'custom' && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12 }} />
+            <span style={{ color: 'var(--text3)', fontSize: 12 }}>to</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12 }} />
+          </div>
+        )}
+        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+          {inWindow.length} cancelled{canSeeAmount ? ` \u00b7 \u20b9${totalPending.toLocaleString('en-IN')} to refund` : ''}
+        </span>
+      </div>
+
+      {loading ? (
+        <div style={{ ...card, padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading cancelled orders…</div>
+      ) : days.length === 0 ? (
+        <div style={{ ...card, padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No cancelled orders in this window.</div>
+      ) : days.map(({ key, orders: dayOrders }) => {
+        const isOpen = collapsed[key] !== true
+        const dayPending = dayOrders.reduce((s, o) => { const r = retByOrder[o.order_id]; return (r && r.refund_status === 'refunded') ? s : s + orderAmount(o) }, 0)
+        const allRefunded = dayOrders.every(o => retByOrder[o.order_id]?.refund_status === 'refunded')
+        return (
+          <div key={key} style={{ ...card, overflow: 'hidden' }}>
+            <button onClick={() => setCollapsed(prev => ({ ...prev, [key]: prev[key] !== true }))}
+              style={{ width: '100%', textAlign: 'left' as const, padding: '10px 16px', background: 'var(--bg2)', border: 'none', borderBottom: isOpen ? '1px solid var(--border)' : 'none', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              {isOpen ? <ChevronDown size={16} style={{ color: 'var(--text3)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text3)' }} />}
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{fmtDay(key)}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{dayOrders.length} cancelled</span>
+              <span style={{ marginLeft: 'auto', fontFamily: 'DM Mono', fontSize: 13, color: allRefunded ? 'var(--dispatched)' : 'var(--today)' }}>
+                {allRefunded ? 'all refunded' : canSeeAmount ? `\u20b9${dayPending.toLocaleString('en-IN')} pending` : `${dayOrders.filter(o => retByOrder[o.order_id]?.refund_status !== 'refunded').length} pending`}
+              </span>
+            </button>
+            {isOpen && dayOrders.map((o, i) => {
+              const r = retByOrder[o.order_id]
+              const refunded = r?.refund_status === 'refunded'
+              const amtVal = amtEdits[o.order_id] ?? String(orderAmount(o))
+              return (
+                <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--border)', background: refunded ? 'var(--dispatched-bg)' : 'transparent' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, color: 'var(--text)' }}>{o.customer_name || '—'}</div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' as const }}>
+                      <span onClick={() => openOrder(o.order_id)} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '\u2026' : o.order_id}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>{platformOf(o.order_id)}</span>
+                      <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{o.sku}</span>
+                    </div>
+                  </div>
+                  {canSeeAmount && (refunded
+                    ? <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--dispatched)', width: 92, textAlign: 'right' as const }}>\u20b9{(r?.refund_amount ?? orderAmount(o)).toLocaleString('en-IN')}</span>
+                    : <input value={amtVal} onChange={e => setAmtEdits(prev => ({ ...prev, [o.order_id]: e.target.value }))}
+                        style={{ width: 92, textAlign: 'right' as const, padding: '7px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono' }} />)}
+                  {refunded ? (
+                    <button onClick={() => undoRefund(o)} disabled={savingId === o.id}
+                      style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{savingId === o.id ? '…' : 'Undo'}</button>
+                  ) : (
+                    <button onClick={() => markRefunded(o)} disabled={savingId === o.id}
+                      style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><CheckCircle size={14} /> {savingId === o.id ? 'Saving…' : 'Mark refunded'}</button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }: {
   returns: ReturnRow[]
   canSeeAmount: boolean
