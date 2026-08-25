@@ -32,6 +32,31 @@ const ReconSection = dynamic(() => import('./ReconSection'), { loading: TabLoadi
 const OtdrTab = dynamic(() => import('./OtdrTab'), { loading: TabLoading })
 const OrderHistoryPanel = dynamic(() => import('./OrderHistoryPanel'))
 
+const UPD_TONE: Record<string, { c: string; b: string }> = {
+  success: { c: 'var(--dispatched)', b: 'var(--dispatched-bg)' },
+  warning: { c: 'var(--today)', b: 'var(--today-bg)' },
+  accent: { c: 'var(--accent)', b: 'var(--accent-bg)' },
+  muted: { c: 'var(--text3)', b: 'var(--bg2)' },
+}
+function prettyTrackStatus(st: string): string {
+  const m: Record<string, string> = { delivered: 'Delivered', in_transit: 'In transit', ofd: 'Out for delivery', out_for_delivery: 'Out for delivery', picked_up: 'Picked up', booked: 'Booked', rto: 'RTO', ndr: 'NDR', lost: 'Lost', pickup_scheduled: 'Pickup scheduled', undelivered: 'Undelivered' }
+  return m[st] || st.replace(/_/g, ' ').replace(/^\w/, (c: string) => c.toUpperCase())
+}
+// The most recent state for an order — tracking update if shipped, else plan/dispatch state.
+function orderLatestUpdate(o: DBOrder): { label: string; tone: 'success' | 'warning' | 'accent' | 'muted'; detail: string } {
+  const fmtDT = (v?: string | null) => v ? new Date(v).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+  const fmtD = (v?: string | null) => v ? new Date(v.length <= 10 ? v + 'T00:00:00' : v).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''
+  if (o.tracking_status) {
+    const st = o.tracking_status
+    const tone: 'success' | 'warning' | 'accent' = st === 'delivered' ? 'success' : (st === 'rto' || st === 'ndr' || st === 'lost' || st === 'undelivered') ? 'warning' : 'accent'
+    return { label: prettyTrackStatus(st), tone, detail: [o.tracking_label, fmtDT(o.tracking_last_update)].filter(Boolean).join(' \u00b7 ') }
+  }
+  if (o.is_cancelled) return { label: 'Cancelled', tone: 'muted', detail: fmtDT(o.manual_cancelled_at) }
+  if (o.is_dispatched) return { label: 'Dispatched', tone: 'accent', detail: fmtDT(o.dispatched_at) }
+  if (o.plan_decision === 'scheduled') return { label: 'Scheduled', tone: 'warning', detail: fmtD(o.scheduled_date) }
+  return { label: o.plan_decision ? o.plan_decision.replace(/^\w/, (c: string) => c.toUpperCase()) : 'Pending', tone: 'muted', detail: '' }
+}
+
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'otdr' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
@@ -235,6 +260,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Global search
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
+  const [multiSearchOpen, setMultiSearchOpen] = useState(false)
   // Picklist print selection
   // Upcoming demand expanded weeks
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set())
@@ -1311,19 +1337,29 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
 
   // ── Search results ──
+  const searchMatch = useCallback((o: DBOrder, q: string) =>
+    o.order_id.toLowerCase().includes(q) ||
+    o.customer_name.toLowerCase().includes(q) ||
+    o.sku.toLowerCase().includes(q) ||
+    (o.tracking_number ? o.tracking_number.toLowerCase().includes(q) : false) ||
+    (o.scanned_barcode ? o.scanned_barcode.toLowerCase().includes(q) : false) ||
+    (o.lr_number ? o.lr_number.toLowerCase().includes(q) : false) ||
+    (o.pincode ? o.pincode.includes(q) : false), [])
+  const searchTerms = useMemo(() => searchQuery.split(',').map(t => t.trim()).filter(t => t.length >= 3), [searchQuery])
   const searchResults = useMemo(() => {
-    if (!searchQuery.trim() || searchQuery.length < 3) return []
-    const q = searchQuery.toLowerCase().trim()
-    return orders.filter(o =>
-      o.order_id.toLowerCase().includes(q) ||
-      o.customer_name.toLowerCase().includes(q) ||
-      o.sku.toLowerCase().includes(q) ||
-      (o.tracking_number && o.tracking_number.toLowerCase().includes(q)) ||
-      (o.scanned_barcode && o.scanned_barcode.toLowerCase().includes(q)) ||
-      (o.lr_number && o.lr_number.toLowerCase().includes(q)) ||
-      (o.pincode && o.pincode.includes(q))
-    ).slice(0, 8)
-  }, [orders, searchQuery])
+    if (!searchTerms.length) return []
+    const ql = searchTerms.map(t => t.toLowerCase())
+    const seen = new Set<string>(); const out: DBOrder[] = []
+    for (const o of orders) {
+      if (seen.has(o.id)) continue
+      if (ql.some(q => searchMatch(o, q))) { seen.add(o.id); out.push(o); if (out.length >= 50) break }
+    }
+    return out
+  }, [orders, searchTerms, searchMatch])
+  const notFoundTerms = useMemo(() => {
+    if (searchTerms.length < 2) return []
+    return searchTerms.filter(t => { const q = t.toLowerCase(); return !orders.some(o => searchMatch(o, q)) })
+  }, [orders, searchTerms, searchMatch])
 
   // ── Computed ──
   const today = new Date().toISOString().split('T')[0]
@@ -2605,8 +2641,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               <Search size={13} style={{ color: 'var(--text3)', flexShrink: 0 }} />
               <input
                 value={searchQuery}
-                onChange={e => { setSearchQuery(e.target.value); setShowSearch(true) }}
+                onChange={e => { const v = e.target.value; setSearchQuery(v); setShowSearch(true); if (v.includes(',') && v.trim().length >= 3) setMultiSearchOpen(true) }}
                 onFocus={() => setShowSearch(true)}
+                onKeyDown={e => { if (e.key === 'Enter' && searchQuery.includes(',')) setMultiSearchOpen(true); if (e.key === 'Escape') { setMultiSearchOpen(false); setShowSearch(false) } }}
                 onBlur={() => setTimeout(() => setShowSearch(false), 200)}
                 ref={searchInputRef}
                 placeholder="Order · AWB · barcode · LR…  ⌘K"
@@ -2617,14 +2654,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 }}
               />
               {searchQuery && (
-                <button onClick={() => { setSearchQuery(''); setShowSearch(false) }}
+                <button onClick={() => { setSearchQuery(''); setShowSearch(false); setMultiSearchOpen(false) }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0, lineHeight: 1 }}>
                   <X size={12} />
                 </button>
               )}
             </div>
             {/* Search results dropdown */}
-            {showSearch && searchResults.length > 0 && (
+            {showSearch && !searchQuery.includes(',') && searchResults.length > 0 && (
               <div style={{
                 position: 'fixed' as const,
                 top: 56, right: 156,
@@ -2636,7 +2673,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
                   {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
                 </div>
-                {searchResults.map(order => {
+                {searchResults.slice(0, 10).map(order => {
                   const lu = liveUrgency(order); const uc = { CRITICAL: 'var(--critical)', TODAY: 'var(--today)', PLAN: 'var(--plan)', HOLD: 'var(--hold)' }[lu as string] || 'var(--text3)'
                   return (
                     <button key={order.id}
@@ -2669,7 +2706,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 })}
               </div>
             )}
-            {showSearch && searchQuery.length >= 3 && searchResults.length === 0 && (
+            {showSearch && !searchQuery.includes(',') && searchQuery.length >= 3 && searchResults.length === 0 && (
               <div style={{
                 position: 'fixed' as const, top: 56, right: 156,
                 width: 280, zIndex: 300,
@@ -2679,6 +2716,50 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 color: 'var(--text3)', fontSize: 13,
               }}>
                 No orders found
+              </div>
+            )}
+
+            {multiSearchOpen && searchQuery.includes(',') && (
+              <div onMouseDown={() => setMultiSearchOpen(false)}
+                style={{ position: 'fixed' as const, inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 80 }}>
+                <div onMouseDown={e => e.stopPropagation()}
+                  style={{ width: 'min(560px, 92vw)', maxHeight: '78vh', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 12px 40px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column' as const, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Search size={15} style={{ color: 'var(--text3)' }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Multi-order search</span>
+                    <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{searchResults.length} found{notFoundTerms.length ? ` \u00b7 ${notFoundTerms.length} not found` : ''}</span>
+                    <button onClick={() => setMultiSearchOpen(false)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', display: 'flex' }}><X size={16} /></button>
+                  </div>
+                  <div style={{ overflowY: 'auto' as const, flex: 1 }}>
+                    {searchResults.map(order => { const u = orderLatestUpdate(order); const t = UPD_TONE[u.tone]; return (
+                      <button key={order.id} onClick={() => setHistoryOrder(order)}
+                        style={{ width: '100%', textAlign: 'left' as const, padding: '12px 16px', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'} onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' as const }}>
+                            <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: 170 }}>{order.order_id}</span>
+                            <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{order.customer_name}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{order.sku}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: t.c, background: t.b, padding: '2px 8px', borderRadius: 4, whiteSpace: 'nowrap' as const, flexShrink: 0 }}>{u.label}</span>
+                            {u.detail && <span style={{ fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{u.detail}</span>}
+                          </div>
+                        </div>
+                        <ArrowRight size={15} style={{ color: 'var(--text3)', flexShrink: 0 }} />
+                      </button>
+                    ) })}
+                    {notFoundTerms.map(t => (
+                      <div key={t} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)' }}>
+                        <AlertCircle size={14} style={{ color: 'var(--text3)', flexShrink: 0 }} />
+                        <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{t} \u2014 no order found</span>
+                      </div>
+                    ))}
+                    {searchResults.length === 0 && notFoundTerms.length === 0 && (
+                      <div style={{ padding: 32, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Paste comma-separated orders or AWBs to search several at once.</div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>
