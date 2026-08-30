@@ -1,9 +1,12 @@
 'use client'
 import { useState } from 'react'
-import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag, Activity } from 'lucide-react'
+import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag, Activity, MapPin, ListChecks, Grid3x3 } from 'lucide-react'
 import InventoryTab from './InventoryTab'
 import UnitsTab from './UnitsTab'
 import ScanToStockTab from './ScanToStockTab'
+import ColumnStockInTab from './ColumnStockInTab'
+import ColumnPickTab from './ColumnPickTab'
+import ColumnsManageTab from './ColumnsManageTab'
 import FbaTab from './FbaTab'
 import RtoTab from './RtoTab'
 import RtoTreatmentTab from './RtoTreatmentTab'
@@ -18,7 +21,7 @@ import LifecycleTab from './LifecycleTab'
 import { UserAccess } from '@/types'
 
 type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'
-type PackingTab = 'generate' | 'scan' | 'fba' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
+type PackingTab = 'generate' | 'scan' | 'colstockin' | 'colpick' | 'columns' | 'fba' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
 
 const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof UserAccess | 'packing' }[] = [
   { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} />, perm: 'can_wh_stock' },
@@ -32,6 +35,9 @@ const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof
 const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; perm: keyof UserAccess }[] = [
   { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} />, perm: 'can_wh_pack_generate' },
   { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} />, perm: 'can_wh_pack_scan' },
+  { key: 'colstockin', label: 'Stock-in (cols)', icon: <MapPin size={14} />, perm: 'can_wh_pack_scan' },
+  { key: 'colpick',   label: 'Pick',          icon: <ListChecks size={14} />, perm: 'can_wh_pack_scan' },
+  { key: 'columns',   label: 'Columns',       icon: <Grid3x3 size={14} />, perm: 'can_wh_pack_scan' },
   { key: 'fba',       label: 'FBA',           icon: <Boxes size={14} />, perm: 'can_wh_pack_scan' },
   { key: 'inventory', label: 'Inventory',     icon: <Package size={14} />, perm: 'can_wh_pack_inventory' },
   { key: 'lifecycle', label: 'Lifecycle',     icon: <Activity size={14} />, perm: 'can_wh_pack_units' },
@@ -51,7 +57,7 @@ function tabBtn(active: boolean): React.CSSProperties {
   }
 }
 
-export default function WarehouseSection({ userId, access, isOwner = false }: { userId: string; access: UserAccess; isOwner?: boolean }) {
+export default function WarehouseSection({ userId, access, isOwner = false, userEmail }: { userId: string; access: UserAccess; isOwner?: boolean; userEmail?: string }) {
   // Only show sub-tabs the user is permitted to see.
   const packingTabs = PACKING_TABS.filter(t => access[t.perm])
   const topTabs = TOP_TABS.filter(t => t.perm === 'packing' ? packingTabs.length > 0 : access[t.perm as keyof UserAccess])
@@ -93,6 +99,9 @@ export default function WarehouseSection({ userId, access, isOwner = false }: { 
 
           {packingTab === 'generate' && <GenerateTab userId={userId} />}
           {packingTab === 'scan' && <ScanToStockTab />}
+          {packingTab === 'colstockin' && <ColumnStockInTab userEmail={userEmail} />}
+          {packingTab === 'colpick' && <ColumnPickTab userEmail={userEmail} />}
+          {packingTab === 'columns' && <ColumnsManageTab userEmail={userEmail} canManage={isOwner || !!access.can_wh_manage_columns} />}
           {packingTab === 'fba' && <FbaTab />}
           {packingTab === 'inventory' && <InventoryTab />}
           {packingTab === 'lifecycle' && <LifecycleTab userId={userId} isOwner={isOwner} />}

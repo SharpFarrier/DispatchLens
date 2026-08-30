@@ -31,6 +31,7 @@ export interface UserAccess {
   can_wh_pack_inventory: boolean
   can_wh_pack_rto: boolean
   can_wh_pack_units: boolean
+  can_wh_manage_columns?: boolean
   requested_at: string
   reviewed_at: string | null
   created_at: string

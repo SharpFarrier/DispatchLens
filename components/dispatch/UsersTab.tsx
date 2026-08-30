@@ -28,6 +28,7 @@ const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[
   { key: 'can_wh_pack_inventory',label: 'Pack·Inv',   desc: 'Packing: packed inventory' },
   { key: 'can_wh_pack_rto',      label: 'Pack·RTO',   desc: 'Packing: RTO handling' },
   { key: 'can_wh_pack_units',    label: 'Pack·Units', desc: 'Packing: unit lookup' },
+  { key: 'can_wh_manage_columns',label: 'Cols·Manage',desc: 'Columns: create/remove, set max, change SKU, audit' },
 ]
 
 // All access keys, for save payloads.

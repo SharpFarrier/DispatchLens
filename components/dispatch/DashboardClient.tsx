@@ -126,7 +126,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_recon: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true }
+    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_recon: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_manage_columns: true }
     : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
@@ -147,7 +147,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // When a scanned piece isn't in stock, owner can force-dispatch from this prompt.
   const [forcePrompt, setForcePrompt] = useState<{ scanned: string; seq: string | null; reason: string } | null>(null)
   // Gate-ON: piece is real but not in stock — offer move-to-stock or force (any scanning user).
-  const [stockPrompt, setStockPrompt] = useState<{ scanned: string; seq: string | null; reason: string } | null>(null)
+  const [stockPrompt, setStockPrompt] = useState<{ scanned: string; seq: string | null; reason: string; pickBypassId?: string; pickBypassSku?: string | null } | null>(null)
   // Visible confirmation that stock was deducted live (so it's never ambiguous again).
   const [scanSuccess, setScanSuccess] = useState<{ scanned: string; sku: string; remaining: number } | null>(null)
 
@@ -878,14 +878,23 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         return
       }
 
-      const stocked = rows.find(u => u.status === 'stocked')
-      if (stocked) {
-        // Normal path: dispatch the order + flip THIS stocked unit, show live confirmation.
-        await commitDispatch(scanned, seq, stocked.id, stocked.sku, false)
+      // Normal path: the piece should already be PICKED for dispatch. Flip it.
+      const picked = rows.find(u => u.status === 'picked')
+      if (picked) {
+        await commitDispatch(scanned, seq, picked.id, picked.sku, false)
         return
       }
 
-      // Piece is not stocked: either not in the system at all, or in another status.
+      // Stocked but not yet picked: it's still sitting in a column. Prompt to pick first,
+      // with a bypass (temporary during the pick-flow rollout).
+      const stocked = rows.find(u => u.status === 'stocked')
+      if (stocked) {
+        beepError()
+        setStockPrompt({ scanned, seq, reason: `${scanned} is in stock but not picked yet. Pick it from its column first — or bypass.`, pickBypassId: stocked.id, pickBypassSku: stocked.sku })
+        return
+      }
+
+      // Not in the system at all, or in another status → move-to-stock / force path (direct dispatch).
       const reason = rows.length === 0
         ? `${scanned} isn't in the system. If it's real stock, move it in & dispatch — or force dispatch.`
         : `${scanned} is "${rows[0].status}", not stocked. Move it to stock & dispatch, or force dispatch.`
@@ -924,8 +933,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     // Flip the warehouse unit stocked -> dispatched.
     let deductedSku: string | null = null
     if (deductId) {
-      // Gate ON: flip the specific stocked unit we matched.
-      await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('id', deductId)
+      // Gate ON: flip the specific matched unit (picked in the normal path, or stocked when bypassed).
+      await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: now }).eq('id', deductId).in('status', ['picked', 'stocked'])
       deductedSku = deductSku
     } else if (!forced) {
       // Gate OFF soft path: flip any stocked unit with this barcode (mirrors reconcile SQL).
@@ -980,6 +989,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   // Override B — "Force dispatch": ship without touching stock (logged as forced).
+  // Bypass the pick step: dispatch a stocked-but-unpicked piece by flipping it directly.
+  // Temporary during pick-flow rollout. Flips the actual stocked unit (no inventory leak).
+  const dispatchWithoutPick = async (scanned: string, seq: string | null, unitId: string, sku: string | null) => {
+    await commitDispatch(scanned, seq, unitId, sku, false)
+    setStockPrompt(null)
+  }
+
   const forceDispatchFromPrompt = async (scanned: string, seq: string | null) => {
     await commitDispatch(scanned, seq, null, null, true)
     setStockPrompt(null)
@@ -4932,6 +4948,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       <div style={{ fontSize: 13, color: 'var(--today)', fontWeight: 600 }}>Not in stock</div>
                       <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{stockPrompt.reason}</div>
                       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
+                        {stockPrompt.pickBypassId && (
+                          <button onClick={() => dispatchWithoutPick(stockPrompt.scanned, stockPrompt.seq, stockPrompt.pickBypassId!, stockPrompt.pickBypassSku ?? null)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Dispatch anyway (skip pick)</button>
+                        )}
                         <button onClick={() => moveToStockAndDispatch(stockPrompt.scanned, stockPrompt.seq)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Move to stock &amp; dispatch</button>
                         <button onClick={() => forceDispatchFromPrompt(stockPrompt.scanned, stockPrompt.seq)} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: 'var(--today)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Force dispatch (no stock)</button>
                         <button onClick={() => { setStockPrompt(null); setScanError(null); setScanItem('') }} style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
@@ -5123,7 +5142,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {/* ════ WAREHOUSE ════ */}
         {tab === 'warehouse' && (
-          <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} />
+          <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} userEmail={user.email || undefined} />
         )}
 
         {tab === 'recon' && effectiveAccess.can_recon && (
