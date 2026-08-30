@@ -132,6 +132,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
   const [stockGateOn, setStockGateOn] = useState(false)
   const [stockGateSaving, setStockGateSaving] = useState(false)
+  // Pick gate: when ON, an in-stock piece must be PICKED before EOD dispatch (else 'pick first' + bypass).
+  // Default OFF so dispatch works during the pick-flow rollout. Persisted in app_config.
+  const [pickGateOn, setPickGateOn] = useState(false)
+  const [pickGateSaving, setPickGateSaving] = useState(false)
   // Stocked finished-frame count per barcode-SKU (for the Plan tab availability badge).
   const [stockBySku, setStockBySku] = useState<Record<string, number>>({})
   // Delivery-column filter (timeliness buckets) + sort toggle.
@@ -359,6 +363,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     // Load the stock-gate flag (EOD scan-out). Default OFF until opening stock is live.
     supabase.from('app_config').select('value').eq('key', 'stock_gate_enabled').maybeSingle().then(({ data }) => {
       setStockGateOn((data?.value as string) === 'true')
+    })
+    supabase.from('app_config').select('value').eq('key', 'pick_gate_enabled').maybeSingle().then(({ data }) => {
+      setPickGateOn((data?.value as string) === 'true')
     })
     // Stocked packed_units grouped by SKU → availability shown while planning.
     void (async () => {
@@ -878,19 +885,23 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         return
       }
 
-      // Normal path: the piece should already be PICKED for dispatch. Flip it.
+      // A picked piece always dispatches (whether or not the pick gate is on) — flip it.
       const picked = rows.find(u => u.status === 'picked')
       if (picked) {
         await commitDispatch(scanned, seq, picked.id, picked.sku, false)
         return
       }
 
-      // Stocked but not yet picked: it's still sitting in a column. Prompt to pick first,
-      // with a bypass (temporary during the pick-flow rollout).
       const stocked = rows.find(u => u.status === 'stocked')
       if (stocked) {
-        beepError()
-        setStockPrompt({ scanned, seq, reason: `${scanned} is in stock but not picked yet. Pick it from its column first — or bypass.`, pickBypassId: stocked.id, pickBypassSku: stocked.sku })
+        if (pickGateOn) {
+          // Pick gate ON: an in-stock piece must be picked first. Prompt with a bypass.
+          beepError()
+          setStockPrompt({ scanned, seq, reason: `${scanned} is in stock but not picked yet. Pick it from its column first — or bypass.`, pickBypassId: stocked.id, pickBypassSku: stocked.sku })
+          return
+        }
+        // Pick gate OFF: dispatch the stocked piece directly (pre-picking behaviour).
+        await commitDispatch(scanned, seq, stocked.id, stocked.sku, false)
         return
       }
 
@@ -1010,6 +1021,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setScanError(null)
     setForcePrompt(null)
     setStockPrompt(null)
+  }
+
+  // Owner toggles the EOD pick gate on/off; persisted in app_config (shared, survives reload).
+  const togglePickGate = async () => {
+    const next = !pickGateOn
+    setPickGateSaving(true)
+    const { error } = await supabase.from('app_config').upsert(
+      { key: 'pick_gate_enabled', value: next ? 'true' : 'false', updated_at: new Date().toISOString(), updated_by: user.email },
+      { onConflict: 'key' }
+    )
+    if (error) setPickGateOn(!next) // revert on failure
+    else setPickGateOn(next)
+    setPickGateSaving(false)
   }
 
   // Owner toggles the EOD stock gate on/off; persisted in app_config (shared, survives reload).
@@ -4871,6 +4895,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         background: stockGateOn ? 'var(--dispatched)' : 'var(--border2)', position: 'relative' as const, transition: 'background 0.15s', flexShrink: 0,
                       }}>
                         <span style={{ position: 'absolute' as const, top: 2, left: stockGateOn ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Pick-gate status + owner toggle */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 7, background: pickGateOn ? 'var(--dispatched-bg)' : 'var(--bg2)', border: `1px solid ${pickGateOn ? '#bbf7d0' : 'var(--border)'}` }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: pickGateOn ? 'var(--dispatched)' : 'var(--text3)' }}>
+                      Pick gate: {pickGateOn ? 'ON — must be picked before dispatch' : 'OFF — stocked pieces dispatch directly'}
+                    </span>
+                    {isOwner && (
+                      <button onClick={togglePickGate} disabled={pickGateSaving} title="Owner: enable once the pick step is in use" style={{
+                        marginLeft: 'auto', width: 42, height: 24, borderRadius: 12, border: 'none', cursor: pickGateSaving ? 'default' : 'pointer',
+                        background: pickGateOn ? 'var(--dispatched)' : 'var(--border2)', position: 'relative' as const, transition: 'background 0.15s', flexShrink: 0,
+                      }}>
+                        <span style={{ position: 'absolute' as const, top: 2, left: pickGateOn ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
                       </button>
                     )}
                   </div>
