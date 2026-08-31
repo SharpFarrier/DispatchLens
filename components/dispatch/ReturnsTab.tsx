@@ -765,8 +765,8 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                             {r.reverse_courier || ''}{r.reverse_tracking_label ? ` · ${r.reverse_tracking_label}` : (r.reverse_tracking_status ? ` · ${r.reverse_tracking_status}` : ' · not synced')}
                           </span>
                         </div>
-                        {/* Customer returns: pickup ID changes across attempts — allow editing. RTO stays read-only. */}
-                        {!(r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto') && !r.is_cancelled && (
+                        {/* Reverse pickup ID is editable for both customer returns and RTO (manual override). */}
+                        {!r.is_cancelled && (
                           <button onClick={() => setEditingRevId(r.id)} title="Edit reverse tracking ID"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, opacity: 0.5, display: 'flex', alignItems: 'center' }}
                             onMouseEnter={e => e.currentTarget.style.opacity = '1'}
@@ -775,11 +775,33 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                           </button>
                         )}
                       </div>
-                    ) : (r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto') ? (
-                      // RTO tracks on the forward AWB (Bluedart re-tags) — no reverse ID entry.
-                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>tracks on forward AWB</span>
                     ) : r.is_cancelled ? (
                       <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>
+                    ) : (r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto') ? (
+                      // RTO normally tracks on the forward AWB, but allow a manual reverse ID override.
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <input
+                          value={revDraft[r.id]?.id ?? ''}
+                          onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: e.target.value, courier: p[r.id]?.courier ?? '' } }))}
+                          placeholder="forward AWB — or set reverse ID"
+                          title="RTO tracks on the forward AWB by default. Enter a reverse ID here only if it changed."
+                          style={{ width: 150, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'DM Mono', outline: 'none' }}
+                        />
+                        <select
+                          value={revDraft[r.id]?.courier ?? ''}
+                          onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: p[r.id]?.id ?? '', courier: e.target.value } }))}
+                          style={{ fontSize: 10, padding: '3px 4px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer' }}>
+                          <option value="">courier</option>
+                          <option value="Bluedart">BD</option>
+                          <option value="Delhivery">DL</option>
+                        </select>
+                        <button
+                          disabled={savingId === r.id || !(revDraft[r.id]?.id?.trim())}
+                          onClick={() => { const d = revDraft[r.id]; patchReturn(r.id, { reverse_tracking_id: d.id.trim(), reverse_courier: d.courier || null, reverse_tracking_status: null, reverse_tracking_label: null } as Partial<ReturnRow>); setRevDraft(p => { const n = { ...p }; delete n[r.id]; return n }) }}
+                          style={{ padding: '3px 7px', borderRadius: 5, border: 'none', fontSize: 10, fontWeight: 600, cursor: 'pointer', background: (revDraft[r.id]?.id?.trim()) ? 'var(--accent)' : 'var(--border2)', color: '#fff' }}>
+                          Set
+                        </button>
+                      </div>
                     ) : (
                       // Customer return, pickup generated → enter the reverse pickup ID now.
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
