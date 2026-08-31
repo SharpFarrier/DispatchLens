@@ -565,7 +565,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   // ── Single decision ──
-  const updateDecision = async (orderId: string, decision: PlanDecision, scheduledDate?: string) => {
+  const updateDecision = async (orderId: string, decision: PlanDecision, scheduledDate?: string, reason?: UnfulfillableReason, note?: string) => {
     setUpdatingIds(prev => new Set(prev).add(orderId))
     const order = orders.find(o => o.id === orderId)
     const update: Record<string, string | boolean | null> = {
@@ -574,6 +574,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }
     if (decision === 'scheduled') update.scheduled_date = scheduledDate || null
     if (decision === 'hold' || decision === 'undecided' || decision === 'unfulfillable') update.scheduled_date = null
+    if (decision === 'unfulfillable') {
+      update.unfulfillable_reason = reason || 'Not ready'
+      update.unfulfillable_note = (note || '').trim() || null
+    }
     // Rescheduling a HELD order (individual action) clears the hold and flags it as
     // rescheduled-from-hold, so the factory knows it was on hold but is now cleared to ship.
     const wasHeld = order && (order.confirmation_status === 'hold' || order.plan_decision === 'hold')
@@ -584,12 +588,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     await supabase.from('dispatch_orders').update(update).eq('id', orderId)
     if (order) {
       if (decision === 'hold') logEvent(order.order_id, 'hold', 'Marked On Hold')
-      if (decision === 'unfulfillable') logEvent(order.order_id, 'unfulfillable', 'Marked Unfulfillable')
+      if (decision === 'unfulfillable') logEvent(order.order_id, 'unfulfillable', `Marked Unfulfillable · ${reason || 'Not ready'}`, (note || '').trim() || undefined)
       if (decision === 'undecided') logEvent(order.order_id, 'hold', 'Decision cleared')
       if (decision === 'scheduled' && wasHeld) logEvent(order.order_id, 'rescheduled', 'Rescheduled out of hold — cleared to dispatch')
     }
     setOrders(prev => prev.map(o => o.id === orderId ? {
       ...o, plan_decision: decision,
+      unfulfillable_reason: decision === 'unfulfillable' ? (reason || 'Not ready') : o.unfulfillable_reason,
+      unfulfillable_note: decision === 'unfulfillable' ? ((note || '').trim() || null) : o.unfulfillable_note,
       scheduled_date: update.scheduled_date !== undefined ? (update.scheduled_date as string | null) : o.scheduled_date,
       confirmation_status: update.confirmation_status !== undefined ? (update.confirmation_status as string | null) : o.confirmation_status,
       rescheduled_from_hold: update.rescheduled_from_hold !== undefined ? (update.rescheduled_from_hold as boolean) : o.rescheduled_from_hold,
@@ -616,6 +622,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // ── Bulk decision ──
   const [bulkScheduleDate, setBulkScheduleDate] = useState('')
+  const [bulkUnfReason, setBulkUnfReason] = useState<UnfulfillableReason>('Not ready')
+  const [bulkUnfNote, setBulkUnfNote] = useState('')
 
   const handleBulkConfirm = async () => {
     if (!bulkDecision || selectedIds.size === 0) return
@@ -634,6 +642,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     ids.forEach(id => setUpdatingIds(prev => new Set(prev).add(id)))
     const update: Record<string, string | null> = {
       plan_decision: bulkDecision,
+      ...(bulkDecision === 'unfulfillable' ? { unfulfillable_reason: bulkUnfReason, unfulfillable_note: bulkUnfNote.trim() || null } : {}),
       updated_at: new Date().toISOString(),
     }
     if (bulkDecision === 'scheduled') update.scheduled_date = bulkScheduleDate || new Date().toISOString().split('T')[0]
@@ -642,6 +651,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const idSet = new Set(ids)
     setOrders(prev => prev.map(o => idSet.has(o.id) ? {
       ...o, plan_decision: bulkDecision as PlanDecision,
+      unfulfillable_reason: bulkDecision === 'unfulfillable' ? bulkUnfReason : o.unfulfillable_reason,
+      unfulfillable_note: bulkDecision === 'unfulfillable' ? (bulkUnfNote.trim() || null) : o.unfulfillable_note,
       scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
     } : o))
     // Log bulk events
@@ -653,7 +664,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       } else if (bulkDecision === 'hold') {
         logEvent(o.order_id, 'hold', 'Marked On Hold (bulk)')
       } else if (bulkDecision === 'unfulfillable') {
-        logEvent(o.order_id, 'unfulfillable', 'Marked Unfulfillable (bulk)')
+        logEvent(o.order_id, 'unfulfillable', `Marked Unfulfillable · ${bulkUnfReason} (bulk)`, bulkUnfNote.trim() || undefined)
       }
     }
     setUpdatingIds(new Set())
@@ -2360,6 +2371,21 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               />
             </div>
           )}
+          {bulkDecision === 'unfulfillable' && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>Reason</label>
+              <select value={bulkUnfReason} onChange={e => setBulkUnfReason(e.target.value as UnfulfillableReason)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', marginBottom: 10 }}>
+                {UNFULFILLABLE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>
+                Note {bulkUnfReason === 'Other' ? <span style={{ color: 'var(--critical)' }}>(required)</span> : <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(optional)</span>}
+              </label>
+              <textarea value={bulkUnfNote} onChange={e => setBulkUnfNote(e.target.value)}
+                placeholder={bulkUnfReason === 'Other' ? 'Describe the issue' : 'Any additional context'}
+                style={{ width: '100%', height: 60, padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Sans', resize: 'vertical' as const, outline: 'none' }} />
+            </div>
+          )}
           <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 4 }}>
             {Array.from(selectedIds).map(id => {
               const o = orders.find(x => x.id === id)
@@ -2373,8 +2399,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               )
             })}
           </div>
-          <ModalActions onCancel={() => setShowBulkConfirm(false)} onConfirm={handleBulkConfirm}
+          {bulkDecision === 'unfulfillable' && bulkUnfReason === 'Other' && !bulkUnfNote.trim() && (
+            <div style={{ fontSize: 12, color: 'var(--critical)', marginTop: 8 }}>A note is required when the reason is Other.</div>
+          )}
+          <ModalActions onCancel={() => { setShowBulkConfirm(false); setBulkUnfReason('Not ready'); setBulkUnfNote('') }} onConfirm={handleBulkConfirm}
             confirmLabel="Confirm"
+            disabled={bulkDecision === 'unfulfillable' && bulkUnfReason === 'Other' && !bulkUnfNote.trim()}
             confirmColor={bulkDecision === 'scheduled' ? 'var(--dispatched)' : bulkDecision === 'hold' ? 'var(--hold)' : 'var(--critical)'} />
         </Modal>
       )}
@@ -5389,7 +5419,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   stockCount?: number | null
   neededCount?: number | null
   onSelect: (id: string) => void
-  onDecision: (id: string, d: PlanDecision) => void
+  onDecision: (id: string, d: PlanDecision, scheduledDate?: string, reason?: UnfulfillableReason, note?: string) => void
   onSchedule: (id: string, date: string) => void
   onPriority: (id: string, current: boolean) => void
   onCancel: (id: string) => void
@@ -5408,6 +5438,9 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onCancelLr: () => void
 }) {
   const [lrCopied, setLrCopied] = useState(false)
+  const [unfOpen, setUnfOpen] = useState(false)
+  const [unfReason, setUnfReason] = useState<UnfulfillableReason>('Not ready')
+  const [unfNote, setUnfNote] = useState('')
   const uc = {
     CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
     TODAY:    { color: 'var(--today)',    bg: 'var(--today-bg)',    border: '#fed7aa' },
@@ -5608,15 +5641,36 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
             color: order.plan_decision === 'hold' ? 'var(--hold)' : 'var(--text3)',
             whiteSpace: 'nowrap' as const,
           }}>Hold</button>
-          {/* Unfulfillable */}
-          <button onClick={() => onDecision(order.id, 'unfulfillable')} style={{
-            padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-            fontFamily: 'DM Sans', fontWeight: 500,
-            background: order.plan_decision === 'unfulfillable' ? 'var(--critical-bg)' : 'var(--surface)',
-            border: `1px solid ${order.plan_decision === 'unfulfillable' ? '#fecaca' : 'var(--border)'}`,
-            color: order.plan_decision === 'unfulfillable' ? 'var(--critical)' : 'var(--text3)',
-            whiteSpace: 'nowrap' as const,
-          }}>Unfulfil.</button>
+          {/* Unfulfillable — opens an inline reason picker */}
+          <div style={{ position: 'relative' as const }}>
+            <button onClick={() => setUnfOpen(v => !v)} style={{
+              padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+              fontFamily: 'DM Sans', fontWeight: 500,
+              background: order.plan_decision === 'unfulfillable' ? 'var(--critical-bg)' : 'var(--surface)',
+              border: `1px solid ${order.plan_decision === 'unfulfillable' ? '#fecaca' : 'var(--border)'}`,
+              color: order.plan_decision === 'unfulfillable' ? 'var(--critical)' : 'var(--text3)',
+              whiteSpace: 'nowrap' as const,
+            }}>Unfulfil.</button>
+            {unfOpen && (
+              <div style={{ position: 'absolute' as const, top: '100%', right: 0, marginTop: 4, zIndex: 60, width: 220, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', padding: 10 }}>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 4, fontWeight: 600 }}>Reason</label>
+                <select value={unfReason} onChange={e => setUnfReason(e.target.value as UnfulfillableReason)}
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer', marginBottom: 8 }}>
+                  {UNFULFILLABLE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <input value={unfNote} onChange={e => setUnfNote(e.target.value)}
+                  placeholder={unfReason === 'Other' ? 'Note (required)' : 'Note (optional)'}
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: `1px solid ${unfReason === 'Other' && !unfNote.trim() ? '#fecaca' : 'var(--border)'}`, background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', marginBottom: 8, boxSizing: 'border-box' as const }} />
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button onClick={() => { setUnfOpen(false); setUnfReason('Not ready'); setUnfNote('') }}
+                    style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                  <button disabled={unfReason === 'Other' && !unfNote.trim()}
+                    onClick={() => { onDecision(order.id, 'unfulfillable', undefined, unfReason, unfNote); setUnfOpen(false); setUnfReason('Not ready'); setUnfNote('') }}
+                    style={{ padding: '5px 10px', borderRadius: 6, border: 'none', background: (unfReason === 'Other' && !unfNote.trim()) ? 'var(--bg2)' : 'var(--critical)', color: (unfReason === 'Other' && !unfNote.trim()) ? 'var(--text3)' : '#fff', fontSize: 11, fontWeight: 600, cursor: (unfReason === 'Other' && !unfNote.trim()) ? 'not-allowed' : 'pointer' }}>Confirm</button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </td>
       <td style={{ padding: '8px 12px' }}>
