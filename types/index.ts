@@ -20,6 +20,7 @@ export interface UserAccess {
   can_calllens: boolean
   can_users: boolean
   can_recon: boolean
+  can_otdr: boolean
   can_warehouse: boolean
   can_wh_stock: boolean
   can_wh_coating: boolean
