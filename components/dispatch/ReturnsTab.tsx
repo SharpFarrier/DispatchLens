@@ -249,6 +249,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
   const [found, setFound] = useState<DBOrder | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [mergeWarn, setMergeWarn] = useState<{ existingId: string; refunded: boolean } | null>(null)
 
   const findOrder = async () => {
     const q = awb.trim()
@@ -259,19 +260,51 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
     setFound(data as DBOrder); setBusy(false)
   }
 
-  const confirmLink = async () => {
+  // Map this received row to the order. If the order ALREADY has a return, MERGE onto it
+  // (same physical return that came back on a new/changed reverse ID) rather than creating a
+  // second row — so it's one return per order and the refund ledger stays clean. If the
+  // existing return is already REFUNDED, warn and require explicit confirmation first.
+  const confirmLink = async (force = false) => {
     if (!found) return
     setBusy(true); setError(null)
-    const { data: existing } = await supabase.from('returns').select('id').eq('order_id', found.order_id).neq('id', row.id).limit(1).maybeSingle()
-    if (existing) { setError(`Order ${found.order_id} already has a return — not linked`); setBusy(false); return }
     const orderedSku = (found.barcode_sku || found.sku || '') as string
     const mismatch = !!(row.received_sku && orderedSku && row.received_sku !== orderedSku)
+    const now = new Date().toISOString()
+
+    const { data: existing } = await supabase.from('returns')
+      .select('id, refund_status').eq('order_id', found.order_id).neq('id', row.id).limit(1).maybeSingle()
+
+    if (existing) {
+      const alreadyRefunded = existing.refund_status === 'refunded'
+      if (alreadyRefunded && !force) { setMergeWarn({ existingId: existing.id, refunded: true }); setBusy(false); return }
+      // MERGE: update the existing return with this row's reverse tracking + receipt, then
+      // remove this now-redundant unmapped row.
+      const { data: merged } = await supabase.from('returns').update({
+        reverse_tracking_id: row.reverse_tracking_id,
+        reverse_courier: row.reverse_courier ?? undefined,
+        reverse_tracking_status: null, reverse_tracking_label: null,
+        received_sku: row.received_sku ?? undefined,
+        warehouse_received: row.warehouse_received ?? undefined,
+        warehouse_received_at: row.warehouse_received_at ?? undefined,
+        barcode: found.scanned_barcode || row.barcode || null,
+        sku_mismatch: mismatch,
+        updated_at: now,
+      }).eq('id', existing.id).select().maybeSingle()
+      if (!merged) { setError('Could not merge — try again'); setBusy(false); return }
+      await supabase.from('returns').delete().eq('id', row.id)
+      void logOrderEvent(found.order_id, 'return', 'Received return merged onto existing return (new reverse ID)', row.reverse_tracking_id ? `reverse ${row.reverse_tracking_id}` : null)
+      onLinked(merged as ReturnRow)
+      setMergeWarn(null)
+      return
+    }
+
+    // No existing return: normal map (update this row with the order).
     const { data } = await supabase.from('returns').update({
       order_id: found.order_id,
       barcode: found.scanned_barcode || row.barcode || null,
       return_type: row.return_type || 'customer',
       sku_mismatch: mismatch,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     }).eq('id', row.id).select().maybeSingle()
     if (data) {
       void logOrderEvent(found.order_id, 'return', 'Return mapped to order via forward AWB', row.reverse_tracking_id ? `reverse ${row.reverse_tracking_id}` : null)
@@ -305,10 +338,20 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--critical)', marginTop: 4 }}>received {row.received_sku} \u2260 ordered {found.barcode_sku || found.sku} — will be flagged, refund held</div>
             )}
           </div>
-          <button onClick={confirmLink} disabled={busy}
+          <button onClick={() => confirmLink()} disabled={busy}
             style={{ background: 'var(--accent)', border: 'none', borderRadius: 7, color: '#fff', cursor: busy ? 'default' : 'pointer', padding: '7px 14px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
             <CheckCircle size={13} /> Confirm link
           </button>
+        </div>
+      )}
+      {mergeWarn && (
+        <div style={{ marginTop: 10, background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 7, padding: '10px 12px' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--critical)', marginBottom: 4 }}>This order&apos;s existing return is already refunded</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>Merging this received shipment onto it won&apos;t change the refund, but you&apos;re attaching a fresh receipt to an already-paid return. Continue only if this is the same return that came back on a new tracking ID.</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setMergeWarn(null)} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={() => confirmLink(true)} disabled={busy} style={{ padding: '6px 12px', borderRadius: 7, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: busy ? 'default' : 'pointer' }}>Merge anyway</button>
+          </div>
         </div>
       )}
     </div>
