@@ -1310,7 +1310,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       sku: unfulfillableSku, reason: unfulfillableReason, note: unfulfillableNote.trim() || null,
       active: true, set_by: user.email, set_at: now, cleared_by: null, cleared_at: null,
     }, { onConflict: 'sku' })
-    setFlaggedSkus(prev => ({ ...prev, [unfulfillableSku]: { reason: unfulfillableReason, note: unfulfillableNote.trim() || null, set_by: user.email, set_at: now } }))
+    setFlaggedSkus(prev => ({ ...prev, [unfulfillableSku]: { reason: unfulfillableReason, note: unfulfillableNote.trim() || null, set_by: user.email ?? null, set_at: now } }))
 
     setUnfulfillableSku(null)
     setUnfulfillableReason('Not ready')
