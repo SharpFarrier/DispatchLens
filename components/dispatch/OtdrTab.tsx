@@ -50,7 +50,7 @@ export default function OtdrTab() {
           if (detectPlatform(r.order_id) !== 'Amazon') continue
           const promise = String(r.promise_date).slice(0, 10)
           if (!/^\d{4}-\d{2}-\d{2}$/.test(promise)) continue
-          const pieceDelivered = r.tracking_status === 'delivered' && !!r.delivered_at
+          const pieceDelivered = r.tracking_status === 'delivered'   // trust status; delivered_at may be missing
           const prev = byOrder.get(r.order_id)
           if (!prev) {
             byOrder.set(r.order_id, {
@@ -70,8 +70,11 @@ export default function OtdrTab() {
       const acc: Tracked[] = []
       for (const o of byOrder.values()) {
         if (o.anyRto) continue                                                    // drop RTO orders
-        const delivered = o.allDelivered && !!o.latestDeliv
-        const onTime = delivered && istDateStr(new Date(o.latestDeliv as string)) <= o.promise
+        const delivered = o.allDelivered
+        // On-time: if we have a delivery date, compare it to the EDD. If the order is
+        // delivered but the timestamp is missing (stale-sync artifact), treat it as on-time
+        // (option a) — a confirmed delivery shouldn't be punished for a missing field.
+        const onTime = delivered && (o.latestDeliv ? istDateStr(new Date(o.latestDeliv)) <= o.promise : true)
         acc.push({ promise: o.promise, onTime, delivered })
       }
       setOrders(acc)
