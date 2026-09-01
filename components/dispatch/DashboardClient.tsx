@@ -14,8 +14,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download
-} from 'lucide-react'
+  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download, Flag } from 'lucide-react'
 
 // Non-Plan tabs are code-split so they are NOT in the initial bundle (which lands on
 // Plan). Each loads its own chunk the first time it's opened — this also keeps jsPDF and
@@ -110,6 +109,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispatchedCount, setDispatchedCount] = useState<number | null>(null)
   const [fullLoaded, setFullLoaded] = useState(false)
   const [skuMaps, setSkuMaps] = useState<SkuMap[]>([])
+  const [flaggedSkus, setFlaggedSkus] = useState<Record<string, { reason: string; note: string | null; set_by: string | null; set_at: string }>>({})
+  const [fulfillableConfirm, setFulfillableConfirm] = useState<{ sku: string; count: number } | null>(null)
   // Bumped after a return is created in the history overlay, so the Returns tab reloads.
   const [returnsReload, setReturnsReload] = useState(0)
 
@@ -357,6 +358,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       void silentRefreshOrders()
     })()
     // Load SKU map for import-time barcode resolution + scan-out verification
+    supabase.from('sku_unfulfillable').select('*').eq('active', true).then(({ data }) => {
+      const m: Record<string, { reason: string; note: string | null; set_by: string | null; set_at: string }> = {}
+      for (const r of (data || [])) m[r.sku] = { reason: r.reason, note: r.note, set_by: r.set_by, set_at: r.set_at }
+      setFlaggedSkus(m)
+    })
     supabase.from('dispatch_sku_map').select('*').then(({ data }) => {
       if (data) setSkuMaps(data as SkuMap[])
     })
@@ -536,11 +542,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         const lookup = buildSkuLookup(skuMaps)
         const rows = trulyNew.map(o => {
           const barcode = resolveBarcodeSku(o.order_id, o.sku, lookup)
+          const flag = flaggedSkus[barcode || ''] || flaggedSkus[o.sku || '']
+          const autoUnf = !o.is_dispatched && !!flag
           return {
             session_id: session.id, ...o,
             barcode_sku: barcode,
             sku_mapped: !!barcode,
-            plan_decision: o.is_dispatched ? 'scheduled' : 'undecided',
+            plan_decision: o.is_dispatched ? 'scheduled' : (autoUnf ? 'unfulfillable' : 'undecided'),
+            ...(autoUnf ? { unfulfillable_reason: flag.reason, unfulfillable_note: 'Auto: SKU flagged unfulfillable' + (flag.note ? ` · ${flag.note}` : '') } : {}),
             // assigned_caller comes straight from the sheet's "Assigned" column (via ...o).
           }
         })
@@ -549,6 +558,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         // Log import events (only for orders actually inserted)
         for (const o of trulyNew) {
           logEvent(o.order_id, 'import', `Imported · ${o.courier} · ${o.sku}`)
+          const bsku = resolveBarcodeSku(o.order_id, o.sku, lookup)
+          if (!o.is_dispatched && (flaggedSkus[bsku || ''] || flaggedSkus[o.sku || ''])) {
+            logEvent(o.order_id, 'unfulfillable', 'Auto-unfulfillable on import · SKU flagged')
+          }
         }
       }
     }
@@ -565,7 +578,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   }
 
   // ── Single decision ──
-  const updateDecision = async (orderId: string, decision: PlanDecision, scheduledDate?: string, reason?: UnfulfillableReason, note?: string) => {
+  const updateDecision = async (orderId: string, decision: PlanDecision, scheduledDate?: string) => {
     setUpdatingIds(prev => new Set(prev).add(orderId))
     const order = orders.find(o => o.id === orderId)
     const update: Record<string, string | boolean | null> = {
@@ -574,10 +587,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }
     if (decision === 'scheduled') update.scheduled_date = scheduledDate || null
     if (decision === 'hold' || decision === 'undecided' || decision === 'unfulfillable') update.scheduled_date = null
-    if (decision === 'unfulfillable') {
-      update.unfulfillable_reason = reason || 'Not ready'
-      update.unfulfillable_note = (note || '').trim() || null
-    }
     // Rescheduling a HELD order (individual action) clears the hold and flags it as
     // rescheduled-from-hold, so the factory knows it was on hold but is now cleared to ship.
     const wasHeld = order && (order.confirmation_status === 'hold' || order.plan_decision === 'hold')
@@ -588,14 +597,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     await supabase.from('dispatch_orders').update(update).eq('id', orderId)
     if (order) {
       if (decision === 'hold') logEvent(order.order_id, 'hold', 'Marked On Hold')
-      if (decision === 'unfulfillable') logEvent(order.order_id, 'unfulfillable', `Marked Unfulfillable · ${reason || 'Not ready'}`, (note || '').trim() || undefined)
+      if (decision === 'unfulfillable') logEvent(order.order_id, 'unfulfillable', 'Marked Unfulfillable')
       if (decision === 'undecided') logEvent(order.order_id, 'hold', 'Decision cleared')
       if (decision === 'scheduled' && wasHeld) logEvent(order.order_id, 'rescheduled', 'Rescheduled out of hold — cleared to dispatch')
     }
     setOrders(prev => prev.map(o => o.id === orderId ? {
       ...o, plan_decision: decision,
-      unfulfillable_reason: decision === 'unfulfillable' ? (reason || 'Not ready') : o.unfulfillable_reason,
-      unfulfillable_note: decision === 'unfulfillable' ? ((note || '').trim() || null) : o.unfulfillable_note,
       scheduled_date: update.scheduled_date !== undefined ? (update.scheduled_date as string | null) : o.scheduled_date,
       confirmation_status: update.confirmation_status !== undefined ? (update.confirmation_status as string | null) : o.confirmation_status,
       rescheduled_from_hold: update.rescheduled_from_hold !== undefined ? (update.rescheduled_from_hold as boolean) : o.rescheduled_from_hold,
@@ -622,8 +629,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // ── Bulk decision ──
   const [bulkScheduleDate, setBulkScheduleDate] = useState('')
-  const [bulkUnfReason, setBulkUnfReason] = useState<UnfulfillableReason>('Not ready')
-  const [bulkUnfNote, setBulkUnfNote] = useState('')
 
   const handleBulkConfirm = async () => {
     if (!bulkDecision || selectedIds.size === 0) return
@@ -642,7 +647,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     ids.forEach(id => setUpdatingIds(prev => new Set(prev).add(id)))
     const update: Record<string, string | null> = {
       plan_decision: bulkDecision,
-      ...(bulkDecision === 'unfulfillable' ? { unfulfillable_reason: bulkUnfReason, unfulfillable_note: bulkUnfNote.trim() || null } : {}),
       updated_at: new Date().toISOString(),
     }
     if (bulkDecision === 'scheduled') update.scheduled_date = bulkScheduleDate || new Date().toISOString().split('T')[0]
@@ -651,8 +655,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const idSet = new Set(ids)
     setOrders(prev => prev.map(o => idSet.has(o.id) ? {
       ...o, plan_decision: bulkDecision as PlanDecision,
-      unfulfillable_reason: bulkDecision === 'unfulfillable' ? bulkUnfReason : o.unfulfillable_reason,
-      unfulfillable_note: bulkDecision === 'unfulfillable' ? (bulkUnfNote.trim() || null) : o.unfulfillable_note,
       scheduled_date: update.scheduled_date !== undefined ? update.scheduled_date : o.scheduled_date
     } : o))
     // Log bulk events
@@ -664,7 +666,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       } else if (bulkDecision === 'hold') {
         logEvent(o.order_id, 'hold', 'Marked On Hold (bulk)')
       } else if (bulkDecision === 'unfulfillable') {
-        logEvent(o.order_id, 'unfulfillable', `Marked Unfulfillable · ${bulkUnfReason} (bulk)`, bulkUnfNote.trim() || undefined)
+        logEvent(o.order_id, 'unfulfillable', 'Marked Unfulfillable (bulk)')
       }
     }
     setUpdatingIds(new Set())
@@ -1302,11 +1304,34 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         logEvent(o.order_id, 'unfulfillable', `Marked Unfulfillable · ${unfulfillableReason}`, unfulfillableNote.trim() || undefined)
       }
     }
+    // Set the STICKY per-SKU flag so future imports of this SKU auto-go unfulfillable
+    // and it drops out of the picklist. Cleared later via "Mark fulfillable" in Plan.
+    await supabase.from('sku_unfulfillable').upsert({
+      sku: unfulfillableSku, reason: unfulfillableReason, note: unfulfillableNote.trim() || null,
+      active: true, set_by: user.email, set_at: now, cleared_by: null, cleared_at: null,
+    }, { onConflict: 'sku' })
+    setFlaggedSkus(prev => ({ ...prev, [unfulfillableSku]: { reason: unfulfillableReason, note: unfulfillableNote.trim() || null, set_by: user.email, set_at: now } }))
+
     setUnfulfillableSku(null)
     setUnfulfillableReason('Not ready')
     setUnfulfillableNote('')
     setAvailableQty('')
     setAllocationPreview(null)
+  }
+
+  // Clear the sticky flag: mark a SKU fulfillable again. Returns its auto/marked
+  // unfulfillable orders to 'undecided' with a note, and un-flags the SKU.
+  const markSkuFulfillable = async (sku: string) => {
+    const now = new Date().toISOString()
+    await supabase.from('sku_unfulfillable').update({ active: false, cleared_by: user.email, cleared_at: now }).eq('sku', sku)
+    const affected = orders.filter(o => (o.barcode_sku === sku || o.sku === sku) && o.plan_decision === 'unfulfillable' && !o.is_cancelled && !o.is_dispatched)
+    const ids = affected.map(o => o.id)
+    if (ids.length > 0) {
+      await supabase.from('dispatch_orders').update({ plan_decision: 'undecided', unfulfillable_reason: null, unfulfillable_note: null, updated_at: now }).in('id', ids)
+      setOrders(prev => prev.map(o => ids.includes(o.id) ? { ...o, plan_decision: 'undecided', unfulfillable_reason: null, unfulfillable_note: null } : o))
+      for (const o of affected) logEvent(o.order_id, 'undecided', `SKU marked fulfillable · returned to undecided`)
+    }
+    setFlaggedSkus(prev => { const n = { ...prev }; delete n[sku]; return n })
   }
 
   // ── Review: save target date ──
@@ -2352,6 +2377,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       {/* ── Modals ── */}
 
       {/* Bulk confirm */}
+      {fulfillableConfirm && (
+        <Modal title="Mark SKU fulfillable" onClose={() => setFulfillableConfirm(null)}>
+          <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 8 }}>
+            Mark <strong style={{ fontFamily: 'DM Mono' }}>{fulfillableConfirm.sku}</strong> fulfillable again?
+          </p>
+          <p style={{ color: 'var(--text3)', fontSize: 13, marginBottom: 16 }}>
+            New imports of this SKU will go to undecided again, and its {fulfillableConfirm.count} currently-unfulfillable order{fulfillableConfirm.count === 1 ? '' : 's'} will return to the undecided tab.
+          </p>
+          <ModalActions onCancel={() => setFulfillableConfirm(null)}
+            onConfirm={async () => { const c = fulfillableConfirm; setFulfillableConfirm(null); await markSkuFulfillable(c.sku) }}
+            confirmLabel="Mark fulfillable" confirmColor="var(--dispatched)" />
+        </Modal>
+      )}
+
       {showBulkConfirm && bulkDecision && (
         <Modal title={`Apply to ${selectedIds.size} orders`} onClose={() => setShowBulkConfirm(false)}>
           <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 12 }}>
@@ -2371,21 +2410,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               />
             </div>
           )}
-          {bulkDecision === 'unfulfillable' && (
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>Reason</label>
-              <select value={bulkUnfReason} onChange={e => setBulkUnfReason(e.target.value as UnfulfillableReason)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', marginBottom: 10 }}>
-                {UNFULFILLABLE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>
-                Note {bulkUnfReason === 'Other' ? <span style={{ color: 'var(--critical)' }}>(required)</span> : <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(optional)</span>}
-              </label>
-              <textarea value={bulkUnfNote} onChange={e => setBulkUnfNote(e.target.value)}
-                placeholder={bulkUnfReason === 'Other' ? 'Describe the issue' : 'Any additional context'}
-                style={{ width: '100%', height: 60, padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Sans', resize: 'vertical' as const, outline: 'none' }} />
-            </div>
-          )}
           <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 4 }}>
             {Array.from(selectedIds).map(id => {
               const o = orders.find(x => x.id === id)
@@ -2399,12 +2423,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               )
             })}
           </div>
-          {bulkDecision === 'unfulfillable' && bulkUnfReason === 'Other' && !bulkUnfNote.trim() && (
-            <div style={{ fontSize: 12, color: 'var(--critical)', marginTop: 8 }}>A note is required when the reason is Other.</div>
-          )}
-          <ModalActions onCancel={() => { setShowBulkConfirm(false); setBulkUnfReason('Not ready'); setBulkUnfNote('') }} onConfirm={handleBulkConfirm}
+          <ModalActions onCancel={() => setShowBulkConfirm(false)} onConfirm={handleBulkConfirm}
             confirmLabel="Confirm"
-            disabled={bulkDecision === 'unfulfillable' && bulkUnfReason === 'Other' && !bulkUnfNote.trim()}
             confirmColor={bulkDecision === 'scheduled' ? 'var(--dispatched)' : bulkDecision === 'hold' ? 'var(--hold)' : 'var(--critical)'} />
         </Modal>
       )}
@@ -3038,6 +3058,33 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ PLAN ════ */}
         {tab === 'plan' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
+            {/* Flagged SKUs — sticky-unfulfillable. New imports of these auto-go unfulfillable
+                and they drop out of the picklist. Mark fulfillable to release. */}
+            {Object.keys(flaggedSkus).length > 0 && (
+              <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' as const }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)' }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}><Flag size={15} style={{ color: 'var(--critical)' }} /> SKUs marked unfulfillable</span>
+                  <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{Object.keys(flaggedSkus).length} flagged</span>
+                </div>
+                {Object.entries(flaggedSkus).sort((a, b) => b[1].set_at.localeCompare(a[1].set_at)).map(([sku, f], i, arr) => {
+                  const affected = orders.filter(o => (o.barcode_sku === sku || o.sku === sku) && o.plan_decision === 'unfulfillable' && !o.is_cancelled && !o.is_dispatched).length
+                  const when = f.set_at ? new Date(f.set_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''
+                  return (
+                    <div key={sku} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700 }}>{sku}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text3)' }}>{f.reason}{f.note ? ` · "${f.note}"` : ''}{when ? ` · flagged ${when}` : ''}{f.set_by ? ` by ${f.set_by.split('@')[0]}` : ''}</div>
+                      </div>
+                      <span style={{ fontSize: 12, fontFamily: 'DM Mono', color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 8px', borderRadius: 6, whiteSpace: 'nowrap' as const }}>{affected} order{affected === 1 ? '' : 's'}</span>
+                      <button onClick={() => setFulfillableConfirm({ sku, count: affected })}
+                        style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+                        Mark fulfillable
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             {/* Overdue backlog banner — mirrors the EOD 'undecided' banner pattern */}
             {overdueCount > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 8, padding: '11px 16px' }}>
@@ -3948,7 +3995,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       </tr>
                     </thead>
                     <tbody>
-                      {pickView.map((row, i) => {
+                      {pickView.filter(row => !flaggedSkus[row.sku]).map((row, i) => {
                         const isToday = row.date === today
                         const dateLabel = row.date === 'Unscheduled' ? 'No date'
                           : new Date(row.date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
@@ -5419,7 +5466,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   stockCount?: number | null
   neededCount?: number | null
   onSelect: (id: string) => void
-  onDecision: (id: string, d: PlanDecision, scheduledDate?: string, reason?: UnfulfillableReason, note?: string) => void
+  onDecision: (id: string, d: PlanDecision) => void
   onSchedule: (id: string, date: string) => void
   onPriority: (id: string, current: boolean) => void
   onCancel: (id: string) => void
@@ -5438,9 +5485,6 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onCancelLr: () => void
 }) {
   const [lrCopied, setLrCopied] = useState(false)
-  const [unfOpen, setUnfOpen] = useState(false)
-  const [unfReason, setUnfReason] = useState<UnfulfillableReason>('Not ready')
-  const [unfNote, setUnfNote] = useState('')
   const uc = {
     CRITICAL: { color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
     TODAY:    { color: 'var(--today)',    bg: 'var(--today-bg)',    border: '#fed7aa' },
@@ -5641,36 +5685,15 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
             color: order.plan_decision === 'hold' ? 'var(--hold)' : 'var(--text3)',
             whiteSpace: 'nowrap' as const,
           }}>Hold</button>
-          {/* Unfulfillable — opens an inline reason picker */}
-          <div style={{ position: 'relative' as const }}>
-            <button onClick={() => setUnfOpen(v => !v)} style={{
-              padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-              fontFamily: 'DM Sans', fontWeight: 500,
-              background: order.plan_decision === 'unfulfillable' ? 'var(--critical-bg)' : 'var(--surface)',
-              border: `1px solid ${order.plan_decision === 'unfulfillable' ? '#fecaca' : 'var(--border)'}`,
-              color: order.plan_decision === 'unfulfillable' ? 'var(--critical)' : 'var(--text3)',
-              whiteSpace: 'nowrap' as const,
-            }}>Unfulfil.</button>
-            {unfOpen && (
-              <div style={{ position: 'absolute' as const, top: '100%', right: 0, marginTop: 4, zIndex: 60, width: 220, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', padding: 10 }}>
-                <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 4, fontWeight: 600 }}>Reason</label>
-                <select value={unfReason} onChange={e => setUnfReason(e.target.value as UnfulfillableReason)}
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer', marginBottom: 8 }}>
-                  {UNFULFILLABLE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-                <input value={unfNote} onChange={e => setUnfNote(e.target.value)}
-                  placeholder={unfReason === 'Other' ? 'Note (required)' : 'Note (optional)'}
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: `1px solid ${unfReason === 'Other' && !unfNote.trim() ? '#fecaca' : 'var(--border)'}`, background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', marginBottom: 8, boxSizing: 'border-box' as const }} />
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                  <button onClick={() => { setUnfOpen(false); setUnfReason('Not ready'); setUnfNote('') }}
-                    style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-                  <button disabled={unfReason === 'Other' && !unfNote.trim()}
-                    onClick={() => { onDecision(order.id, 'unfulfillable', undefined, unfReason, unfNote); setUnfOpen(false); setUnfReason('Not ready'); setUnfNote('') }}
-                    style={{ padding: '5px 10px', borderRadius: 6, border: 'none', background: (unfReason === 'Other' && !unfNote.trim()) ? 'var(--bg2)' : 'var(--critical)', color: (unfReason === 'Other' && !unfNote.trim()) ? 'var(--text3)' : '#fff', fontSize: 11, fontWeight: 600, cursor: (unfReason === 'Other' && !unfNote.trim()) ? 'not-allowed' : 'pointer' }}>Confirm</button>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Unfulfillable */}
+          <button onClick={() => onDecision(order.id, 'unfulfillable')} style={{
+            padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+            fontFamily: 'DM Sans', fontWeight: 500,
+            background: order.plan_decision === 'unfulfillable' ? 'var(--critical-bg)' : 'var(--surface)',
+            border: `1px solid ${order.plan_decision === 'unfulfillable' ? '#fecaca' : 'var(--border)'}`,
+            color: order.plan_decision === 'unfulfillable' ? 'var(--critical)' : 'var(--text3)',
+            whiteSpace: 'nowrap' as const,
+          }}>Unfulfil.</button>
         </div>
       </td>
       <td style={{ padding: '8px 12px' }}>
