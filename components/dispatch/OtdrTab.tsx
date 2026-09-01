@@ -7,7 +7,7 @@ import { RefreshCw } from 'lucide-react'
 // OTDR = on-time / tracked, over a 30-day window bucketed by promised delivery date (EDD),
 // ending 10 days before each date. Amazon orders, all courier partners.
 //   Tracked (denominator)  = dispatched, non-cancelled orders with an EDD in the window
-//                            (delivered + in-transit + late/RTO) — matches Amazon's total.
+//                            (delivered + in-transit) — by order, RTO excluded, matches Amazon's total.
 //   On-time (numerator)    = delivered on/before the EDD.
 //   In-transit             = tracked-but-not-yet-delivered (outcome not final).
 
@@ -29,7 +29,12 @@ export default function OtdrTab() {
   const load = useCallback(async () => {
     setLoading(true); setErr(null)
     try {
-      const acc: Tracked[] = []
+      // Collapse multi-piece orders (same order_id spans several rows) into ONE per order,
+      // so counts are by order, not by piece.
+      //   delivered  = ALL pieces delivered (a partly-delivered order isn't on-time yet)
+      //   promise    = latest piece's EDD  ·  delivered_at = latest delivery
+      //   RTO if ANY piece is RTO -> the whole order is dropped.
+      const byOrder = new Map<string, { promise: string; anyRto: boolean; allDelivered: boolean; latestDeliv: string | null }>()
       const pageSize = 1000
       for (let from = 0; ; from += pageSize) {
         const { data, error } = await supabase.from('dispatch_orders')
@@ -37,6 +42,7 @@ export default function OtdrTab() {
           .eq('is_dispatched', true)
           .eq('is_cancelled', false)
           .not('promise_date', 'is', null)
+          .neq('tracking_status', 'rto')
           .range(from, from + pageSize - 1)
         if (error) throw error
         const rows = (data || []) as { order_id: string; promise_date: string; delivered_at: string | null; tracking_status: string | null }[]
@@ -44,11 +50,29 @@ export default function OtdrTab() {
           if (detectPlatform(r.order_id) !== 'Amazon') continue
           const promise = String(r.promise_date).slice(0, 10)
           if (!/^\d{4}-\d{2}-\d{2}$/.test(promise)) continue
-          const delivered = r.tracking_status === 'delivered' && !!r.delivered_at
-          const onTime = delivered && istDateStr(new Date(r.delivered_at as string)) <= promise
-          acc.push({ promise, onTime, delivered })
+          const pieceDelivered = r.tracking_status === 'delivered' && !!r.delivered_at
+          const prev = byOrder.get(r.order_id)
+          if (!prev) {
+            byOrder.set(r.order_id, {
+              promise, anyRto: r.tracking_status === 'rto',
+              allDelivered: pieceDelivered,
+              latestDeliv: pieceDelivered ? (r.delivered_at as string) : null,
+            })
+          } else {
+            prev.anyRto = prev.anyRto || r.tracking_status === 'rto'
+            prev.allDelivered = prev.allDelivered && pieceDelivered
+            if (promise > prev.promise) prev.promise = promise                    // latest EDD
+            if (pieceDelivered && (!prev.latestDeliv || (r.delivered_at as string) > prev.latestDeliv)) prev.latestDeliv = r.delivered_at as string
+          }
         }
         if (rows.length < pageSize) break
+      }
+      const acc: Tracked[] = []
+      for (const o of byOrder.values()) {
+        if (o.anyRto) continue                                                    // drop RTO orders
+        const delivered = o.allDelivered && !!o.latestDeliv
+        const onTime = delivered && istDateStr(new Date(o.latestDeliv as string)) <= o.promise
+        acc.push({ promise: o.promise, onTime, delivered })
       }
       setOrders(acc)
       setLoadedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }))
@@ -90,7 +114,7 @@ export default function OtdrTab() {
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 4px' }}>Delivery Performance — OTDR forecast</h2>
           <p style={{ fontSize: 12.5, color: 'var(--text3)', margin: 0, lineHeight: 1.5, maxWidth: 720 }}>
-            Projected On-Time Delivery Rate for each of the next 10 days, as the 30-day window (by promised delivery date, ending 10 days before each date) rolls forward. Amazon orders, all courier partners. OTDR = on-time ÷ tracked; tracked = dispatched orders in the window, including in-transit.
+            Projected On-Time Delivery Rate for each of the next 10 days, as the 30-day window (by promised delivery date, ending 10 days before each date) rolls forward. Amazon orders, all courier partners, counted by order (RTO excluded). OTDR = on-time ÷ tracked; tracked = dispatched orders in the window, including in-transit.
           </p>
         </div>
         <button onClick={() => void load()} disabled={loading} style={{ marginLeft: 'auto', padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: loading ? 'default' : 'pointer', fontSize: 12, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
