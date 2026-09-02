@@ -277,21 +277,25 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
     if (existing) {
       const alreadyRefunded = existing.refund_status === 'refunded'
       if (alreadyRefunded && !force) { setMergeWarn({ existingId: existing.id, refunded: true }); setBusy(false); return }
-      // MERGE: update the existing return with this row's reverse tracking + receipt, then
-      // remove this now-redundant unmapped row.
-      const { data: merged } = await supabase.from('returns').update({
-        reverse_tracking_id: row.reverse_tracking_id,
-        reverse_courier: row.reverse_courier ?? undefined,
+      // MERGE. reverse_tracking_id is UNIQUELY constrained, and THIS row already holds the
+      // reverse ID we're about to move onto the existing return — so DELETE this redundant
+      // unmapped row FIRST to free the ID, then update the existing return. (Delete-then-update
+      // avoids a transient duplicate-key violation, code 23505.)
+      const snapshot = { reverse_tracking_id: row.reverse_tracking_id, reverse_courier: row.reverse_courier, received_sku: row.received_sku, warehouse_received: row.warehouse_received, warehouse_received_at: row.warehouse_received_at, barcode: found.scanned_barcode || row.barcode || null }
+      const { error: delErr } = await supabase.from('returns').delete().eq('id', row.id)
+      if (delErr) { setError('Could not merge — try again'); setBusy(false); return }
+      const { data: merged, error: updErr } = await supabase.from('returns').update({
+        reverse_tracking_id: snapshot.reverse_tracking_id,
+        reverse_courier: snapshot.reverse_courier ?? undefined,
         reverse_tracking_status: null, reverse_tracking_label: null,
-        received_sku: row.received_sku ?? undefined,
-        warehouse_received: row.warehouse_received ?? undefined,
-        warehouse_received_at: row.warehouse_received_at ?? undefined,
-        barcode: found.scanned_barcode || row.barcode || null,
+        received_sku: snapshot.received_sku ?? undefined,
+        warehouse_received: snapshot.warehouse_received ?? undefined,
+        warehouse_received_at: snapshot.warehouse_received_at ?? undefined,
+        barcode: snapshot.barcode,
         sku_mismatch: mismatch,
         updated_at: now,
       }).eq('id', existing.id).select().maybeSingle()
-      if (!merged) { setError('Could not merge — try again'); setBusy(false); return }
-      await supabase.from('returns').delete().eq('id', row.id)
+      if (!merged || updErr) { setError('Merge failed after removing the duplicate — reload and check the return'); setBusy(false); return }
       void logOrderEvent(found.order_id, 'return', 'Received return merged onto existing return (new reverse ID)', row.reverse_tracking_id ? `reverse ${row.reverse_tracking_id}` : null)
       onLinked(merged as ReturnRow)
       setMergeWarn(null)
