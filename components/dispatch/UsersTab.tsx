@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { UserAccess } from '@/types'
-import { CheckCircle, Clock, XCircle, RefreshCw } from 'lucide-react'
+import { CheckCircle, Clock, XCircle, RefreshCw, Ban, Monitor } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
 const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
   { key: 'can_import',   label: 'Import',   desc: 'Paste & import planning data' },
@@ -51,6 +52,95 @@ const ROLE_PRESETS: { label: string; desc: string; keys: (keyof UserAccess)[] }[
   { label: 'Full Warehouse', desc: 'Every warehouse + packing permission',
     keys: ['can_wh_stock', 'can_wh_coating', 'can_wh_picking', 'can_wh_inventory', 'can_wh_barcodes', 'can_wh_pack_generate', 'can_wh_pack_scan', 'can_wh_pack_inventory', 'can_wh_pack_rto', 'can_wh_pack_units'] },
 ]
+
+interface DeviceRow { device_id: string; code: string | null; label: string | null; status: string; requested_by: string | null; user_agent: string | null; approved_at: string | null; requested_at: string; last_seen_at: string | null }
+
+function DevicesPanel({ ownerEmail }: { ownerEmail: string }) {
+  const supabase = createClient()
+  const [devices, setDevices] = useState<DeviceRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [labelEdits, setLabelEdits] = useState<Record<string, string>>({})
+
+  const load = async () => {
+    setLoading(true)
+    const { data } = await supabase.from('approved_devices').select('*').order('requested_at', { ascending: false })
+    setDevices((data || []) as DeviceRow[]); setLoading(false)
+  }
+  useEffect(() => { void load() }, [])
+
+  const setStatus = async (device_id: string, status: string) => {
+    const label = labelEdits[device_id]
+    await supabase.from('approved_devices').update({
+      status,
+      ...(status === 'approved' ? { approved_by: ownerEmail, approved_at: new Date().toISOString(), ...(label ? { label } : {}) } : {}),
+    }).eq('device_id', device_id)
+    await load()
+  }
+
+  const fmt = (d: string | null) => d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+  const shortUA = (ua: string | null) => {
+    if (!ua) return 'unknown'
+    const b = /Edg/.test(ua) ? 'Edge' : /Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : /Firefox/.test(ua) ? 'Firefox' : 'browser'
+    const o = /Windows/.test(ua) ? 'Windows' : /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : ''
+    return o ? `${b}/${o}` : b
+  }
+
+  const pending = devices.filter(d => d.status === 'pending')
+  const approved = devices.filter(d => d.status === 'approved')
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 7 }}><Monitor size={16} /> Devices</h2>
+        <button onClick={load} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '4px 9px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}><RefreshCw size={12} /> Refresh</button>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)' }}>Only approved devices can use the app (owner always allowed).</span>
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 20, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading devices…</div>
+      ) : (
+        <>
+          {pending.length > 0 && (
+            <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' as const }}>
+              <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--today-bg)', display: 'flex', alignItems: 'center', gap: 7 }}>
+                <Clock size={14} style={{ color: 'var(--today)' }} /><span style={{ fontSize: 13, fontWeight: 700, color: 'var(--today)' }}>Pending approval ({pending.length})</span>
+              </div>
+              {pending.map((d, i) => (
+                <div key={d.device_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderBottom: i < pending.length - 1 ? '1px solid var(--border)' : 'none', flexWrap: 'wrap' as const }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <input value={labelEdits[d.device_id] ?? d.label ?? ''} onChange={e => setLabelEdits(p => ({ ...p, [d.device_id]: e.target.value }))} placeholder="Name this device (e.g. Warehouse PC 3)"
+                      style={{ width: '100%', maxWidth: 220, padding: '6px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
+                    <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4, fontFamily: 'DM Mono' }}>{d.code || '—'} · {shortUA(d.user_agent)} · {d.requested_by || ''} · {fmt(d.requested_at)}</div>
+                  </div>
+                  <button onClick={() => setStatus(d.device_id, 'approved')} style={{ padding: '6px 12px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><CheckCircle size={13} /> Approve</button>
+                  <button onClick={() => setStatus(d.device_id, 'denied')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>Deny</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' as const }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}><CheckCircle size={14} style={{ color: 'var(--dispatched)' }} /> Approved devices</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{approved.length}</span>
+            </div>
+            {approved.length === 0 ? (
+              <div style={{ padding: 18, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No approved devices yet.</div>
+            ) : approved.map((d, i) => (
+              <div key={d.device_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderBottom: i < approved.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{d.label || 'Unnamed device'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{shortUA(d.user_agent)} · approved {fmt(d.approved_at)} · last seen {fmt(d.last_seen_at)}</div>
+                </div>
+                <button onClick={() => setStatus(d.device_id, 'revoked')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><Ban size={13} /> Revoke</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
   const [users, setUsers] = useState<UserAccess[]>([])
@@ -259,6 +349,8 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
           <RefreshCw size={12} /> Refresh
         </button>
       </div>
+
+      <DevicesPanel ownerEmail={ownerEmail} />
 
       {loading ? (
         <div style={{ color: 'var(--text3)', padding: 40, textAlign: 'center' as const }}>Loading users…</div>

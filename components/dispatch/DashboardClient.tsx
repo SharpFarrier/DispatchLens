@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
+import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
 import { fetchLabelBytes, stripAdPage, invoicePdfBytes, mergePdfs, downloadBytes, isBluedart, fetchBluedartLabels, stampLabelStrip, type InvoiceLine } from '@/lib/dispatchDocs'
@@ -2372,6 +2373,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   return (
+    <DeviceGate userEmail={user.email || ''} isOwner={isOwner}>
     <div className="dl-app-root" style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false); setShowDispatchedCourierPopover(false) }}>
 
       {/* ── Modals ── */}
@@ -5455,6 +5457,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         </div>
       )}
     </div>
+    </DeviceGate>
   )
 }
 
