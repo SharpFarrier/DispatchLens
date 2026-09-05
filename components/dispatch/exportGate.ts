@@ -6,6 +6,7 @@ export type ExportGateStatus = 'loading' | 'owner' | 'none' | 'pending' | 'appro
 
 const OWNER_EMAIL = 'adityaramnani91581@gmail.com'
 const BUCKET = 'export-reports'
+const APPROVED_COOLDOWN_MS = 60_000  // after approval, lock for 1 min, then allow a fresh request
 
 function triggerDownload(csv: string, filename: string) {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -23,6 +24,7 @@ export function useExportGate(reportType: string, reportLabel: string) {
   const supabase = createClient()
   const [status, setStatus] = useState<ExportGateStatus>('loading')
   const [reqId, setReqId] = useState<string | null>(null)
+  const cooldownTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const emailRef = useRef<string>('')
   const ownerRef = useRef<boolean>(false)
 
@@ -34,12 +36,22 @@ export function useExportGate(reportType: string, reportLabel: string) {
     if (ownerRef.current) { setStatus('owner'); return }
     if (!email) { setStatus('none'); return }
     const { data } = await supabase.from('export_requests')
-      .select('id, status, expires_at')
+      .select('id, status, expires_at, decided_at')
       .eq('requested_by', email).eq('report_type', reportType)
       .order('requested_at', { ascending: false }).limit(1).maybeSingle()
     if (!data) { setStatus('none'); setReqId(null); return }
+    if (cooldownTimer.current) { clearTimeout(cooldownTimer.current); cooldownTimer.current = null }
     if (data.status === 'approved' && data.expires_at && new Date(data.expires_at as string) > new Date()) {
-      setStatus('approved'); setReqId(data.id)
+      // Approved: lock the button for 1 min (so they grab the download), then free it so a
+      // NEW filtered report can be requested. The approved report stays in Reports for 7 days.
+      const decidedMs = data.decided_at ? new Date(data.decided_at as string).getTime() : 0
+      const elapsed = Date.now() - decidedMs
+      if (decidedMs && elapsed < APPROVED_COOLDOWN_MS) {
+        setStatus('approved'); setReqId(data.id)
+        cooldownTimer.current = setTimeout(() => { setStatus('none'); setReqId(null) }, APPROVED_COOLDOWN_MS - elapsed)
+      } else {
+        setStatus('none'); setReqId(null)   // cooldown passed -> allow a fresh request
+      }
     } else if (data.status === 'pending') {
       setStatus('pending'); setReqId(data.id)
     } else {
@@ -47,7 +59,7 @@ export function useExportGate(reportType: string, reportLabel: string) {
     }
   }, [supabase, reportType])
 
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { void refresh(); return () => { if (cooldownTimer.current) clearTimeout(cooldownTimer.current) } }, [refresh])
 
   const handleExport = useCallback(async ({ rowCount, summary, getCsv, filename }: { rowCount: number; summary?: string; getCsv: () => string; filename: string }) => {
     const email = emailRef.current
