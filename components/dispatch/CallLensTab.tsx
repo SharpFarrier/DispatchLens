@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import PhoneReveal from './PhoneReveal'
 import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
 import { DBOrder } from '@/types'
@@ -153,7 +154,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '' },
     { key: 'sku', label: 'SKU', type: 'category', get: r => r.o.sku || '(none)' },
     { key: 'oda', label: 'ODA', type: 'category', get: r => r.o.oda === 'ODA' ? 'ODA' : '(no)', render: r => r.o.oda === 'ODA' ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', padding: '2px 7px', borderRadius: 4 }}>ODA</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
-    { key: 'contact', label: 'Contact', type: 'text', get: r => r.o.contact_number || '', render: r => r.o.contact_number ? <a href={`tel:${r.o.contact_number}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{r.o.contact_number}</a> : '—' },
+    { key: 'contact', label: 'Contact', type: 'text', get: r => r.o.contact_number || '', render: r => <PhoneReveal number={r.o.contact_number} orderId={r.o.order_id} /> },
     { key: 'confirmation', label: 'Confirmation', type: 'category', queues: ['predispatch', 'callbacks'], get: r => confirmationBadge(r.o)?.label || '(pending)', render: r => { const b = confirmationBadge(r.o); return b ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: b.fg, background: b.bg, padding: '2px 7px', borderRadius: 4 }}>{b.label}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>pending</span> } },
     { key: 'dispatch', label: 'Dispatch', type: 'category', get: r => dispatchStatus(r.o).label, render: r => { const s = dispatchStatus(r.o); return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: s.fg, background: s.bg, padding: '2px 7px', borderRadius: 4 }}>{s.label}</span> } },
     { key: 'flags', label: 'Flags', type: 'category', queues: ['delay'], get: r => r.o.cancellation_requested ? 'Cancellation requested' : r.o.escalated ? 'Escalated' : '(none)', render: r => (<span style={{ display: 'inline-flex', gap: 4 }}>

@@ -2,6 +2,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { DBOrder } from '@/types'
 import { createClient } from '@/lib/supabase/client'
+import PhoneReveal from './PhoneReveal'
 import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
 import { Search, Download, ArrowUp, ArrowDown, Filter, X, Calendar } from 'lucide-react'
@@ -119,7 +120,7 @@ export default function AllOrdersTab() {
     { key: 'pincode', label: 'Pincode · City', type: 'text', get: r => `${r.o.pincode || ''} ${r.o.city || ''}`.trim(), render: r => <span>{r.o.pincode}{r.o.city ? ` · ${r.o.city}` : ''}</span> },
     { key: 'promise', label: 'Promise', type: 'date', get: r => r.o.promise_date || '', render: r => <span style={{ color: 'var(--text2)' }}>{fmtDate(r.o.promise_date)}</span> },
     { key: 'dispatched', label: 'Dispatched', type: 'date', get: r => r.o.dispatched_at || '', render: r => <span style={{ color: 'var(--text2)' }}>{fmtDate(r.o.dispatched_at)}</span> },
-    { key: 'contact', label: 'Contact', type: 'text', get: r => r.o.contact_number || '', render: r => <span style={{ color: 'var(--text2)' }}>{r.o.contact_number || '—'}</span> },
+    { key: 'contact', label: 'Contact', type: 'text', get: r => r.o.contact_number || '', render: r => <PhoneReveal number={r.o.contact_number} orderId={r.o.order_id} /> },
     { key: 'value', label: 'Value', type: 'number', align: 'right', get: r => r.o.taxable_value != null ? (r.o.taxable_value + (r.o.tax_amount || 0)) : -1, render: r => <span style={{ color: 'var(--text2)' }}>{r.o.taxable_value != null ? `₹${(r.o.taxable_value + (r.o.tax_amount || 0)).toLocaleString('en-IN')}` : '—'}</span> },
     { key: 'created', label: 'Created', type: 'date', get: r => r.o.created_at || '', render: r => <span style={{ color: 'var(--text3)' }}>{fmtDate(r.o.created_at)}</span> },
   ], [])
