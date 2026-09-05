@@ -20,7 +20,6 @@ interface UploadRow { id: string; platform: string; file_name: string; row_count
 type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
 
 export default function ReconSection() {
-  const _xg = useExportGate('recon', 'Recon export')
   const supabase = createClient()
   const [tab, setTab] = useState<Tab>('inbox')
   const [uploads, setUploads] = useState<UploadRow[]>([])
@@ -750,6 +749,7 @@ function ChargesView() {
 }
 
 function OrdersView() {
+  const _xg = useExportGate('recon', 'Recon export')
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [rows, setRows] = useState<OrderRow[]>([])
