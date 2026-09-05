@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
+import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
 import { parseOrders } from '@/lib/parser'
@@ -30,6 +31,7 @@ const CargoTokenPanel = dynamic(() => import('./CargoTokenPanel'))
 const WarehouseSection = dynamic(() => import('./WarehouseSection'), { loading: TabLoading })
 const ReconSection = dynamic(() => import('./ReconSection'), { loading: TabLoading })
 const OtdrTab = dynamic(() => import('./OtdrTab'), { loading: TabLoading })
+const ReportsTab = dynamic(() => import('./ReportsTab'), { loading: TabLoading })
 const OrderHistoryPanel = dynamic(() => import('./OrderHistoryPanel'))
 
 const UPD_TONE: Record<string, { c: string; b: string }> = {
@@ -57,7 +59,7 @@ function orderLatestUpdate(o: DBOrder): { label: string; tone: 'success' | 'warn
   return { label: o.plan_decision ? o.plan_decision.replace(/^\w/, (c: string) => c.toUpperCase()) : 'Pending', tone: 'muted', detail: '' }
 }
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'otdr' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -125,6 +127,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const awbInputRef = useRef<HTMLInputElement>(null)
   const itemInputRef = useRef<HTMLInputElement>(null)
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
+  const xgDispatched = useExportGate('dispatched', 'Dispatched export')
+  const xgDemand = useExportGate('demand', 'Upcoming-demand export')
+  const xgPlan = useExportGate('plan', 'Dispatch-plan export')
+  const [pendingReports, setPendingReports] = useState(0)
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
@@ -2764,6 +2770,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'recon', label: 'Recon', show: effectiveAccess.can_recon },
             { key: 'otdr', label: 'OTDR', show: effectiveAccess.can_otdr },
+            { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', show: true },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -3154,8 +3161,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 <button onClick={() => loadOrders()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
                   <RefreshCw size={12} />
                 </button>
-                <button onClick={exportPlanXlsx} disabled={filteredActive.length === 0} title="Download current view as Excel" style={{ background: filteredActive.length === 0 ? 'var(--bg2)' : 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: filteredActive.length === 0 ? 'var(--text3)' : 'var(--text2)', cursor: filteredActive.length === 0 ? 'not-allowed' : 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500 }}>
-                  <Download size={12} /> Export
+                <button onClick={() => xgPlan.handleExport({ rowCount: filteredActive.length, doDownload: exportPlanXlsx })} disabled={filteredActive.length === 0 || xgPlan.disabled} title="Download current view as Excel" style={{ background: filteredActive.length === 0 ? 'var(--bg2)' : 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: filteredActive.length === 0 ? 'var(--text3)' : 'var(--text2)', cursor: filteredActive.length === 0 ? 'not-allowed' : 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500 }}>
+                  <Download size={12} /> {xgPlan.label}
                 </button>
                 <button onClick={generateDispatchDocs} disabled={genDocs || filteredActive.length === 0}
                   title={selectedIds.size > 0 ? `Generate labels + invoices for ${selectedIds.size} selected` : 'Generate labels + invoices for the current view'}
@@ -4121,7 +4128,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     }}>{v.charAt(0).toUpperCase() + v.slice(1)}</button>
                   ))}
                 </div>
-                <button onClick={exportDemandCsv} title="Export the demand matrix (current view, filter & sort)" style={{ marginLeft: 'auto', padding: '5px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 500, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text2)' }}>⤓ Export CSV</button>
+                <button onClick={() => xgDemand.handleExport({ rowCount: 0, doDownload: exportDemandCsv })} disabled={xgDemand.disabled} title="Export the demand matrix (current view, filter & sort)" style={{ marginLeft: 'auto', padding: '5px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 500, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text2)' }}>⤓ {xgDemand.label}</button>
               </div>
 
               {/* Matrix table */}
@@ -4281,10 +4288,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 </div>
               )}
               {/* Export the full filtered window */}
-              <button onClick={exportDispatchedCSV} disabled={dispExporting || filteredDispatched.length === 0} style={{
+              <button onClick={() => xgDispatched.handleExport({ rowCount: filteredDispatched.length, doDownload: exportDispatchedCSV })} disabled={dispExporting || filteredDispatched.length === 0 || xgDispatched.disabled} style={{
                 padding: '6px 13px', borderRadius: 7, border: '1px solid var(--border)', cursor: filteredDispatched.length === 0 ? 'default' : 'pointer',
                 background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
-              }}><Download size={13} /> Export CSV ({filteredDispatched.length})</button>
+              }}><Download size={13} /> {xgDispatched.status==='none'||xgDispatched.status==='owner' ? `${xgDispatched.label} (${filteredDispatched.length})` : xgDispatched.label}</button>
               {/* Sync tracking */}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
                 {trackingLastSync && (
@@ -5269,6 +5276,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {tab === 'otdr' && effectiveAccess.can_otdr && (
           <OtdrTab />
+        )}
+        {tab === 'reports' && (
+          <ReportsTab userEmail={user.email || ''} isOwner={isOwner} onPendingChange={setPendingReports} />
         )}
 
         {/* ════ USERS ════ */}

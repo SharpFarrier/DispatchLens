@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
 import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X, Download, Search } from 'lucide-react'
 import {
@@ -19,6 +20,7 @@ interface UploadRow { id: string; platform: string; file_name: string; row_count
 type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
 
 export default function ReconSection() {
+  const _xg = useExportGate('recon', 'Recon export')
   const supabase = createClient()
   const [tab, setTab] = useState<Tab>('inbox')
   const [uploads, setUploads] = useState<UploadRow[]>([])
@@ -1026,8 +1028,8 @@ function OrdersView() {
           }}>{t.label} {loading ? '' : t.n.toLocaleString()}</button>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button onClick={exportCsv} disabled={loading || !filtered.length} title={anyFilter ? 'Export the filtered rows' : 'Export all rows in this window'} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: filtered.length ? 'var(--text2)' : 'var(--text3)', cursor: filtered.length ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <Download size={12} /> Export CSV{anyFilter ? ' (filtered)' : ''}
+          <button onClick={() => _xg.handleExport({ rowCount: filtered.length, summary: anyFilter ? 'filtered' : undefined, doDownload: exportCsv })} disabled={loading || !filtered.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows in this window'} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: filtered.length ? 'var(--text2)' : 'var(--text3)', cursor: filtered.length ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Download size={12} /> {_xg.label}{(_xg.status==='none'||_xg.status==='owner') && anyFilter ? ' (filtered)' : ''}
           </button>
           {anyFilter && (
             <button onClick={clearAll} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}><X size={12} /> Clear filters</button>

@@ -2,6 +2,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { DBOrder } from '@/types'
 import { createClient } from '@/lib/supabase/client'
+import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
 import { Search, Download, ArrowUp, ArrowDown, Filter, X, Calendar } from 'lucide-react'
 
@@ -53,6 +54,7 @@ interface Col {
 }
 
 export default function AllOrdersTab() {
+  const _xg = useExportGate('all_orders', 'All-orders export')
   const supabase = createClient()
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
@@ -224,8 +226,8 @@ export default function AllOrdersTab() {
             <X size={12} /> Clear filters
           </button>
         )}
-        <button onClick={exportCsv} style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-          <Download size={12} /> Export CSV
+        <button onClick={() => _xg.handleExport({ rowCount: rows.length, doDownload: exportCsv })} disabled={_xg.disabled} style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Download size={12} /> {_xg.label}
         </button>
       </div>
 

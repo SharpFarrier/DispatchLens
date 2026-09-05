@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
 import { DBOrder } from '@/types'
 import { logOrderEvent } from '@/lib/orderEvents'
@@ -66,6 +67,7 @@ function platformOf(oid: string): string {
 }
 
 export default function CallLensTab({ currentUserEmail }: { currentUserEmail: string }) {
+  const _xg = useExportGate('calllens', 'CallLens export')
   const supabase = createClient()
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
@@ -473,7 +475,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
         </div>
         <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
-        <button onClick={exportCsv} disabled={loading || !rows.length} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> Export{anyFilter ? ' (filtered)' : ''}</button>
+        <button onClick={() => _xg.handleExport({ rowCount: rows.length, summary: anyFilter ? 'filtered' : undefined, doDownload: exportCsv })} disabled={loading || !rows.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> {_xg.status === 'none' || _xg.status === 'owner' ? _xg.label + (anyFilter ? ' (filtered)' : '') : _xg.label}</button>
       </div>
 
       {/* KPI cards — reflect the current queue AND the active column filters */}
