@@ -1,14 +1,14 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Clock, Check, FileText, RefreshCw, Files } from 'lucide-react'
+import { Clock, Check, FileText, RefreshCw, Files, Download } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }
 
 interface ReqRow {
   id: string; report_type: string; report_label: string | null; params: { summary?: string } | null
   row_count: number | null; status: string; requested_by: string; requested_at: string
-  decided_by: string | null; decided_at: string | null; reason: string | null; expires_at: string | null
+  decided_by: string | null; decided_at: string | null; reason: string | null; expires_at: string | null; file_path: string | null
 }
 
 const EXPIRE_DAYS = 7
@@ -28,6 +28,7 @@ export default function ReportsTab({ userEmail, isOwner, onPendingChange }: { us
     setRows(list)
     setLoading(false)
     if (onPendingChange) onPendingChange(list.filter(r => r.status === 'pending').length)
+    setTimeout(() => { void purgeExpired(list) }, 0)
   }, [supabase, isOwner, userEmail, onPendingChange])
   useEffect(() => { void load() }, [load])
 
@@ -42,6 +43,23 @@ export default function ReportsTab({ userEmail, isOwner, onPendingChange }: { us
   }
 
   const fmt = (d: string | null) => d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+  const download = async (r: ReqRow) => {
+    if (!r.file_path) return
+    const { data, error } = await supabase.storage.from('export-reports').download(r.file_path)
+    if (error || !data) return
+    const url = URL.createObjectURL(data)
+    const a = document.createElement('a'); a.href = url
+    a.download = (r.params && typeof r.params === 'object' && 'filename' in r.params ? (r.params as { filename?: string }).filename : null) || (r.report_type + '-' + new Date().toISOString().slice(0, 10) + '.csv')
+    a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000)
+    await supabase.from('export_log').insert({ request_id: r.id, report_type: r.report_type, actor: userEmail, action: 'downloaded', row_count: r.row_count })
+  }
+  const purgeExpired = async (list: ReqRow[]) => {
+    const now = Date.now()
+    const dead = list.filter(r => r.file_path && r.expires_at && new Date(r.expires_at).getTime() < now)
+    if (!dead.length) return
+    await supabase.storage.from('export-reports').remove(dead.map(r => r.file_path as string))
+    await supabase.from('export_requests').update({ file_path: null }).in('id', dead.map(r => r.id))
+  }
   const expiresIn = (d: string | null) => { if (!d) return ''; const days = Math.ceil((new Date(d).getTime() - Date.now()) / 86400000); return days > 0 ? `expires in ${days}d` : 'expired' }
   const tabForType = (t: string) => ({ returns: 'Returns', recon: 'Recon', all_orders: 'All Orders', dispatched: 'Dispatched', demand: 'Plan', plan: 'Plan', calllens: 'CallLens' } as Record<string, string>)[t] || t
 
@@ -101,7 +119,7 @@ export default function ReportsTab({ userEmail, isOwner, onPendingChange }: { us
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{r.report_label || tabForType(r.report_type) + ' export'}</div>
                   <div style={{ fontSize: 11, color: 'var(--text3)' }}>{isOwner ? `${r.requested_by.split('@')[0]} · ` : ''}approved {fmt(r.decided_at)} · {expiresIn(r.expires_at)}</div>
                 </div>
-                <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, whiteSpace: 'nowrap' as const }}>Download from {tabForType(r.report_type)}</span>
+                <button onClick={() => download(r)} disabled={!r.file_path} style={{ padding: '6px 12px', borderRadius: 7, border: 'none', background: r.file_path ? 'var(--accent)' : 'var(--bg2)', color: r.file_path ? '#fff' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: r.file_path ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><Download size={13} /> Download</button>
               </div>
             ))}
           </div>

@@ -449,13 +449,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     const header = cols.map(c => c.label)
     const lines = rows.map(r => cols.map(c => esc(c.get(r))).join(','))
     const csv = [header.join(','), ...lines].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `calllens-${queue}-${todayStr()}.csv`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    return csv
   }
 
   const QueueBtn = ({ q, label, n }: { q: Queue; label: string; n: number }) => (
@@ -475,7 +469,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
         </div>
         <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
-        <button onClick={() => _xg.handleExport({ rowCount: rows.length, summary: anyFilter ? 'filtered' : undefined, doDownload: exportCsv })} disabled={loading || !rows.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> {_xg.status === 'none' || _xg.status === 'owner' ? _xg.label + (anyFilter ? ' (filtered)' : '') : _xg.label}</button>
+        <button onClick={() => _xg.handleExport({ rowCount: rows.length, summary: anyFilter ? 'filtered' : undefined, getCsv: exportCsv, filename: `calllens-${queue}-${todayStr()}.csv` })} disabled={loading || !rows.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> {_xg.status === 'none' || _xg.status === 'owner' ? _xg.label + (anyFilter ? ' (filtered)' : '') : _xg.label}</button>
       </div>
 
       {/* KPI cards — reflect the current queue AND the active column filters */}

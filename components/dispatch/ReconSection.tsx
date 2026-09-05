@@ -965,13 +965,7 @@ function OrdersView() {
     const headers = [...COLS.map(c => c.label), 'SKU', 'Net settled']
     const lines = [headers.join(',')]
     for (const r of filtered) lines.push([...COLS.map(c => csvCell(c.get(r))), csvCell(r.sku || ''), csvCell(r.net)].join(','))
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `recon-orders-${win}-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    return lines.join('\n')
   }
 
   const monthName = (mo: string) => ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(mo, 10)] || mo
@@ -1028,7 +1022,7 @@ function OrdersView() {
           }}>{t.label} {loading ? '' : t.n.toLocaleString()}</button>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button onClick={() => _xg.handleExport({ rowCount: filtered.length, summary: anyFilter ? 'filtered' : undefined, doDownload: exportCsv })} disabled={loading || !filtered.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows in this window'} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: filtered.length ? 'var(--text2)' : 'var(--text3)', cursor: filtered.length ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <button onClick={() => _xg.handleExport({ rowCount: filtered.length, summary: anyFilter ? 'filtered' : undefined, getCsv: exportCsv, filename: `recon-orders-${win}-${new Date().toISOString().slice(0, 10)}.csv` })} disabled={loading || !filtered.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows in this window'} style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: filtered.length ? 'var(--text2)' : 'var(--text3)', cursor: filtered.length ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
             <Download size={12} /> {_xg.label}{(_xg.status==='none'||_xg.status==='owner') && anyFilter ? ' (filtered)' : ''}
           </button>
           {anyFilter && (

@@ -181,11 +181,7 @@ export default function AllOrdersTab() {
   const exportCsv = () => {
     const headers = COLS.map(c => c.label)
     const lines = rows.map(r => COLS.map(c => `"${String(c.get(r)).replace(/"/g, '""')}"`).join(','))
-    const csv = [headers.join(','), ...lines].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `all-orders-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    return [headers.join(','), ...lines].join('\n')
   }
 
   return (
@@ -226,7 +222,7 @@ export default function AllOrdersTab() {
             <X size={12} /> Clear filters
           </button>
         )}
-        <button onClick={() => _xg.handleExport({ rowCount: rows.length, doDownload: exportCsv })} disabled={_xg.disabled} style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <button onClick={() => _xg.handleExport({ rowCount: rows.length, getCsv: exportCsv, filename: `all-orders-${new Date().toISOString().slice(0, 10)}.csv` })} disabled={_xg.disabled} style={{ marginLeft: 'auto', padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <Download size={12} /> {_xg.label}
         </button>
       </div>

@@ -508,13 +508,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
       r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN') : '',
     ].map(esc).join(','))
     const csv = [header.join(','), ...lines].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `returns-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    return csv
   }
 
   const patchReturn = async (id: string, patch: Partial<ReturnRow>) => {
@@ -580,7 +574,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
         <button onClick={syncReverse} disabled={revSyncing} style={{ background: revSyncing ? 'var(--bg2)' : 'var(--accent)', border: 'none', borderRadius: 6, color: revSyncing ? 'var(--text3)' : '#fff', cursor: revSyncing ? 'default' : 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
           <RotateCcw size={12} /> {revSyncing ? 'Syncing…' : 'Sync Reverse'}
         </button>
-        <button onClick={() => _xg.handleExport({ rowCount: shownReturns.length, summary: flt.anyFilter ? 'filtered' : undefined, doDownload: exportReturns })} disabled={!shownReturns.length || _xg.disabled} title={flt.anyFilter ? 'Export the filtered rows as CSV' : 'Export the returns list as CSV'} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: shownReturns.length ? 'var(--text2)' : 'var(--text3)', cursor: shownReturns.length ? 'pointer' : 'not-allowed', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
+        <button onClick={() => _xg.handleExport({ rowCount: shownReturns.length, summary: flt.anyFilter ? 'filtered' : undefined, getCsv: exportReturns, filename: `returns-${new Date().toISOString().slice(0, 10)}.csv` })} disabled={!shownReturns.length || _xg.disabled} title={flt.anyFilter ? 'Export the filtered rows as CSV' : 'Export the returns list as CSV'} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: shownReturns.length ? 'var(--text2)' : 'var(--text3)', cursor: shownReturns.length ? 'pointer' : 'not-allowed', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
           <Download size={12} /> {_xg.label}{(_xg.status==='none'||_xg.status==='owner') && subTab === 'returns' && flt.anyFilter ? ' (filtered)' : ''}
         </button>
         {revSyncMsg && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{revSyncMsg}</span>}

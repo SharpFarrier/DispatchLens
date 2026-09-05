@@ -197,7 +197,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [dispWindowLoading, setDispWindowLoading] = useState(false)
   const [dispPage, setDispPage] = useState(0)
   const DISP_PAGE_SIZE = 100
-  const [dispExporting, setDispExporting] = useState(false)
   const [genDocs, setGenDocs] = useState(false)
   const [genProgress, setGenProgress] = useState('')
   // Session-only dispatch checklist — populated after Generate Docs, ticks reset on refresh.
@@ -1785,9 +1784,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     [filteredDispatched, dispPageSafe])
 
   // Export the ENTIRE current filtered window to CSV (not just the visible page).
-  const exportDispatchedCSV = useCallback(() => {
-    setDispExporting(true)
-    try {
+  const exportDispatchedCSV = useCallback((): string => {
       const cols: { key: string; label: string }[] = [
         { key: 'dispatched_at', label: 'Dispatched At' },
         { key: 'order_id', label: 'Order ID' },
@@ -1807,14 +1804,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
       }
       const rows = filteredDispatched.map(o => cols.map(c => esc((o as unknown as Record<string, unknown>)[c.key])).join(','))
-      const csv = [cols.map(c => c.label).join(','), ...rows].join('\n')
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      const stamp = new Date().toISOString().slice(0, 10)
-      a.href = url; a.download = `dispatched-${dispWindow}-${stamp}.csv`
-      a.click(); URL.revokeObjectURL(url)
-    } finally { setDispExporting(false) }
+      return [cols.map(c => c.label).join(','), ...rows].join('\n')
   }, [filteredDispatched, dispWindow])
 
   const scheduledCount = useMemo(() => orders.filter(o => o.plan_decision === 'scheduled' && !o.is_cancelled && !o.is_dispatched).length, [orders])
@@ -1948,7 +1938,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // SKU filter and sort: one row per SKU, a column per period, plus total / stock / short.
   const exportDemandCsv = () => {
     const ud = upcomingDemand
-    if (!ud.totalOrders) return
+    if (!ud.totalOrders) return ''
     const cols: { key: string; label: string; sublabel?: string }[] = demandView === 'weekly' ? ud.weeklyCols : ud.dailyCols
     const stockAvailOf = (sku: string): number | null => { const stk = stockByPlatformSku[sku]; return stk === undefined ? null : stk - (picklistCommittedBySku[sku] || 0) }
     const visibleSkus = demandSkuFilter.size > 0 ? ud.allSkus.filter(s => demandSkuFilter.has(s)) : ud.allSkus
@@ -1970,13 +1960,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       const short = stk === null ? '' : Math.max(0, total - stk)
       lines.push([csvCell(sku), ...cols.map(c => csvCell(getQty(sku, c.key))), csvCell(total), csvCell(stk === null ? 'n/a' : stk), csvCell(short)].join(','))
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `upcoming-demand-${demandView}-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    return lines.join('\n')
   }
 
 
@@ -2363,17 +2347,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
  </Worksheet>
 </Workbook>`
 
-    const blob = new Blob([xml], { type: 'application/vnd.ms-excel' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    const stamp = new Date().toISOString().slice(0, 10)
-    const scope = activeFilter === 'ALL' ? 'all' : activeFilter
-    a.href = url
-    a.download = `dispatch-plan-${scope}-${stamp}.xls`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    return xml
   }
 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
@@ -3161,7 +3135,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 <button onClick={() => loadOrders()} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
                   <RefreshCw size={12} />
                 </button>
-                <button onClick={() => xgPlan.handleExport({ rowCount: filteredActive.length, doDownload: exportPlanXlsx })} disabled={filteredActive.length === 0 || xgPlan.disabled} title="Download current view as Excel" style={{ background: filteredActive.length === 0 ? 'var(--bg2)' : 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: filteredActive.length === 0 ? 'var(--text3)' : 'var(--text2)', cursor: filteredActive.length === 0 ? 'not-allowed' : 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500 }}>
+                <button onClick={() => xgPlan.handleExport({ rowCount: filteredActive.length, getCsv: exportPlanXlsx, filename: `dispatch-plan-${activeFilter === 'ALL' ? 'all' : activeFilter}-${new Date().toISOString().slice(0, 10)}.xls` })} disabled={filteredActive.length === 0 || xgPlan.disabled} title="Download current view as Excel" style={{ background: filteredActive.length === 0 ? 'var(--bg2)' : 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: filteredActive.length === 0 ? 'var(--text3)' : 'var(--text2)', cursor: filteredActive.length === 0 ? 'not-allowed' : 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 500 }}>
                   <Download size={12} /> {xgPlan.label}
                 </button>
                 <button onClick={generateDispatchDocs} disabled={genDocs || filteredActive.length === 0}
@@ -4128,7 +4102,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     }}>{v.charAt(0).toUpperCase() + v.slice(1)}</button>
                   ))}
                 </div>
-                <button onClick={() => xgDemand.handleExport({ rowCount: 0, doDownload: exportDemandCsv })} disabled={xgDemand.disabled} title="Export the demand matrix (current view, filter & sort)" style={{ marginLeft: 'auto', padding: '5px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 500, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text2)' }}>⤓ {xgDemand.label}</button>
+                <button onClick={() => xgDemand.handleExport({ rowCount: 0, getCsv: exportDemandCsv, filename: `upcoming-demand-${demandView}-${new Date().toISOString().slice(0, 10)}.csv` })} disabled={xgDemand.disabled} title="Export the demand matrix (current view, filter & sort)" style={{ marginLeft: 'auto', padding: '5px 14px', borderRadius: 20, cursor: 'pointer', fontSize: 12, fontWeight: 500, background: 'var(--bg2)', border: '1px solid var(--border)', color: 'var(--text2)' }}>⤓ {xgDemand.label}</button>
               </div>
 
               {/* Matrix table */}
@@ -4288,7 +4262,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 </div>
               )}
               {/* Export the full filtered window */}
-              <button onClick={() => xgDispatched.handleExport({ rowCount: filteredDispatched.length, doDownload: exportDispatchedCSV })} disabled={dispExporting || filteredDispatched.length === 0 || xgDispatched.disabled} style={{
+              <button onClick={() => xgDispatched.handleExport({ rowCount: filteredDispatched.length, getCsv: exportDispatchedCSV, filename: `dispatched-${dispWindow}-${new Date().toISOString().slice(0, 10)}.csv` })} disabled={filteredDispatched.length === 0 || xgDispatched.disabled} style={{
                 padding: '6px 13px', borderRadius: 7, border: '1px solid var(--border)', cursor: filteredDispatched.length === 0 ? 'default' : 'pointer',
                 background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
               }}><Download size={13} /> {xgDispatched.status==='none'||xgDispatched.status==='owner' ? `${xgDispatched.label} (${filteredDispatched.length})` : xgDispatched.label}</button>
