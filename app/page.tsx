@@ -39,13 +39,17 @@ export default async function Home() {
     return <AccessGate status={access?.status || 'pending'} email={email} user={user} />
   }
 
-  // Load ALL active orders across all sessions — no date boundary.
-  // Page past Supabase's 1000-row cap so initialOrders is complete (master DB).
+  // Fast initial paint: server-load ONLY the active pool (Plan/Import land here) so the page
+  // renders immediately instead of blocking on every dispatched row. The client then loads the
+  // full set (dispatched, search, All Orders, import de-dup) in the background on mount.
+  // Active is well under the 1000-row cap, but we still page defensively.
   const orders: DBOrder[] = []
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('dispatch_orders')
       .select('*')
+      .eq('is_dispatched', false)
+      .eq('is_cancelled', false)
       .order('created_at', { ascending: false })
       .range(from, from + 999)
     if (error) break
