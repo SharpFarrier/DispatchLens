@@ -552,10 +552,19 @@ function ChargesView() {
         if (r.settlement_date && !payDate[oid]) payDate[oid] = r.settlement_date
       }
     }
-    const out: ChargeRow[] = (orders || []).filter(o => o.order_id).map(o => {
-      const oid = o.order_id.trim(); const plat = platformOf(oid); const lines = byOrder[oid]
-      return { order_id: o.order_id, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null }
-    })
+    // ONE row per unique order_id. Multi-piece orders span several dispatch_orders rows with
+    // the same order_id; without deduping we'd render the order 2-5 times (duplicate rows AND
+    // duplicate React keys, which makes rows stick on filter changes).
+    const seenOids = new Set<string>()
+    const out: ChargeRow[] = []
+    for (const o of (orders || [])) {
+      if (!o.order_id) continue
+      const oid = o.order_id.trim()
+      if (seenOids.has(oid)) continue
+      seenOids.add(oid)
+      const plat = platformOf(oid); const lines = byOrder[oid]
+      out.push({ order_id: o.order_id, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null })
+    }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
   useEffect(() => { if (win !== 'custom') void loadWindow() }, [win, loadWindow])
