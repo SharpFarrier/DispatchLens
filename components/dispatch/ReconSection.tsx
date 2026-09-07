@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type React
 import { createClient } from '@/lib/supabase/client'
 import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
-import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X, Download, Search } from 'lucide-react'
+import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X, Download, Search, Calendar, ChevronLeft } from 'lucide-react'
 import {
   parseAmazonText, parseFlipkartBuffer, readFileText, readFileBuffer,
   parseRazorpayText, parseCashfreeText, detectWebsiteAggregator,
@@ -492,6 +492,80 @@ interface ChargeRow {
 }
 type ChgCol = { key: string; label: string; type: 'text' | 'category' | 'number' | 'date'; align?: 'right'; get: (r: ChargeRow) => string | number; render?: (r: ChargeRow) => ReactNode }
 
+function DateRangePicker({ from, to, onApply }: { from: string; to: string; onApply: (from: string, to: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState(() => { const d = from ? new Date(from + 'T00:00:00') : new Date(); return { y: d.getFullYear(), m: d.getMonth() } })
+  const [pick, setPick] = useState<{ start: string | null; end: string | null }>({ start: from || null, end: to || null })
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  const iso = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  const fmt = (d: string) => { if (!d) return ''; const dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
+  const label = from && to ? `${fmt(from)} \u2013 ${fmt(to)} ${new Date(to + 'T00:00:00').getFullYear()}` : 'Pick a range'
+
+  const clickDay = (day: string) => {
+    if (!pick.start || pick.end) {
+      setPick({ start: day, end: null })
+    } else {
+      let a = pick.start, b = day
+      if (b < a) { const t = a; a = b; b = t }
+      setPick({ start: a, end: b })
+      onApply(a, b)          // auto-load on end selection
+      setOpen(false)
+    }
+  }
+
+  const daysInMonth = new Date(view.y, view.m + 1, 0).getDate()
+  const firstDow = new Date(view.y, view.m, 1).getDay()
+  const monthName = new Date(view.y, view.m, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+  const prevMonth = () => setView(v => v.m === 0 ? { y: v.y - 1, m: 11 } : { y: v.y, m: v.m - 1 })
+  const nextMonth = () => setView(v => v.m === 11 ? { y: v.y + 1, m: 0 } : { y: v.y, m: v.m + 1 })
+  const cells: (number | null)[] = [...Array(firstDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
+  const inRange = (d: string) => pick.start && pick.end && d > pick.start && d < pick.end
+  const isEnd = (d: string) => d === pick.start || d === pick.end
+
+  return (
+    <div style={{ position: 'relative' as const }} ref={ref}>
+      <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
+        <Calendar size={14} style={{ color: 'var(--text3)' }} />
+        <span style={{ fontFamily: 'DM Mono' }}>{label}</span>
+        <ChevronDown size={13} style={{ color: 'var(--text3)' }} />
+      </button>
+      {open && (
+        <div style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, zIndex: 60, width: 300, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 12, boxShadow: '0 8px 28px rgba(0,0,0,0.16)', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <button onClick={prevMonth} style={{ width: 28, height: 28, padding: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer' }}><ChevronLeft size={15} /></button>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{monthName}</span>
+            <button onClick={nextMonth} style={{ width: 28, height: 28, padding: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer' }}><ChevronRight size={15} /></button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, textAlign: 'center' as const }}>
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i} style={{ fontSize: 11, color: 'var(--text3)', padding: '4px 0' }}>{d}</div>)}
+            {cells.map((day, i) => {
+              if (day == null) return <div key={i} />
+              const d = iso(view.y, view.m, day)
+              const end = isEnd(d), mid = inRange(d)
+              return (
+                <div key={i} onClick={() => clickDay(d)} style={{ padding: '6px 0', fontSize: 13, cursor: 'pointer', borderRadius: 8,
+                  background: end ? 'var(--accent)' : mid ? 'var(--accent-bg)' : 'transparent',
+                  color: end ? '#fff' : mid ? 'var(--accent)' : 'var(--text)', fontWeight: end ? 700 : 400 }}>{day}</div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{pick.start ? fmt(pick.start) : 'start'} \u2013 {pick.end ? fmt(pick.end) : 'end'}</span>
+            {pick.start && !pick.end && <span style={{ fontSize: 11, color: 'var(--text3)' }}>pick end date</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ChargesView() {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
@@ -567,7 +641,7 @@ function ChargesView() {
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
-  useEffect(() => { if (win !== 'custom') void loadWindow() }, [win, loadWindow])
+  useEffect(() => { if (win !== 'custom') void loadWindow(); else if (customFrom && customTo) void loadWindow() }, [win, customFrom, customTo, loadWindow])
 
   const fmt = (d: string | null) => { if (!d) return '—'; const s = String(d); const dt = new Date(s.length <= 10 ? s + 'T00:00:00' : s); return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
   const money = (n: number | null | undefined) => (n == null || n === 0) ? '—' : Math.round(n).toLocaleString('en-IN')
@@ -633,12 +707,7 @@ function ChargesView() {
           {winBtns.map(([k, l]) => segBtn(win === k, l, () => setWin(k)))}
         </div>
         {win === 'custom' && (
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12 }} />
-            <span style={{ color: 'var(--text3)', fontSize: 12 }}>to</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12 }} />
-            <button onClick={() => void loadWindow()} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Load</button>
-          </div>
+          <DateRangePicker from={customFrom} to={customTo} onApply={(f, t) => { setCustomFrom(f); setCustomTo(t) }} />
         )}
       </div>
 
@@ -872,7 +941,7 @@ function OrdersView() {
   }, [supabase, win, customFrom, customTo, range])
 
   // Auto-load on mount + when a preset window changes (custom waits for the Load button).
-  useEffect(() => { if (win !== 'custom') void loadWindow() }, [win, loadWindow])
+  useEffect(() => { if (win !== 'custom') void loadWindow(); else if (customFrom && customTo) void loadWindow() }, [win, customFrom, customTo, loadWindow])
 
   const fmt = (d: string | number | null) => { if (!d) return '—'; const s = String(d); const iso = s.length <= 10 ? s + 'T00:00:00' : s; const dt = new Date(iso); return isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) }
   const money = (n: number | null) => n != null ? Math.round(n).toLocaleString('en-IN') : '—'
@@ -1012,12 +1081,7 @@ function OrdersView() {
           ))}
         </div>
         {win === 'custom' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
-            <span style={{ color: 'var(--text3)', fontSize: 12 }}>→</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
-            <button onClick={() => loadWindow()} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Load</button>
-          </div>
+          <DateRangePicker from={customFrom} to={customTo} onApply={(f, t) => { setCustomFrom(f); setCustomTo(t) }} />
         )}
       </div>
 
