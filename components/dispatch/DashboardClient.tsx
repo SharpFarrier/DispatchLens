@@ -212,7 +212,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [trackingData, setTrackingData] = useState<Record<string, TrackResult>>({})
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [trackingProgress, setTrackingProgress] = useState<{ done: number; total: number } | null>(null)
-  const [trackingLastSync, setTrackingLastSync] = useState<Date | null>(null)
+  const [trackingLastSync, setTrackingLastSync] = useState<Date | null>(() => {
+    try { const v = typeof window !== 'undefined' ? localStorage.getItem('dl_track_sync') : null; return v ? new Date(v) : null } catch { return null }
+  })
+  const autoSyncedRef = useRef(false)
   const [daysFilter, setDaysFilter] = useState<Set<number>>(new Set())
   const [showDaysPopover, setShowDaysPopover] = useState(false)
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 })
@@ -1187,11 +1190,27 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setOrders(prev => prev.map(o => ids.includes(o.id) ? { ...o, manifested_at: manifestedNow } : o))
   }
 
+  // Auto-sync tracking: when an admin/owner opens the Dispatched tab and the last sync is
+  // stale (>1h), run it once automatically. Throttled via localStorage so a reload doesn't
+  // re-trigger; reset when leaving the tab so a later revisit can sync again.
+  const AUTO_SYNC_STALE_MS = 60 * 60 * 1000
+  useEffect(() => {
+    if (tab !== 'dispatched') { autoSyncedRef.current = false; return }
+    if (autoSyncedRef.current || trackingLoading) return
+    if (!(isOwner || effectiveAccess.can_users)) return
+    if (!trackOrders.length) return
+    const stale = !trackingLastSync || (Date.now() - trackingLastSync.getTime() > AUTO_SYNC_STALE_MS)
+    if (!stale) return
+    autoSyncedRef.current = true
+    void syncTracking()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, trackOrders, trackingLastSync, trackingLoading, isOwner, effectiveAccess.can_users])
+
   // ── Sync tracking (courier engine lives in @/lib/tracking) ──
   const syncTracking = async () => {
     // Skip orders already delivered (status never changes after delivery)
     const toTrack = trackOrders.filter(o => o.tracking_number && o.tracking_status !== 'delivered' && o.tracking_status !== 'rto')
-    if (!toTrack.length) { setTrackingLastSync(new Date()); return }
+    if (!toTrack.length) { const _n = new Date(); setTrackingLastSync(_n); try { localStorage.setItem('dl_track_sync', _n.toISOString()) } catch {}; return }
     setTrackingLoading(true)
     setTrackingProgress({ done: 0, total: toTrack.length })
     let results: Record<string, TrackResult> = {}
@@ -1278,7 +1297,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       setTrackOrders(prev => patch(prev))
     }
     setTrackingData(results)
-    setTrackingLastSync(new Date())
+    const _now = new Date(); setTrackingLastSync(_now); try { localStorage.setItem('dl_track_sync', _now.toISOString()) } catch {}
     setTrackingLoading(false)
     setTrackingProgress(null)
   }
