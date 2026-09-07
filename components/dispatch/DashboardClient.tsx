@@ -26,6 +26,7 @@ const AllOrdersTab = dynamic(() => import('./AllOrdersTab'), { loading: TabLoadi
 const CallLensTab = dynamic(() => import('./CallLensTab'), { loading: TabLoading })
 const UsersTab = dynamic(() => import('./UsersTab'), { loading: TabLoading })
 const SkuMapTab = dynamic(() => import('./SkuMapTab'), { loading: TabLoading })
+const HandlingTimeTab = dynamic(() => import('./HandlingTimeTab'), { loading: TabLoading })
 const ReturnsTab = dynamic(() => import('./ReturnsTab'), { loading: TabLoading })
 const CargoTokenPanel = dynamic(() => import('./CargoTokenPanel'))
 const WarehouseSection = dynamic(() => import('./WarehouseSection'), { loading: TabLoading })
@@ -59,7 +60,7 @@ function orderLatestUpdate(o: DBOrder): { label: string; tone: 'success' | 'warn
   return { label: o.plan_decision ? o.plan_decision.replace(/^\w/, (c: string) => c.toUpperCase()) : 'Pending', tone: 'muted', detail: '' }
 }
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users'
+type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users'
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -2760,6 +2761,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'allorders', label: 'All Orders', show: effectiveAccess.can_allorders },
             { key: 'calllens', label: 'CallLens', show: effectiveAccess.can_calllens },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
+            { key: 'handling', label: 'Handling Time', show: true },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'recon', label: 'Recon', show: effectiveAccess.can_recon },
             { key: 'otdr', label: 'OTDR', show: effectiveAccess.can_otdr },
@@ -5256,6 +5258,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {/* ════ SKU MAP ════ */}
         {tab === 'skumap' && effectiveAccess.can_users && (
           <SkuMapTab />
+        )}
+        {tab === 'handling' && (
+          <HandlingTimeTab userEmail={user.email || ''} />
         )}
 
         {/* ════ WAREHOUSE ════ */}
