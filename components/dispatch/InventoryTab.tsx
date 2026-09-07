@@ -212,7 +212,9 @@ export default function InventoryTab() {
           <p>{lowOnly ? 'No low-stock SKUs' : 'No packed inventory yet'}</p>
         </div>
       ) : (
-        <div style={{ ...card, overflow: 'hidden' }}>
+        <>
+        <style>{`@media (max-width: 640px){ .dl-inv-tbl{display:none!important;} .dl-inv-cards{display:flex!important;} }`}</style>
+        <div className="dl-inv-tbl" style={{ ...card, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 360px)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 560 }}>
               <thead style={{ position: 'sticky' as const, top: 0, zIndex: 10 }}>
@@ -312,6 +314,51 @@ export default function InventoryTab() {
             </table>
           </div>
         </div>
+
+        {/* Mobile: one card per SKU (Stocked + target big, rest on tap). Hidden on desktop. */}
+        <div className="dl-inv-cards" style={{ display: 'none', flexDirection: 'column' as const, gap: 10 }}>
+          {filtered.map(r => {
+            const rate = runRate.rateBySku[r.sku] || 0
+            const target = Math.ceil(rate * targetDays)
+            const short = target > r.stocked
+            const img = productImage(r.product || '')
+            const isOpen = expanded === r.sku
+            return (
+              <div key={r.sku} style={{ ...card, padding: 12 }}>
+                <div onClick={() => toggleExpand(r.sku)} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+                  <div style={{ width: 52, height: 52, borderRadius: 10, background: 'var(--bg2)', flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {img ? <img src={img} alt={r.product || r.sku} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' as const, display: 'block' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} /> : <Package size={24} style={{ color: 'var(--text3)' }} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.3, display: 'flex', alignItems: 'center', gap: 6 }}>{r.descr}{r.low && (r.stocked + r.packed) > 0 && <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '1px 6px', borderRadius: 4 }}>LOW</span>}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{r.sku}</div>
+                  </div>
+                  <span style={{ fontSize: 20, color: 'var(--text3)', transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>&#8250;</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <div style={{ flex: 1, background: r.stocked > 0 ? 'var(--dispatched-bg)' : 'var(--bg2)', borderRadius: 10, padding: 10, textAlign: 'center' as const }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'DM Mono', color: r.stocked > 0 ? 'var(--dispatched)' : 'var(--text3)' }}>{r.stocked}</div>
+                    <div style={{ fontSize: 13, color: r.stocked > 0 ? 'var(--dispatched)' : 'var(--text3)' }}>Stocked</div>
+                  </div>
+                  <div style={{ flex: 1, background: target === 0 ? 'var(--bg2)' : short ? 'var(--critical-bg)' : 'var(--dispatched-bg)', borderRadius: 10, padding: 10, textAlign: 'center' as const }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'DM Mono', color: target === 0 ? 'var(--text3)' : short ? 'var(--critical)' : 'var(--dispatched)' }}>{target > 0 ? target : '\u2014'}{short && target > 0 ? ' \u25B2' : ''}</div>
+                    <div style={{ fontSize: 13, color: target === 0 ? 'var(--text3)' : short ? 'var(--critical)' : 'var(--dispatched)' }}>{targetDays}d target</div>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 16px', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                    {isAdmin && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span style={{ color: 'var(--text3)' }}>Rate/day</span><span style={{ fontFamily: 'DM Mono' }}>{rate > 0 ? rate.toFixed(1) : '\u2014'}</span></div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span style={{ color: 'var(--text3)' }}>Packed</span><span style={{ fontFamily: 'DM Mono', color: 'var(--accent)' }}>{r.packed}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span style={{ color: 'var(--text3)' }}>In-disp</span><span style={{ fontFamily: 'DM Mono' }}>{r.in_dispatch}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span style={{ color: 'var(--text3)' }}>Disp</span><span style={{ fontFamily: 'DM Mono' }}>{r.dispatched}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}><span style={{ color: 'var(--text3)' }}>RTO</span><span style={{ fontFamily: 'DM Mono' }}>{r.rto}</span></div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        </>
       )}
 
       {/* ── Fulfillment waterfall: pending orders vs frame supply ── */}
