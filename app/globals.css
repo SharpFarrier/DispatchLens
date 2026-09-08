@@ -97,3 +97,15 @@ tbody tr:hover { background: var(--surface2); }
   .print-area { padding: 0; }
   .print-hide { display: none !important; }
 }
+
+/* ── Redesign sidebar shell ── */
+.dl-app-root.sidebar-on { flex-direction: row !important; align-items: stretch; }
+.sidebar-on .dl-logo, .sidebar-on .dl-nav { display: none !important; }
+.sidebar-on .dl-right { margin-left: auto; }
+.dl-mobile-substrip, .dl-mobile-bottombar { display: none; }
+@media (max-width: 860px) {
+  .dl-sidebar { display: none !important; }
+  .dl-mobile-substrip { display: flex !important; }
+  .dl-mobile-bottombar { display: flex !important; }
+  .dl-content-wrap { padding-bottom: 62px; }
+}

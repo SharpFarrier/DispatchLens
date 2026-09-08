@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import Badge, { tierVariant } from './Badge'
 import DrumDatePicker from './DrumDatePicker'
+import Sidebar, { type NavItem } from './Sidebar'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
@@ -2374,9 +2375,27 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
+  const navItems: NavItem[] = [
+    { key: 'import', label: 'Import', count: 0, section: 'orders', show: effectiveAccess.can_import },
+    { key: 'plan', label: 'Plan', count: activeOrders.length, section: 'orders', show: effectiveAccess.can_plan },
+    { key: 'review', label: 'Review', count: reviewCount, section: 'orders', show: effectiveAccess.can_review },
+    { key: 'eod', label: 'EOD', section: 'orders', show: effectiveAccess.can_eod },
+    { key: 'dispatched', label: 'Dispatched', count: fullLoaded ? dispatchedOrders.length : (dispatchedCount ?? dispatchedOrders.length), section: 'orders', show: effectiveAccess.can_dispatched },
+    { key: 'picklist', label: 'Picklist', count: dispatchTodayCount, section: 'orders', show: effectiveAccess.can_picklist },
+    { key: 'returns', label: 'Returns', section: 'orders', show: effectiveAccess.can_returns },
+    { key: 'allorders', label: 'All Orders', section: 'orders', show: effectiveAccess.can_allorders },
+    { key: 'calllens', label: 'CallLens', section: 'orders', show: effectiveAccess.can_calllens },
+    { key: 'recon', label: 'Recon', section: 'orders', show: effectiveAccess.can_recon },
+    { key: 'otdr', label: 'OTDR', section: 'orders', show: effectiveAccess.can_otdr },
+    { key: 'handling', label: 'Handling Time', section: 'orders', show: true },
+    { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', count: 0, section: 'orders', show: true },
+    { key: 'warehouse', label: 'Warehouse', section: 'warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
+    { key: 'skumap', label: 'SKU Map', section: 'settings', show: effectiveAccess.can_users },
+    { key: 'users', label: 'Users', section: 'settings', show: effectiveAccess.can_users },
+  ]
   return (
     <DeviceGate userEmail={user.email || ''} isOwner={isOwner}>
-    <div className="dl-app-root" style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false); setShowDispatchedCourierPopover(false) }}>
+    <div className="dl-app-root sidebar-on" style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'row' as const }} onClick={() => { setShowDaysPopover(false); setShowCourierPopover(false); setShowDispatchDatePopover(false); setShowDispatchedDatePopover(false); setShowSkuPopover(false); setShowDispatchedStatusPopover(false); setShowDispatchedCourierPopover(false) }}>
 
       {/* ── Modals ── */}
 
@@ -2720,6 +2739,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           @page { size: A4; margin: 12mm; }
         }
       `}</style>
+      <Sidebar items={navItems} tab={tab} setTab={(k) => setTab(k as Tab)} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />
+      <div className="dl-content-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, minHeight: '100vh' }}>
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
           <div style={{ width: 30, height: 30, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14, color: '#fff' }}>D</div>
@@ -5471,6 +5492,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           ))}
         </div>
       )}
+      </div>
     </div>
     </DeviceGate>
   )
