@@ -10,6 +10,7 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
   { key: 'can_review',   label: 'Review',   desc: 'Assign target dates, cancel orders' },
   { key: 'can_picklist', label: 'Picklist', desc: 'View picklist, mark SKU unfulfillable' },
   { key: 'can_eod',      label: 'EOD',      desc: 'Upload Shypassist, confirm dispatch' },
+  { key: 'can_eod_reconcile', label: 'EOD Reconcile', desc: 'Return leftover picked pieces to stock' },
   { key: 'can_dispatched', label: 'Dispatched', desc: 'View dispatched orders, sync tracking' },
   { key: 'can_returns',  label: 'Returns',  desc: 'Returns tracker & refunds' },
   { key: 'can_allorders', label: 'All Orders', desc: 'All orders view (every status + platform)' },

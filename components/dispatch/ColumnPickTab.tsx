@@ -47,26 +47,25 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
       if (!c) continue
       dem[c][k] = (dem[c][k] || 0) + 1
     }
-    // Picked today, split by the piece's original courier isn't stored; we track picked per sku
-    // and also per courier via stock_movements? Simpler: count picked pieces today per sku, and
-    // allocate against the selected courier as the picker works. We keep a per-courier tally in
-    // state as they scan; on load we seed it from packed_units picked today by sku, attributed
-    // to demand proportionally is unreliable — instead seed per-courier from today's movements.
+    // "Already picked" = pieces CURRENTLY in 'picked' status (ANY day). A piece that was
+    // dispatched flips to 'dispatched', so status='picked' == picked-and-not-yet-dispatched.
+    // Counting these (not just today's) means a piece picked yesterday but not dispatched still
+    // satisfies today's demand -> no double-pick. (Fix 1.)
     const pk = await fetchAllRows<{ sku: string | null }>((from, to) =>
-      supabase.from('packed_units').select('sku').eq('status', 'picked').gte('picked_at', today + 'T00:00:00').range(from, to))
+      supabase.from('packed_units').select('sku').eq('status', 'picked').range(from, to))
     const pkc: Record<string, number> = {}
     for (const r of pk) { const k = (r.sku || '').trim(); if (k) pkc[k] = (pkc[k] || 0) + 1 }
-    // seed per-courier picked from stock_movements (direction 'pick') today, matched to courier by demand presence
-    const moves = await fetchAllRows<{ sku: string | null; at: string | null }>((from, to) =>
-      supabase.from('stock_movements').select('sku, at').eq('direction', 'pick').gte('at', today + 'T00:00:00').range(from, to))
-    // We can't know which courier each historical pick was for; attribute to whichever courier needs the sku
-    // (Delhivery first). This is a best-effort seed; live picks below are attributed to the selected courier.
+    // Attribute the picked count to couriers by demand (Delhivery first), since pieces aren't
+    // courier-tagged. Excess over total demand (over-picked leftovers) stays unattributed.
     const pbc: Record<Courier, Record<string, number>> = { Delhivery: {}, Bluedart: {} }
-    for (const m of moves) {
-      const k = (m.sku || '').trim(); if (!k) continue
-      const needD = (dem.Delhivery[k] || 0) - (pbc.Delhivery[k] || 0)
-      if (needD > 0) pbc.Delhivery[k] = (pbc.Delhivery[k] || 0) + 1
-      else pbc.Bluedart[k] = (pbc.Bluedart[k] || 0) + 1
+    for (const k of Object.keys(pkc)) {
+      let remaining = pkc[k]
+      for (const c of ['Delhivery', 'Bluedart'] as Courier[]) {
+        const need = Math.max(0, (dem[c][k] || 0) - (pbc[c][k] || 0))
+        const take = Math.min(remaining, need)
+        if (take > 0) { pbc[c][k] = (pbc[c][k] || 0) + take; remaining -= take }
+        if (remaining <= 0) break
+      }
     }
     // product names
     const maps = await fetchAllRows<{ master_sku: string; product_name: string | null }>((from, to) =>

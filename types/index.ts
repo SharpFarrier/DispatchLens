@@ -14,6 +14,7 @@ export interface UserAccess {
   can_review: boolean
   can_picklist: boolean
   can_eod: boolean
+  can_eod_reconcile: boolean
   can_dispatched: boolean
   can_returns: boolean
   can_allorders: boolean

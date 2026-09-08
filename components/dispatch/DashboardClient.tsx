@@ -19,7 +19,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download, Flag } from 'lucide-react'
+  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download, Flag, Undo2 } from 'lucide-react'
 
 // Non-Plan tabs are code-split so they are NOT in the initial bundle (which lands on
 // Plan). Each loads its own chunk the first time it's opened — this also keeps jsPDF and
@@ -139,7 +139,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
+    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
     : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
@@ -314,6 +314,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   } | null>(null)
   const [showEodConfirm, setShowEodConfirm] = useState(false)
   const [eodDone, setEodDone] = useState(false)
+  // EOD reconcile leftover picks (picked but not dispatched -> back to stock)
+  const [leftoverPicks, setLeftoverPicks] = useState<Record<string, number>>({})
+  const [reconcileQty, setReconcileQty] = useState<Record<string, number>>({})
+  const [reconcileOpen, setReconcileOpen] = useState(false)
+  const [reconciling, setReconciling] = useState(false)
 
   const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -697,6 +702,34 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, is_priority: !current } : o))
   }
 
+  // ── EOD: leftover picks (pieces currently in 'picked' status = picked, not dispatched) ──
+  const loadLeftoverPicks = useCallback(async () => {
+    const pk = await fetchAllRows<{ sku: string | null }>((from, to) =>
+      supabase.from('packed_units').select('sku').eq('status', 'picked').range(from, to))
+    const m: Record<string, number> = {}
+    for (const r of pk) { const k = (r.sku || '').trim(); if (k) m[k] = (m[k] || 0) + 1 }
+    setLeftoverPicks(m)
+    setReconcileQty(prev => { const q: Record<string, number> = {}; for (const k of Object.keys(m)) q[k] = prev[k] ?? m[k]; return q })
+  }, [supabase])
+
+  const runReconcile = async () => {
+    setReconciling(true)
+    try {
+      const now = new Date().toISOString()
+      for (const sku of Object.keys(reconcileQty)) {
+        const qty = Math.min(reconcileQty[sku] || 0, leftoverPicks[sku] || 0)
+        if (qty <= 0) continue
+        const { data: pieces } = await supabase.from('packed_units').select('id, barcode, column_code').eq('sku', sku).eq('status', 'picked').limit(qty)
+        for (const p of (pieces || [])) {
+          await supabase.from('packed_units').update({ status: 'stocked', picked_at: null }).eq('id', p.id).eq('status', 'picked')
+          await supabase.from('stock_movements').insert({ barcode: p.barcode, column_code: p.column_code ?? null, direction: 'in', sku, bypassed: false, by_email: user.email || null })
+        }
+      }
+      await loadLeftoverPicks()
+      setReconcileOpen(false)
+    } finally { setReconciling(false) }
+  }
+
   // ── Manual cancel ──
   const handleManualCancel = async () => {
     if (!cancelOrderId) return
@@ -810,6 +843,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   useEffect(() => {
     if (tab !== 'eod' && tab !== 'dispatched') return
     silentRefreshOrders()
+    if (tab === 'eod') void loadLeftoverPicks()
     const iv = setInterval(() => {
       if (!scanOrder) silentRefreshOrders()
     }, 15000)
@@ -4848,6 +4882,47 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {tab === 'eod' && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24, maxWidth: 700 }}>
             <h1 style={{ fontSize: 18, fontWeight: 600 }}>End of Day — {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</h1>
+
+            {/* Reconcile leftover picks — picked but not dispatched -> back to stock */}
+            {effectiveAccess.can_eod_reconcile && Object.keys(leftoverPicks).length > 0 && (() => {
+              const totalLeft = Object.values(leftoverPicks).reduce((a, b) => a + b, 0)
+              const totalReturn = Object.keys(reconcileQty).reduce((a, k) => a + Math.min(reconcileQty[k] || 0, leftoverPicks[k] || 0), 0)
+              return (
+                <div style={{ border: '1px solid #fed7aa', background: 'var(--today-bg)', borderRadius: 12, padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Undo2 size={16} style={{ color: 'var(--today)' }} />
+                    <div style={{ flex: 1, fontSize: 13, color: 'var(--today)' }}><b>{totalLeft} piece{totalLeft === 1 ? '' : 's'} picked but not dispatched.</b> Return the ones that won&apos;t go out to stock so they&apos;re free for the next picklist.</div>
+                    <button onClick={() => setReconcileOpen(o => !o)} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>{reconcileOpen ? 'Hide' : 'Reconcile leftover picks'}</button>
+                  </div>
+                  {reconcileOpen && (
+                    <div style={{ marginTop: 12, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' as const, background: 'var(--surface)' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, padding: '8px 14px', background: 'var(--bg2)', fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>
+                        <span>SKU</span><span>Picked</span><span style={{ textAlign: 'center' as const }}>Return</span>
+                      </div>
+                      {Object.keys(leftoverPicks).sort().map(sku => {
+                        const have = leftoverPicks[sku]; const q = Math.min(reconcileQty[sku] ?? have, have)
+                        const setQ = (v: number) => setReconcileQty(prev => ({ ...prev, [sku]: Math.max(0, Math.min(have, v)) }))
+                        return (
+                          <div key={sku} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, alignItems: 'center', padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 500 }}>{sku}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text3)' }}>{have}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <button onClick={() => setQ(q - 1)} style={{ width: 26, height: 26, padding: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer' }}>&minus;</button>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, width: 18, textAlign: 'center' as const, color: q === 0 ? 'var(--text3)' : 'var(--text)' }}>{q}</span>
+                              <button onClick={() => setQ(q + 1)} style={{ width: 26, height: 26, padding: 0, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer' }}>+</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: 12, color: 'var(--text3)' }}>Set 0 to keep a piece picked (going tomorrow).</span>
+                        <button onClick={runReconcile} disabled={reconciling || totalReturn === 0} style={{ marginLeft: 'auto', padding: '8px 16px', borderRadius: 8, border: 'none', background: totalReturn === 0 ? 'var(--bg2)' : 'var(--accent)', color: totalReturn === 0 ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 600, cursor: totalReturn === 0 || reconciling ? 'default' : 'pointer' }}>{reconciling ? 'Returning…' : `Return ${totalReturn} to stock`}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Dispatch performance strip */}
             {(() => {
