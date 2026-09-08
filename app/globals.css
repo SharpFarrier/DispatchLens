@@ -104,7 +104,9 @@ tbody tr:hover { background: var(--surface2); }
 .sidebar-on .dl-right { margin-left: auto; }
 .dl-mobile-substrip, .dl-mobile-bottombar { display: none; }
 @media (max-width: 860px) {
+  .dl-app-root.sidebar-on { flex-direction: column !important; align-items: stretch !important; }
   .dl-sidebar { display: none !important; }
+  .dl-mobile-substrip button { align-self: center; }
   .dl-mobile-substrip { display: flex !important; }
   .dl-mobile-bottombar { display: flex !important; }
   .dl-content-wrap { padding-bottom: 62px; }
