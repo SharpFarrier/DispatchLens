@@ -1,4 +1,5 @@
 'use client'
+import { usePathname, useRouter } from 'next/navigation'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import dynamic from 'next/dynamic'
@@ -64,6 +65,27 @@ function orderLatestUpdate(o: DBOrder): { label: string; tone: 'success' | 'warn
 }
 
 type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users'
+
+// ── URL <-> tab sync (Option B: real bookmarkable URLs over the tab-state model) ──
+const SECTION_OF: Record<string, 'orders' | 'warehouse' | 'settings'> = {
+  import: 'orders', plan: 'orders', review: 'orders', eod: 'orders', dispatched: 'orders',
+  picklist: 'orders', returns: 'orders', allorders: 'orders', calllens: 'orders', recon: 'orders',
+  otdr: 'orders', handling: 'orders', reports: 'orders', skumap: 'settings', users: 'settings',
+}
+const WH_SUBS = ['stock', 'coating', 'picking', 'inventory', 'barcodes', 'packing']
+const TAB_KEYS = Object.keys(SECTION_OF)
+function pathToState(pathname: string): { tab: string; wt?: string } {
+  const segs = pathname.split('/').filter(Boolean)
+  if (segs.length === 0) return { tab: 'plan' }              // '/' -> default landing
+  const last = segs[segs.length - 1].toLowerCase()
+  if (WH_SUBS.includes(last)) return { tab: 'warehouse', wt: last }
+  if (TAB_KEYS.includes(last)) return { tab: last }
+  return { tab: 'plan' }                                     // unknown -> default
+}
+function stateToPath(tab: string, wt: string): string {
+  if (tab === 'warehouse') return `/warehouse/${wt}`
+  return `/${SECTION_OF[tab] || 'orders'}/${tab}`
+}
 type ActiveFilter = 'ALL' | UrgencyTier | 'scheduled' | 'scheduled_today' | 'slipped' | 'hold' | 'unfulfillable' | 'undecided' | 'unmapped'
 
 interface Props {
@@ -132,6 +154,23 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const itemInputRef = useRef<HTMLInputElement>(null)
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
   const [warehouseTab, setWarehouseTab] = useState<'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'>('stock')
+  const pathname = usePathname()
+  const router = useRouter()
+  const stateNavReady = useRef(false)
+  // URL -> state: on mount, back/forward, and deep links.
+  useEffect(() => {
+    const st = pathToState(pathname)
+    if (st.tab !== tab) setTab(st.tab as Tab)
+    if (st.wt && st.wt !== warehouseTab) setWarehouseTab(st.wt as typeof warehouseTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
+  // state -> URL: in-app navigation. Skips the initial mount run so it doesn't fight URL->state.
+  useEffect(() => {
+    if (!stateNavReady.current) { stateNavReady.current = true; return }
+    const p = stateToPath(tab, warehouseTab)
+    if (p !== pathname) { if (pathname === '/') router.replace(p); else router.push(p) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, warehouseTab])
   const xgDispatched = useExportGate('dispatched', 'Dispatched export')
   const xgDemand = useExportGate('demand', 'Upcoming-demand export')
   const xgPlan = useExportGate('plan', 'Dispatch-plan export')
