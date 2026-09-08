@@ -3427,8 +3427,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             style={{
                               background: 'var(--bg2)',
                               padding: '9px 12px', textAlign: 'left' as const,
-                              color: sortCol === col ? 'var(--accent)' : 'var(--text3)',
-                              fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500,
+                              color: sortCol === col ? 'var(--accent-solid)' : 'var(--ink-2)',
+                              fontSize: 11, fontFamily: 'var(--font-sans)', fontWeight: 600,
+                              textTransform: 'uppercase' as const, letterSpacing: '0.06em',
+                              borderBottom: '1px solid var(--line)',
                               whiteSpace: 'nowrap' as const,
                               cursor: col ? 'pointer' : 'default',
                               userSelect: 'none' as const,
@@ -5552,18 +5554,16 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       <td style={{ padding: '8px 12px', maxWidth: 160 }}><span style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block', maxWidth: 150 }}>{order.customer_name}</span></td>
       <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3 }}>
-          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, alignSelf: 'flex-start' as const }}>{order.barcode_sku || order.sku}</span>
+          <span style={{ alignSelf: 'flex-start' as const }}><Badge variant="sku">{order.barcode_sku || order.sku}</Badge></span>
           {order.barcode_sku && stockCount !== null && stockCount !== undefined && (() => {
             const need = neededCount ?? 0
             const diff = stockCount - need
             const short = diff < 0
-            const surplusColor = 'var(--dispatched)'  // enough
-            const shortColor = 'var(--critical)'       // short
             return (
-              <span style={{ fontFamily: 'DM Mono', fontSize: 10, whiteSpace: 'nowrap' as const }}>
-                <span style={{ color: stockCount > 0 ? 'var(--text2)' : 'var(--critical)', fontWeight: 600 }}>{stockCount} stock</span>
-                <span style={{ color: 'var(--text3)' }}> · {need} needed</span>
-                <span style={{ color: short ? shortColor : surplusColor, fontWeight: 700 }}> · {short ? `short ${Math.abs(diff)}` : `+${diff}`}</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 11, whiteSpace: 'nowrap' as const }}>
+                <span style={{ color: stockCount > 0 ? 'var(--ink-2)' : 'var(--red)', fontWeight: 600 }}>{stockCount} stock</span>
+                <span style={{ color: 'var(--ink-3)' }}>· {need} needed</span>
+                <Badge variant={short ? 'short' : 'surplus'}>{short ? `short ${Math.abs(diff)}` : `+${diff}`}</Badge>
               </span>
             )
           })()}
