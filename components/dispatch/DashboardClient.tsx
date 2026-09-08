@@ -3104,35 +3104,46 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               </div>
             )}
             {/* KPI cards */}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' as const, alignItems: 'stretch' }}>
-              {[
-                { key: 'ALL' as ActiveFilter, label: 'Total Active', value: activeOrders.length, color: 'var(--text)', bg: 'var(--surface)', border: 'var(--border)' },
-                { key: 'undecided' as ActiveFilter, label: 'Undecided', value: undecidedCount, color: 'var(--today)', bg: 'var(--today-bg)', border: '#fed7aa' },
-                { key: 'scheduled' as ActiveFilter, label: 'Scheduled', value: scheduledCount, color: 'var(--dispatched)', bg: 'var(--dispatched-bg)', border: '#bbf7d0' },
-                { key: 'scheduled_today' as ActiveFilter, label: 'Going Today', value: dispatchTodayCount, color: '#059669', bg: '#ecfdf5', border: '#6ee7b7' },
-                { key: 'slipped' as ActiveFilter, label: 'Slipped', value: slippedCount, color: '#dc2626', bg: '#fef2f2', border: '#fca5a5' },
-                { key: 'hold' as ActiveFilter, label: 'On Hold', value: holdCount, color: 'var(--hold)', bg: 'var(--hold-bg)', border: '#bfdbfe' },
-                { key: 'unfulfillable' as ActiveFilter, label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)', border: '#fecaca' },
-                { key: 'unmapped' as ActiveFilter, label: 'Unmapped SKU', value: unmappedCount, color: '#9333ea', bg: '#faf5ff', border: '#e9d5ff' },
-              ].map(kpi => {
-                const isActive = activeFilter === kpi.key
-                return (
-                  <button key={kpi.key} onClick={() => toggleFilter(kpi.key)} style={{
-                    padding: '10px 18px', minWidth: 120,
-                    background: isActive ? kpi.bg : 'var(--surface)',
-                    border: `1px solid ${isActive ? kpi.border : 'var(--border)'}`,
-                    borderRadius: 8, cursor: 'pointer',
-                    display: 'flex', flexDirection: 'column' as const, gap: 2, textAlign: 'left' as const,
-                    boxShadow: isActive ? `0 0 0 2px ${kpi.color}` : '0 1px 3px rgba(0,0,0,0.06)',
-                    opacity: kpi.value === 0 && !isActive ? 0.45 : 1,
-                    transition: 'all 0.15s', outline: 'none',
-                  }}>
-                    <span style={{ color: kpi.color, fontFamily: 'DM Mono', fontSize: 22, fontWeight: 700, lineHeight: 1 }}>{kpi.value}</span>
-                    <span style={{ color: 'var(--text2)', fontSize: 11, fontWeight: 600, marginTop: 2 }}>{kpi.label}</span>
-                    {isActive && <span style={{ fontSize: 10, color: kpi.color, marginTop: 1 }}>● filtered</span>}
-                  </button>
-                )
-              })}
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' as const, alignItems: 'flex-start' }}>
+              {([
+                { label: 'Pipeline', cards: [
+                  { key: 'ALL' as ActiveFilter, label: 'Total Active', value: activeOrders.length, problem: false },
+                  { key: 'undecided' as ActiveFilter, label: 'Undecided', value: undecidedCount, problem: false },
+                  { key: 'scheduled' as ActiveFilter, label: 'Scheduled', value: scheduledCount, problem: false },
+                  { key: 'scheduled_today' as ActiveFilter, label: 'Going Today', value: dispatchTodayCount, problem: false },
+                ] },
+                { label: 'Needs attention', cards: [
+                  { key: 'slipped' as ActiveFilter, label: 'Slipped', value: slippedCount, problem: true },
+                  { key: 'hold' as ActiveFilter, label: 'On Hold', value: holdCount, problem: false },
+                  { key: 'unfulfillable' as ActiveFilter, label: 'Unfulfillable', value: unfulfillableCount, problem: true },
+                  { key: 'unmapped' as ActiveFilter, label: 'Unmapped SKU', value: unmappedCount, problem: false },
+                ] },
+              ] as { label: string; cards: { key: ActiveFilter; label: string; value: number; problem: boolean }[] }[]).map(group => (
+                <div key={group.label}>
+                  <div style={{ fontSize: 10.5, letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--ink-3)', fontWeight: 600, marginBottom: 8, paddingLeft: 2 }}>{group.label}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(96px, 1fr))', gap: 8 }}>
+                    {group.cards.map(kpi => {
+                      const isActive = activeFilter === kpi.key
+                      const numColor = isActive ? 'var(--accent-solid)' : (kpi.problem && kpi.value > 0 ? 'var(--red)' : 'var(--ink)')
+                      return (
+                        <button key={kpi.key} onClick={() => toggleFilter(kpi.key)} style={{
+                          padding: '10px 14px', minWidth: 96,
+                          background: isActive ? 'var(--accent-soft)' : 'var(--surface)',
+                          border: `1px solid ${isActive ? 'var(--accent-line)' : 'var(--border)'}`,
+                          borderRadius: 12, cursor: 'pointer',
+                          display: 'flex', flexDirection: 'column' as const, gap: 2, textAlign: 'left' as const,
+                          boxShadow: isActive ? 'none' : 'var(--shadow)',
+                          opacity: kpi.value === 0 && !isActive ? 0.5 : 1,
+                          transition: 'all 0.15s', outline: 'none',
+                        }}>
+                          <span style={{ color: numColor, fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 600, lineHeight: 1 }}>{kpi.value}</span>
+                          <span style={{ color: 'var(--ink-2)', fontSize: 11, fontWeight: 600, marginTop: 2 }}>{kpi.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
               <div style={{ flex: 1 }} />
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 {URGENCY_ORDER.map(tier => {
@@ -5559,20 +5570,21 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         </div>
       </td>
       <td style={{ padding: '8px 12px' }}>
-        <select
-          value={order.courier}
-          onChange={e => onSaveCourier(order.id, e.target.value as Courier)}
-          style={{
-            fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600,
-            color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed',
-            background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff',
-            border: `1px solid ${order.courier === 'Bluedart' ? '#bfdbfe' : '#e9d5ff'}`,
-            borderRadius: 4, padding: '2px 4px', cursor: 'pointer', outline: 'none',
-          }}
-        >
-          <option value="Bluedart">BD</option>
-          <option value="Delhivery">DL</option>
-        </select>
+        <div style={{ position: 'relative' as const, display: 'inline-flex' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--panel-2)', border: '1px solid var(--line)', borderRadius: 6, padding: '3px 8px', pointerEvents: 'none' as const }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ink-2)' }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
+            <ChevronDown size={11} style={{ color: 'var(--ink-3)' }} />
+          </div>
+          <select
+            value={order.courier}
+            onChange={e => onSaveCourier(order.id, e.target.value as Courier)}
+            style={{ position: 'absolute' as const, inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', border: 'none' }}
+          >
+            <option value="Bluedart">BD</option>
+            <option value="Delhivery">DL</option>
+          </select>
+        </div>
       </td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
         <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{order.pincode}</span>
