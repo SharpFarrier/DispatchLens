@@ -51,7 +51,7 @@ function tabBtn(active: boolean): React.CSSProperties {
     display: 'flex', alignItems: 'center', gap: 6,
     padding: '8px 16px', border: 'none', cursor: 'pointer', background: 'transparent',
     color: active ? 'var(--accent)' : 'var(--text2)',
-    fontFamily: 'DM Sans', fontWeight: active ? 600 : 400, fontSize: 14,
+    fontFamily: 'var(--font-sans)', fontWeight: active ? 600 : 400, fontSize: 14,
     borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
     marginBottom: -1, transition: 'all 0.15s',
   }

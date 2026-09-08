@@ -133,7 +133,7 @@ export default function OtdrTab() {
         {/* Today hero */}
         <div style={{ ...card, padding: 18, maxWidth: 300 }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 0.5, color: 'var(--text3)' }}>Today&apos;s OTDR</div>
-          <div style={{ fontSize: 40, fontWeight: 800, fontFamily: 'DM Mono', color: colorFor(todayRow?.otdr ?? null), lineHeight: 1.1, marginTop: 4 }}>{todayRow?.otdr != null ? todayRow.otdr + '%' : '—'}</div>
+          <div style={{ fontSize: 40, fontWeight: 800, fontFamily: 'var(--font-mono)', color: colorFor(todayRow?.otdr ?? null), lineHeight: 1.1, marginTop: 4 }}>{todayRow?.otdr != null ? todayRow.otdr + '%' : '—'}</div>
           <div style={{ fontSize: 12.5, color: 'var(--text3)', marginTop: 4 }}>{todayRow ? `${todayRow.onTime.toLocaleString('en-IN')} on-time / ${todayRow.tracked.toLocaleString('en-IN')} tracked` : ''}</div>
           <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>Window {todayRow ? `${fmtDay(todayRow.start)} – ${fmtDay(todayRow.end)}` : ''} · target {TARGET}%+</div>
         </div>
@@ -162,7 +162,7 @@ export default function OtdrTab() {
             <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12.5, minWidth: 620 }}>
               <thead><tr>
                 {['Day', 'EDD window', 'On-time', 'In-transit', 'Tracked', 'OTDR', 'vs today'].map((h, i) => (
-                  <th key={h} style={{ padding: '9px 12px', textAlign: i >= 2 ? 'right' as const : 'left' as const, fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', background: 'var(--bg2)', whiteSpace: 'nowrap' as const }}>{h}</th>
+                  <th key={h} style={{ padding: '9px 12px', textAlign: i >= 2 ? 'right' as const : 'left' as const, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text3)', background: 'var(--bg2)', whiteSpace: 'nowrap' as const }}>{h}</th>
                 ))}
               </tr></thead>
               <tbody>
@@ -171,12 +171,12 @@ export default function OtdrTab() {
                   return (
                     <tr key={p.d} style={{ borderTop: '1px solid var(--border)', background: p.d === 0 ? 'var(--bg2)' : undefined }}>
                       <td style={{ padding: '9px 12px', fontWeight: p.d === 0 ? 700 : 400 }}>{p.d === 0 ? 'Today' : `+${p.d}d`} <span style={{ color: 'var(--text3)', fontWeight: 400 }}>· {fmtDay(p.date)}</span></td>
-                      <td style={{ padding: '9px 12px', color: 'var(--text2)', fontFamily: 'DM Mono', fontSize: 11 }}>{fmtDay(p.start)} – {fmtDay(p.end)}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono' }}>{p.onTime.toLocaleString('en-IN')}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: p.inTransit ? 'var(--today)' : 'var(--text3)' }}>{p.inTransit.toLocaleString('en-IN')}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{p.tracked.toLocaleString('en-IN')}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: colorFor(p.otdr) }}>{p.otdr != null ? p.otdr + '%' : '—'}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: delta == null ? 'var(--text3)' : delta > 0 ? 'var(--dispatched)' : delta < 0 ? 'var(--critical)' : 'var(--text3)' }}>{delta == null ? '—' : delta === 0 ? '±0' : (delta > 0 ? '+' : '') + delta}</td>
+                      <td style={{ padding: '9px 12px', color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{fmtDay(p.start)} – {fmtDay(p.end)}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)' }}>{p.onTime.toLocaleString('en-IN')}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', color: p.inTransit ? 'var(--today)' : 'var(--text3)' }}>{p.inTransit.toLocaleString('en-IN')}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{p.tracked.toLocaleString('en-IN')}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontWeight: 700, color: colorFor(p.otdr) }}>{p.otdr != null ? p.otdr + '%' : '—'}</td>
+                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontSize: 11, color: delta == null ? 'var(--text3)' : delta > 0 ? 'var(--dispatched)' : delta < 0 ? 'var(--critical)' : 'var(--text3)' }}>{delta == null ? '—' : delta === 0 ? '±0' : (delta > 0 ? '+' : '') + delta}</td>
                     </tr>
                   )
                 })}

@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -47,9 +46,9 @@
   /* sidebar rail */
   --sidebar: #1E1B18; --sidebar-hover: #2A2622; --sidebar-border: #37322D; --sidebar-muted: #8A827A;
 
-  /* fonts (IBM Plex via next/font; DM kept as fallback until the per-component sweep) */
-  --font-sans: var(--font-plex-sans), 'IBM Plex Sans', 'DM Sans', system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', 'DM Mono', ui-monospace, monospace;
+  /* fonts — IBM Plex via next/font (DM fully removed) */
+  --font-sans: var(--font-plex-sans), 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

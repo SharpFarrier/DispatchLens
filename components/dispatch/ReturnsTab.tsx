@@ -189,7 +189,7 @@ function RetHeaderCell({ col, ctx }: { col: RetCol; ctx: RetFilterCtx }) {
   const toggleNode = (k: string) => ctx.setDateTreeOpen(prev => ({ ...prev, [k]: !(prev[k] ?? false) }))
 
   return (
-    <th style={{ padding: '9px 12px', textAlign: col.type === 'number' ? 'right' as const : 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
+    <th style={{ padding: '9px 12px', textAlign: col.type === 'number' ? 'right' as const : 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: col.type === 'number' ? 'flex-end' : 'flex-start' }}>
         <span onClick={() => ctx.toggleSort(col.key)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, color: ctx.sortKey === col.key ? 'var(--accent)' : 'inherit' }}>
           {col.label}{ctx.sortKey === col.key && (ctx.sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
@@ -197,7 +197,7 @@ function RetHeaderCell({ col, ctx }: { col: RetCol; ctx: RetFilterCtx }) {
         <button onClick={() => ctx.setOpenFilter(ctx.openFilter === col.key ? null : col.key)} title="Filter" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 1, display: 'inline-flex', color: ctx.hasFilter(col.key) ? 'var(--accent)' : 'var(--text3)', opacity: ctx.hasFilter(col.key) ? 1 : 0.4 }}><Filter size={11} /></button>
       </div>
       {ctx.openFilter === col.key && (
-        <div ref={ctx.popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'DM Sans', fontWeight: 400 }}>
+        <div ref={ctx.popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'var(--font-sans)', fontWeight: 400 }}>
           {col.type === 'category' ? (
             <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3, maxHeight: 240, overflowY: 'auto' as const }}>
               {(ctx.catOptions[col.key] || []).map(opt => { const cur = ctx.catFilters[col.key] || []; const on = cur.includes(opt); return (
@@ -227,7 +227,7 @@ function RetHeaderCell({ col, ctx }: { col: RetCol; ctx: RetFilterCtx }) {
                           <span onClick={() => toggleNode(mKey)} style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text2)' }}>{monthName(mo)}</span>
                         </div>
                         {treeNodeOpen(mKey) && days.map(d => { const on = (ctx.dateFilters[col.key] || []).includes(d); return (
-                          <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'DM Mono' }}>
+                          <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
                             <input type="checkbox" checked={on} onChange={() => toggleDays(col.key, [d], !on)} />{dayNum(d)}
                           </label>) })}
                       </div>) })}
@@ -322,14 +322,14 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
   return (
     <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
-        <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text)' }}>{row.reverse_tracking_id}</span>
-        {row.received_sku && <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{row.received_sku}</span>}
-        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: 4 }}>RECEIVED · UNMAPPED</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text)' }}>{row.reverse_tracking_id}</span>
+        {row.received_sku && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>{row.received_sku}</span>}
+        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: 4 }}>RECEIVED · UNMAPPED</span>
         {recvAt && <span style={{ fontSize: 12, color: 'var(--text3)' }}>received {recvAt}</span>}
         <input value={awb} onChange={e => { setAwb(e.target.value); setError(null); setFound(null) }}
           onKeyDown={e => { if (e.key === 'Enter') findOrder() }}
           placeholder="Enter forward AWB to map"
-          style={{ flex: 1, minWidth: 200, border: '1px solid var(--border)', background: 'var(--bg2)', borderRadius: 7, padding: '7px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono', outline: 'none' }} />
+          style={{ flex: 1, minWidth: 200, border: '1px solid var(--border)', background: 'var(--bg2)', borderRadius: 7, padding: '7px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-mono)', outline: 'none' }} />
         <button onClick={findOrder} disabled={busy || !awb.trim()}
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text2)', cursor: busy || !awb.trim() ? 'default' : 'pointer', padding: '7px 14px', fontSize: 12, fontWeight: 600 }}>Find order</button>
       </div>
@@ -337,7 +337,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
       {found && (
         <div style={{ marginTop: 10, background: 'var(--bg2)', border: '1px solid var(--accent)', borderRadius: 7, padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
           <div style={{ fontSize: 13 }}>
-            <span style={{ fontFamily: 'DM Mono', color: 'var(--text)' }}>{found.order_id}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{found.order_id}</span>
             <span style={{ color: 'var(--text3)' }}> · {found.sku || found.scanned_barcode || '—'}{found.dispatched_at ? ` · dispatched ${new Date(found.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}</span>
             {row.received_sku && (found.barcode_sku || found.sku) && row.received_sku !== (found.barcode_sku || found.sku) && (
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--critical)', marginTop: 4 }}>received {row.received_sku} \u2260 ordered {found.barcode_sku || found.sku} — will be flagged, refund held</div>
@@ -566,7 +566,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 18, fontWeight: 600 }}>Returns</h1>
-        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{subTab === 'returns' && flt.anyFilter ? `${shownReturns.length} of ${mapped.length}` : `${mapped.length} tracked`}</span>
+        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{subTab === 'returns' && flt.anyFilter ? `${shownReturns.length} of ${mapped.length}` : `${mapped.length} tracked`}</span>
         {subTab === 'returns' && flt.anyFilter && <button onClick={flt.clearAll} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}><X size={12} /> Clear filters</button>}
         <button onClick={load} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text2)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
           <RefreshCw size={12} /> Refresh
@@ -586,7 +586,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
             ...(canSeeAmount ? [{ label: 'Pending ₹', value: `₹${totalPending.toLocaleString('en-IN')}`, color: 'var(--text)', bg: 'var(--bg2)', border: 'var(--border)' }] : []),
           ].map(c => (
             <div key={c.label} style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '5px 12px', background: c.bg, border: `1px solid ${c.border}`, borderRadius: 20 }}>
-              <span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 700, color: c.color }}>{c.value}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 700, color: c.color }}>{c.value}</span>
               <span style={{ fontSize: 11, color: 'var(--text3)' }}>{c.label}</span>
             </div>
           ))}
@@ -634,8 +634,8 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
           </div>
           {mismatched.map(r => (
             <div key={r.id} style={{ padding: '10px 18px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
-              <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{r.order_id}</span>
-              <span style={{ fontSize: 12, color: 'var(--text2)' }}>received <span style={{ fontFamily: 'DM Mono', color: 'var(--critical)' }}>{r.received_sku || '—'}</span></span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text)' }}>{r.order_id}</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>received <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--critical)' }}>{r.received_sku || '—'}</span></span>
               <button onClick={() => patchReturn(r.id, { sku_mismatch: false })} disabled={savingId === r.id}
                 style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                 {savingId === r.id ? 'Clearing…' : 'Clear mismatch'}
@@ -647,13 +647,13 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
 
       {/* ── Manual add: search dispatched orders ── */}
       <div style={{ ...card, padding: 18, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
-        <div style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text2)', letterSpacing: '0.04em' }}>ADD A RETURN</div>
+        <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text2)', letterSpacing: '0.04em' }}>ADD A RETURN</div>
         <div style={{ fontSize: 12, color: 'var(--text3)' }}>Search a dispatched order, then open it and choose “Mark as Return” in the history panel.</div>
         <div style={{ position: 'relative' as const, maxWidth: 480 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 12px' }}>
             <Search size={14} style={{ color: 'var(--text3)', flexShrink: 0 }} />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search order ID, customer, AWB, SKU…"
-              style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', fontFamily: 'DM Sans' }} />
+              style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', fontFamily: 'var(--font-sans)' }} />
             {search && <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0 }}><X size={13} /></button>}
           </div>
           {search.trim().length >= 2 && (
@@ -672,11 +672,11 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{o.customer_name}</div>
                       <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '…' : o.order_id}</span>
-                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)' }}>{o.sku}</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '…' : o.order_id}</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{o.sku}</span>
                       </div>
                     </div>
-                    {already && <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--today)', background: 'var(--today-bg)', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: 4, flexShrink: 0 }}>in returns</span>}
+                    {already && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--today)', background: 'var(--today-bg)', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: 4, flexShrink: 0 }}>in returns</span>}
                   </button>
                 )
               })}
@@ -698,9 +698,9 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
               {rtoOrders.map((o, i) => (
                 <tr key={o.id} style={{ borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
                   <td style={{ padding: '9px 18px', fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{o.customer_name}</td>
-                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '…' : o.order_id}</td>
-                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{o.sku}</td>
-                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{o.tracking_number || '—'}</td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '…' : o.order_id}</td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{o.sku}</td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{o.tracking_number || '—'}</td>
                   <td style={{ padding: '9px 18px', textAlign: 'right' as const }}>
                     <button onClick={() => addFromRto(o)} disabled={savingId === o.id}
                       style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
@@ -721,7 +721,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
                 {cols.map(c => <RetHeaderCell key={c.key} col={c} ctx={flt} />)}
-                <th style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}></th>
+                <th style={{ padding: '9px 12px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const }}></th>
               </tr>
             </thead>
             <tbody>
@@ -733,8 +733,8 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                 <tr><td colSpan={canSeeAmount ? 10 : 9} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No returns match the current filters.</td></tr>
               ) : shownReturns.map((r, i) => (
                 <tr key={r.id} style={{ borderBottom: i < shownReturns.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
-                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{r.order_id}</td>
-                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{r.order_id}</td>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
                   <td style={{ padding: '9px 12px' }}>
                     {(() => {
                       const needsReason = r.warehouse_received && (!r.reason || r.reason === 'Pending review')
@@ -748,10 +748,10 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {needsReason && (
-                            <span title="Received — reason not set yet" style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--critical)', background: 'var(--critical-bg)', border: '1px solid #fecaca', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>NEEDS REASON</span>
+                            <span title="Received — reason not set yet" style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--critical)', background: 'var(--critical-bg)', border: '1px solid #fecaca', padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>NEEDS REASON</span>
                           )}
                           <select value={selectVal} onChange={e => patchReturn(r.id, { reason: e.target.value })}
-                            style={{ fontSize: 11, fontFamily: 'DM Sans', color: reasonColor(selectVal || null), background: 'var(--surface)', border: `1px solid ${needsReason ? '#fecaca' : 'var(--border)'}`, borderRadius: 5, padding: '3px 6px', cursor: 'pointer', maxWidth: 200 }}>
+                            style={{ fontSize: 11, fontFamily: 'var(--font-sans)', color: reasonColor(selectVal || null), background: 'var(--surface)', border: `1px solid ${needsReason ? '#fecaca' : 'var(--border)'}`, borderRadius: 5, padding: '3px 6px', cursor: 'pointer', maxWidth: 200 }}>
                             <option value="">— set reason —</option>
                             {options.map(rs => <option key={rs} value={rs}>{rs}</option>)}
                           </select>
@@ -763,7 +763,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                     {(() => {
                       const isRto = r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto'
                       return (
-                        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: isRto ? 'var(--today)' : 'var(--accent)', background: isRto ? 'var(--today-bg)' : 'var(--accent-bg)', border: `1px solid ${isRto ? '#fed7aa' : 'var(--border)'}`, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: isRto ? 'var(--today)' : 'var(--accent)', background: isRto ? 'var(--today-bg)' : 'var(--accent-bg)', border: `1px solid ${isRto ? '#fed7aa' : 'var(--border)'}`, padding: '2px 7px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>
                           {isRto ? 'RTO' : 'CUSTOMER'}
                         </span>
                       )
@@ -776,7 +776,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                         <input
                           value={revDraft[r.id]?.id ?? r.reverse_tracking_id ?? ''}
                           onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: e.target.value, courier: p[r.id]?.courier ?? r.reverse_courier ?? '' } }))}
-                          style={{ width: 92, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'DM Mono', outline: 'none' }}
+                          style={{ width: 92, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'var(--font-mono)', outline: 'none' }}
                         />
                         <select
                           value={revDraft[r.id]?.courier ?? r.reverse_courier ?? ''}
@@ -803,7 +803,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                     ) : r.reverse_tracking_id ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
-                          <span style={{ fontFamily: 'DM Mono', fontSize: 10, color: 'var(--text2)' }}>{r.reverse_tracking_id}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text2)' }}>{r.reverse_tracking_id}</span>
                           <span style={{ fontSize: 10, color: r.reverse_tracking_status === 'delivered' ? 'var(--dispatched)' : r.reverse_tracking_status === 'rto' ? 'var(--critical)' : 'var(--text3)' }}>
                             {r.reverse_courier || ''}{r.reverse_tracking_label ? ` · ${r.reverse_tracking_label}` : (r.reverse_tracking_status ? ` · ${r.reverse_tracking_status}` : ' · not synced')}
                           </span>
@@ -828,7 +828,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                           onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: e.target.value, courier: p[r.id]?.courier ?? '' } }))}
                           placeholder="forward AWB — or set reverse ID"
                           title="RTO tracks on the forward AWB by default. Enter a reverse ID here only if it changed."
-                          style={{ width: 150, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'DM Mono', outline: 'none' }}
+                          style={{ width: 150, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'var(--font-mono)', outline: 'none' }}
                         />
                         <select
                           value={revDraft[r.id]?.courier ?? ''}
@@ -852,7 +852,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                           value={revDraft[r.id]?.id ?? ''}
                           onChange={e => setRevDraft(p => ({ ...p, [r.id]: { id: e.target.value, courier: p[r.id]?.courier ?? '' } }))}
                           placeholder="pickup ID…"
-                          style={{ width: 92, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'DM Mono', outline: 'none' }}
+                          style={{ width: 92, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 10, fontFamily: 'var(--font-mono)', outline: 'none' }}
                         />
                         <select
                           value={revDraft[r.id]?.courier ?? ''}
@@ -905,7 +905,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                             {refunded ? <><CheckCircle size={11} /> Refunded</> : <><Clock size={11} /> Pending</>}
                           </button>
                           {refunded && r.refund_type && (
-                            <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 700, color: r.refund_type === 'partial' ? 'var(--today)' : 'var(--dispatched)' }}>
+                            <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 700, color: r.refund_type === 'partial' ? 'var(--today)' : 'var(--dispatched)' }}>
                               {r.refund_type.toUpperCase()}{r.refund_type === 'partial' && r.invoice_amount ? ` ₹${r.refund_amount}/₹${r.invoice_amount}` : ''}
                             </span>
                           )}
@@ -923,17 +923,17 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                           onKeyDown={e => { if (e.key === 'Enter') saveAmount(r.id) }}
                           onBlur={() => { if (amountDraft[r.id] !== undefined) saveAmount(r.id) }}
                           placeholder="0"
-                          style={{ width: 80, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono', outline: 'none' }}
+                          style={{ width: 80, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'var(--font-mono)', outline: 'none' }}
                         />
                       </div>
                     </td>
                   )}
-                  <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>
+                  <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>
                     {new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </td>
                   <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                     {r.is_cancelled ? (
-                      <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 4 }}>CANCELLED</span>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 4 }}>CANCELLED</span>
                     ) : (r.return_type === 'customer' || r.source === 'manual') && !r.warehouse_received && r.refund_status !== 'refunded' ? (
                       // Customer changed their mind — cancel the return request. Order stays normal.
                       <button onClick={() => { if (confirm('Cancel this return request? The order stays delivered/normal.')) patchReturn(r.id, { is_cancelled: true, cancelled_at: new Date().toISOString() } as Partial<ReturnRow>) }}
@@ -1060,7 +1060,7 @@ function CancelledReview({ canSeeAmount, onOpenOrder }: { canSeeAmount: boolean;
             <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12 }} />
           </div>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
           {inWindow.length} cancelled{canSeeAmount ? ` \u00b7 \u20b9${totalPending.toLocaleString('en-IN')} to refund` : ''}
         </span>
       </div>
@@ -1080,7 +1080,7 @@ function CancelledReview({ canSeeAmount, onOpenOrder }: { canSeeAmount: boolean;
               {isOpen ? <ChevronDown size={16} style={{ color: 'var(--text3)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text3)' }} />}
               <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{fmtDay(key)}</span>
               <span style={{ fontSize: 12, color: 'var(--text3)' }}>{dayOrders.length} cancelled</span>
-              <span style={{ marginLeft: 'auto', fontFamily: 'DM Mono', fontSize: 13, color: allRefunded ? 'var(--dispatched)' : 'var(--today)' }}>
+              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 13, color: allRefunded ? 'var(--dispatched)' : 'var(--today)' }}>
                 {allRefunded ? 'all refunded' : canSeeAmount ? `\u20b9${dayPending.toLocaleString('en-IN')} pending` : `${dayOrders.filter(o => retByOrder[o.order_id]?.refund_status !== 'refunded').length} pending`}
               </span>
             </button>
@@ -1093,15 +1093,15 @@ function CancelledReview({ canSeeAmount, onOpenOrder }: { canSeeAmount: boolean;
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13, color: 'var(--text)' }}>{o.customer_name || '—'}</div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' as const }}>
-                      <span onClick={() => openOrder(o.order_id)} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '\u2026' : o.order_id}</span>
+                      <span onClick={() => openOrder(o.order_id)} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '\u2026' : o.order_id}</span>
                       <span style={{ fontSize: 11, color: 'var(--text3)' }}>{platformOf(o.order_id)}</span>
-                      <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{o.sku}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{o.sku}</span>
                     </div>
                   </div>
                   {canSeeAmount && (refunded
-                    ? <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--dispatched)', width: 92, textAlign: 'right' as const }}>\u20b9{(r?.refund_amount ?? orderAmount(o)).toLocaleString('en-IN')}</span>
+                    ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--dispatched)', width: 92, textAlign: 'right' as const }}>\u20b9{(r?.refund_amount ?? orderAmount(o)).toLocaleString('en-IN')}</span>
                     : <input value={amtVal} onChange={e => setAmtEdits(prev => ({ ...prev, [o.order_id]: e.target.value }))}
-                        style={{ width: 92, textAlign: 'right' as const, padding: '7px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono' }} />)}
+                        style={{ width: 92, textAlign: 'right' as const, padding: '7px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-mono)' }} />)}
                   {refunded ? (
                     <button onClick={() => undoRefund(o)} disabled={savingId === o.id}
                       style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{savingId === o.id ? '…' : 'Undo'}</button>
@@ -1220,7 +1220,7 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
         <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Received</div><div style={{ fontSize: 22, fontWeight: 800 }}>{totals.received}</div></div>
         <div style={{ background: 'var(--today-bg)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--today)' }}>Refund pending</div><div style={{ fontSize: 22, fontWeight: 800, color: 'var(--today)' }}>{totals.pending}</div></div>
         <div style={{ background: 'var(--dispatched-bg)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--dispatched)' }}>Refunded</div><div style={{ fontSize: 22, fontWeight: 800, color: 'var(--dispatched)' }}>{totals.refunded}</div></div>
-        {canSeeAmount && <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Pending value</div><div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'DM Mono' }}>₹{money(totals.pendingValue)}</div></div>}
+        {canSeeAmount && <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 14px' }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Pending value</div><div style={{ fontSize: 22, fontWeight: 800, fontFamily: 'var(--font-mono)' }}>₹{money(totals.pendingValue)}</div></div>}
       </div>
 
       {/* Filter / sort bar — same machinery as the main list; filters re-group the days below. */}
@@ -1250,7 +1250,7 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
               <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' as const }}>
                 {pend > 0 && <span style={{ background: 'var(--today-bg)', color: 'var(--today)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{pend} pending</span>}
                 {refd > 0 && <span style={{ background: 'var(--dispatched-bg)', color: 'var(--dispatched)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{refd} refunded</span>}
-                {canSeeAmount && pval > 0 && <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>₹{money(pval)} pend.</span>}
+                {canSeeAmount && pval > 0 && <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>₹{money(pval)} pend.</span>}
               </div>
             </div>
             {open && (
@@ -1266,10 +1266,10 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
                       const refunded = r.refund_status === 'refunded'
                       return (
                         <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                          <td style={{ padding: '7px 10px' }}><span onClick={() => openOrder(r.order_id ?? '')} style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
+                          <td style={{ padding: '7px 10px' }}><span onClick={() => openOrder(r.order_id ?? '')} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{r.order_id}</span></td>
                           <td style={{ padding: '7px 10px', color: 'var(--text2)' }}>{platformOf(r.order_id ?? '')}</td>
-                          <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
-                          <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11 }}>{r.reverse_tracking_id ? (() => {
+                          <td style={{ padding: '7px 10px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{r.barcode || '—'}</td>
+                          <td style={{ padding: '7px 10px', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{r.reverse_tracking_id ? (() => {
                             const url = r.reverse_courier === 'Bluedart' ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${r.reverse_tracking_id}` : r.reverse_courier === 'Delhivery' ? `https://www.delhivery.com/track/package/${r.reverse_tracking_id}` : null
                             return url
                               ? <a href={url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--accent)', textDecoration: 'none' }} onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{r.reverse_tracking_id} <ExternalLink size={9} /></a>
@@ -1282,7 +1282,7 @@ function DailyReview({ returns, canSeeAmount, savingId, onRefund, onOpenOrder }:
                             {refunded ? (
                               <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'flex-end', gap: 1 }}>
                                 <span style={{ background: 'var(--dispatched-bg)', color: 'var(--dispatched)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}><CheckCircle size={11} /> Refunded</span>
-                                <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{r.refund_type ? r.refund_type.toUpperCase() : ''}{canSeeAmount && r.refund_amount ? ` ₹${money(r.refund_amount)}` : ''} · {fmtTime(r.refunded_at)}</span>
+                                <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{r.refund_type ? r.refund_type.toUpperCase() : ''}{canSeeAmount && r.refund_amount ? ` ₹${money(r.refund_amount)}` : ''} · {fmtTime(r.refunded_at)}</span>
                               </div>
                             ) : (
                               <span style={{ background: 'var(--today-bg)', color: 'var(--today)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}><Clock size={11} /> Pending</span>

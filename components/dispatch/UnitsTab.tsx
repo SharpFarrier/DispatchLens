@@ -20,7 +20,7 @@ const STATUS_STYLE: Record<string, { color: string; bg: string }> = {
 
 function StatusBadge({ s }: { s: string }) {
   const st = STATUS_STYLE[s] || { color: 'var(--text3)', bg: 'var(--bg2)' }
-  return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, padding: '2px 7px', borderRadius: 4, color: st.color, background: st.bg }}>{s}</span>
+  return <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 7px', borderRadius: 4, color: st.color, background: st.bg }}>{s}</span>
 }
 
 function ts(v: string | null) {
@@ -65,7 +65,7 @@ export default function UnitsTab() {
             <Search size={13} style={{ color: 'var(--text3)' }} />
             <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && runSearch()}
               placeholder="Barcode or SKU (e.g. ME-B-BL-EL-3 or …-3-1257)"
-              style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'DM Sans', width: '100%' }} />
+              style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-sans)', width: '100%' }} />
           </div>
           <button onClick={runSearch} style={{ padding: '7px 22px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Search</button>
         </div>
@@ -92,15 +92,15 @@ export default function UnitsTab() {
               return (
                 <div style={{ ...card, padding: 18, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text)' }}>{u.barcode}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text)' }}>{u.barcode}</span>
                     <StatusBadge s={u.status} />
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>SKU {u.sku} · seq {u.seq} · source {u.source}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>SKU {u.sku} · seq {u.seq} · source {u.source}</div>
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 8, fontSize: 12 }}>
-                    <span style={{ color: 'var(--text3)' }}>Packed</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'DM Mono' }}>{ts(u.packed_at)}</span>
-                    <span style={{ color: 'var(--text3)' }}>Stocked</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'DM Mono' }}>{ts(u.stocked_at)}</span>
-                    <span style={{ color: 'var(--text3)' }}>Dispatched</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'DM Mono' }}>{ts(u.dispatched_at)}</span>
-                    <span style={{ color: 'var(--text3)' }}>RTO</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'DM Mono' }}>{ts(u.rto_at)}</span>
+                    <span style={{ color: 'var(--text3)' }}>Packed</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'var(--font-mono)' }}>{ts(u.packed_at)}</span>
+                    <span style={{ color: 'var(--text3)' }}>Stocked</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'var(--font-mono)' }}>{ts(u.stocked_at)}</span>
+                    <span style={{ color: 'var(--text3)' }}>Dispatched</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'var(--font-mono)' }}>{ts(u.dispatched_at)}</span>
+                    <span style={{ color: 'var(--text3)' }}>RTO</span><span style={{ color: 'var(--text2)', textAlign: 'right' as const, fontFamily: 'var(--font-mono)' }}>{ts(u.rto_at)}</span>
                   </div>
                 </div>
               )
@@ -110,17 +110,17 @@ export default function UnitsTab() {
               <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
-                    <th style={{ padding: '8px 12px', textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, color: 'var(--text3)' }}>Barcode</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, color: 'var(--text3)' }}>Status</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'right' as const, fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, color: 'var(--text3)' }}>Stocked</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left' as const, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--text3)' }}>Barcode</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left' as const, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--text3)' }}>Status</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right' as const, fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--text3)' }}>Stocked</th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.map((u, i) => (
                     <tr key={u.id} style={{ borderTop: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
-                      <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{u.barcode}</td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{u.barcode}</td>
                       <td style={{ padding: '8px 12px' }}><StatusBadge s={u.status} /></td>
-                      <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)' }}>{ts(u.stocked_at)}</td>
+                      <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{ts(u.stocked_at)}</td>
                     </tr>
                   ))}
                 </tbody>

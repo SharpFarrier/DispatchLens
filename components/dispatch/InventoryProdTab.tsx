@@ -130,7 +130,7 @@ function DrilldownOverlay({ row, data, onClose }: { row: Row; data: Row; onClose
                   {(tab === 'packed' || tab === 'dispatched') && entries.map((e: Row, i: number) => (
                     <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap' }}>—</td>
-                      <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{e.master_sku}</td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>{e.master_sku}</td>
                       <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)' }}>{e.mattress_type || '—'}</td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 800, color: 'var(--accent)' }}>1</td>
                     </tr>

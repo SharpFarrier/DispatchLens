@@ -116,7 +116,7 @@ function DevicesPanel({ ownerEmail }: { ownerEmail: string }) {
                   <div style={{ flex: 1, minWidth: 180 }}>
                     <input value={labelEdits[d.device_id] ?? d.label ?? ''} onChange={e => setLabelEdits(p => ({ ...p, [d.device_id]: e.target.value }))} placeholder="Name this device (e.g. Warehouse PC 3)"
                       style={{ width: '100%', maxWidth: 220, padding: '6px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }} />
-                    <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4, fontFamily: 'DM Mono' }}>{d.code || '—'} · {shortUA(d.user_agent)} · {d.requested_by || ''} · {fmt(d.requested_at)}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4, fontFamily: 'var(--font-mono)' }}>{d.code || '—'} · {shortUA(d.user_agent)} · {d.requested_by || ''} · {fmt(d.requested_at)}</div>
                   </div>
                   <button onClick={() => setStatus(d.device_id, 'approved')} style={{ padding: '6px 12px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><CheckCircle size={13} /> Approve</button>
                   <button onClick={() => setStatus(d.device_id, 'denied')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>Deny</button>
@@ -128,7 +128,7 @@ function DevicesPanel({ ownerEmail }: { ownerEmail: string }) {
           <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' as const }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}><CheckCircle size={14} style={{ color: 'var(--dispatched)' }} /> Approved devices</span>
-              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{approved.length}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{approved.length}</span>
             </div>
             {approved.length === 0 ? (
               <div style={{ padding: 18, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No approved devices yet.</div>
@@ -136,7 +136,7 @@ function DevicesPanel({ ownerEmail }: { ownerEmail: string }) {
               <div key={d.device_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderBottom: i < approved.length - 1 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{d.label || 'Unnamed device'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{shortUA(d.user_agent)} · approved {fmt(d.approved_at)} · last seen {fmt(d.last_seen_at)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{shortUA(d.user_agent)} · approved {fmt(d.approved_at)} · last seen {fmt(d.last_seen_at)}</div>
                 </div>
                 <button onClick={() => setStatus(d.device_id, 'revoked')} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><Ban size={13} /> Revoke</button>
               </div>
@@ -239,7 +239,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)' }}>{user.email}</div>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2, fontFamily: 'DM Mono' }}>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
               Requested {new Date(user.requested_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
             </div>
           </div>
@@ -276,7 +276,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
                     boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
                   }} />
                 </button>
-                <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: isOn ? 'var(--text)' : 'var(--text3)', fontWeight: isOn ? 500 : 400, textAlign: 'center' as const }}>{label}</span>
+                <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: isOn ? 'var(--text)' : 'var(--text3)', fontWeight: isOn ? 500 : 400, textAlign: 'center' as const }}>{label}</span>
               </div>
             )
           }
@@ -285,11 +285,11 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
               {/* Role presets — one click sets a sensible toggle set, still editable before save */}
               {!isOwnerRow && (
                 <div>
-                  <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>QUICK ROLE</div>
+                  <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>QUICK ROLE</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
                     {ROLE_PRESETS.map(p => (
                       <button key={p.label} title={p.desc} onClick={() => applyPreset(user.email, p.keys)}
-                        style={{ fontSize: 11, fontWeight: 600, fontFamily: 'DM Sans', color: 'var(--accent)', background: 'var(--accent-bg)', border: '1px solid var(--accent)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+                        style={{ fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-sans)', color: 'var(--accent)', background: 'var(--accent-bg)', border: '1px solid var(--accent)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
                         {p.label}
                       </button>
                     ))}
@@ -297,13 +297,13 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
                 </div>
               )}
               <div>
-                <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>DISPATCH</div>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>DISPATCH</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 8 }}>
                   {DISPATCH_TOGGLES.map(renderToggle)}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>WAREHOUSE</div>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--text3)', letterSpacing: '0.05em', marginBottom: 8 }}>WAREHOUSE</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
                   {WAREHOUSE_TOGGLES.map(renderToggle)}
                 </div>
@@ -366,7 +366,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
           {pending.length > 0 && (
             <section>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'DM Mono', color: '#d97706' }}>PENDING APPROVAL</h2>
+                <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', color: '#d97706' }}>PENDING APPROVAL</h2>
                 <span style={{ fontSize: 12, background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', borderRadius: 20, padding: '1px 8px' }}>{pending.length}</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
@@ -378,7 +378,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
           {/* Approved */}
           {approved.length > 0 && (
             <section>
-              <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'DM Mono', color: 'var(--dispatched)', marginBottom: 12 }}>APPROVED</h2>
+              <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--dispatched)', marginBottom: 12 }}>APPROVED</h2>
               <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
                 {approved.map(u => <UserCard key={u.email} user={u} />)}
               </div>
@@ -388,7 +388,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
           {/* Owner */}
           {owner && (
             <section>
-              <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'DM Mono', color: 'var(--text3)', marginBottom: 12 }}>OWNER</h2>
+              <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text3)', marginBottom: 12 }}>OWNER</h2>
               <UserCard user={owner} showSave={false} />
             </section>
           )}
@@ -396,7 +396,7 @@ export default function UsersTab({ ownerEmail }: { ownerEmail: string }) {
           {/* Rejected */}
           {rejected.length > 0 && (
             <section>
-              <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'DM Mono', color: 'var(--critical)', marginBottom: 12 }}>REJECTED</h2>
+              <h2 style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--critical)', marginBottom: 12 }}>REJECTED</h2>
               <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
                 {rejected.map(u => <UserCard key={u.email} user={u} />)}
               </div>

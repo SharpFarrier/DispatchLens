@@ -108,7 +108,7 @@ export default function ReportsTab({ userEmail, isOwner, onPendingChange }: { us
           <div style={{ ...card, overflow: 'hidden' as const }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}><Files size={14} style={{ color: 'var(--dispatched)' }} /> Approved reports</span>
-              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{approvedLive.length}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{approvedLive.length}</span>
             </div>
             {approvedLive.length === 0 ? (
               <div style={{ padding: 18, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No approved reports.</div>

@@ -187,12 +187,12 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button onClick={() => { setCourier(null); setPicked([]); setLastResult(null) }} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '6px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}><ChevronLeft size={15} /> Courier</button>
         <span style={{ fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 11, fontWeight: 700, color: codeFg, background: codeBg, padding: '2px 7px', borderRadius: 5 }}>{code}</span> {courier} picklist</span>
-        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{leftTotal} left</span>
+        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{leftTotal} left</span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--accent)', borderRadius: 10, padding: '12px 14px' }}>
         <input ref={inputRef} autoFocus onKeyDown={handleKeyDown} disabled={cameraOn} placeholder="Scan piece barcode"
-          style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 17, fontFamily: 'DM Mono', fontWeight: 700, outline: 'none', flex: 1, letterSpacing: '0.04em' }} />
+          style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 17, fontFamily: 'var(--font-mono)', fontWeight: 700, outline: 'none', flex: 1, letterSpacing: '0.04em' }} />
       </div>
 
       <div style={{ borderRadius: 10, border: `1px solid ${banner.border}`, background: banner.bg, color: banner.color, padding: '13px 14px', textAlign: 'center' as const, fontWeight: 700, fontSize: 14 }}>
@@ -219,17 +219,17 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
               {pendingRows.map(r => (
                 <div key={r.sku} style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontFamily: 'DM Mono', fontWeight: 600, fontSize: 15 }}>{r.sku}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 15 }}>{r.sku}</div>
                     {names[r.sku] && <div style={{ fontSize: 13, color: 'var(--text3)' }}>{names[r.sku]}</div>}
                   </div>
-                  <div style={{ fontFamily: 'DM Mono', fontSize: 18, fontWeight: 600 }}><span style={{ color: 'var(--dispatched)' }}>{r.got}</span><span style={{ color: 'var(--text3)' }}>/{r.need}</span></div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600 }}><span style={{ color: 'var(--dispatched)' }}>{r.got}</span><span style={{ color: 'var(--text3)' }}>/{r.need}</span></div>
                 </div>
               ))}
               {doneRows.length > 0 && <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 700, marginTop: 6 }}>Done ({doneRows.length})</div>}
               {doneRows.map(r => (
                 <div key={r.sku} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', opacity: 0.55 }}>
-                  <div style={{ flex: 1, minWidth: 0, fontFamily: 'DM Mono', fontSize: 14 }}>{r.sku}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--dispatched)' }}><CircleCheck size={16} /><span style={{ fontFamily: 'DM Mono', fontSize: 14 }}>{r.got}/{r.need}</span></div>
+                  <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-mono)', fontSize: 14 }}>{r.sku}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--dispatched)' }}><CircleCheck size={16} /><span style={{ fontFamily: 'var(--font-mono)', fontSize: 14 }}>{r.got}/{r.need}</span></div>
                 </div>
               ))}
             </>
@@ -240,7 +240,7 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>Picked this session ({picked.length})</div>
               {picked.slice(0, 8).map(s => (
                 <div key={s.unitId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
-                  <span style={{ flex: 1, fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{s.barcode}</span>
+                  <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>{s.barcode}</span>
                   <button onClick={() => undoPick(s)} style={{ fontSize: 11, fontWeight: 700, color: 'var(--critical)', border: '1px solid #fecaca', borderRadius: 6, padding: '3px 8px', background: 'var(--surface)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Undo2 size={11} /> Undo</button>
                 </div>
               ))}

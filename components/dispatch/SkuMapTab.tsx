@@ -176,7 +176,7 @@ export default function SkuMapTab() {
         value={(draft[key] as string) || ''}
         onChange={e => setDraft(prev => ({ ...prev, [key]: e.target.value }))}
         placeholder={placeholder}
-        style={{ width: '100%', padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono', outline: 'none' }}
+        style={{ width: '100%', padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-mono)', outline: 'none' }}
         onFocus={e => e.target.style.borderColor = 'var(--accent)'}
         onBlur={e => e.target.style.borderColor = 'var(--border)'}
       />
@@ -187,12 +187,12 @@ export default function SkuMapTab() {
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 18, fontWeight: 600 }}>SKU Map</h1>
-        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filtered.length} of {maps.length} products</span>
+        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{filtered.length} of {maps.length} products</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 12px' }}>
             <Search size={13} style={{ color: 'var(--text3)' }} />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SKUs…"
-              style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'DM Sans', width: 200 }} />
+              style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-sans)', width: 200 }} />
             {search && <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0 }}><X size={12} /></button>}
           </div>
           <button onClick={() => { setShowBulk(true); setBulkResult(null); setBulkText('') }} style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
@@ -223,7 +223,7 @@ export default function SkuMapTab() {
               <thead>
                 <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
                   {['Master SKU (Barcode)', 'Product', 'Amazon SKU', 'Amazon ASIN', 'Flipkart SKU', 'Website SKU', 'Other SKU', 'Other SKU 2', ''].map(h => (
-                    <th key={h} style={{ padding: '9px 14px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
+                    <th key={h} style={{ padding: '9px 14px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -233,14 +233,14 @@ export default function SkuMapTab() {
                     onClick={() => openEdit(m)}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-bg)'}
                     onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'transparent' : 'var(--bg2)'}>
-                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 12, fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap' as const }}>{m.master_sku}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--accent)', whiteSpace: 'nowrap' as const }}>{m.master_sku}</td>
                     <td style={{ padding: '9px 14px', fontSize: 13, color: 'var(--text)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{m.product_name || '—'}</td>
-                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.amazon_sku || '—'}</td>
-                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{m.amazon_asin || '—'}</td>
-                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.flipkart_sku || '—'}</td>
-                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.website_sku || '—'}</td>
-                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.other_sku || '—'}</td>
-                    <td style={{ padding: '9px 14px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{m.other_sku_2 || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{m.amazon_sku || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{m.amazon_asin || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{m.flipkart_sku || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{m.website_sku || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{m.other_sku || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{m.other_sku_2 || '—'}</td>
                     <td style={{ padding: '9px 14px' }}>
                       <Pencil size={12} style={{ color: 'var(--text3)' }} />
                     </td>
@@ -264,7 +264,7 @@ export default function SkuMapTab() {
             {field('Master SKU (barcode value)', 'master_sku', 'e.g. L3-B-BR-TR-3', true)}
             {field('Product Name', 'product_name', 'e.g. Xyra')}
             <div style={{ height: 1, background: 'var(--border)', margin: '20px 0' }} />
-            <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', marginBottom: 12, letterSpacing: '0.05em' }}>PLATFORM SKUs</div>
+            <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)', marginBottom: 12, letterSpacing: '0.05em' }}>PLATFORM SKUs</div>
             {field('Amazon SKU', 'amazon_sku', 'Amazon seller SKU')}
             {field('Amazon ASIN', 'amazon_asin', 'B0XXXXXXXX')}
             {field('Flipkart SKU', 'flipkart_sku', 'Flipkart SKU')}
@@ -296,12 +296,12 @@ export default function SkuMapTab() {
             </div>
             <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
               Paste rows (tab or comma separated). Columns in order:<br />
-              <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>Master SKU · Product Name · Amazon SKU · Amazon ASIN · Flipkart SKU · Website SKU · Other SKU · Other SKU 2</span><br />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>Master SKU · Product Name · Amazon SKU · Amazon ASIN · Flipkart SKU · Website SKU · Other SKU · Other SKU 2</span><br />
               A header row is auto-detected and skipped. Existing Master SKUs are updated; new ones added.
             </p>
             <textarea value={bulkText} onChange={e => { setBulkText(e.target.value); setBulkResult(null) }}
               placeholder={'L3-B-BR-TR-3\tXyra\tSW-TR-BL-BR-3\tB0FPM59XH7\tSW-TR-BL-BR-3\t3L-B-BR-TR-3'}
-              style={{ height: 240, width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', fontFamily: 'DM Mono', fontSize: 12, resize: 'vertical' as const, outline: 'none', lineHeight: 1.5 }} />
+              style={{ height: 240, width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: 12, resize: 'vertical' as const, outline: 'none', lineHeight: 1.5 }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14 }}>
               <button onClick={runBulk} disabled={bulkRunning || !bulkText.trim()} style={{ padding: '9px 20px', borderRadius: 7, background: bulkRunning || !bulkText.trim() ? 'var(--bg2)' : 'var(--accent)', border: 'none', color: bulkRunning || !bulkText.trim() ? 'var(--text3)' : '#fff', fontWeight: 600, fontSize: 13, cursor: bulkRunning || !bulkText.trim() ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Upload size={14} /> {bulkRunning ? 'Importing…' : 'Import Mappings'}

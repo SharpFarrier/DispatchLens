@@ -250,10 +250,10 @@ function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
                   <tr key={u.id} onClick={() => setDetailFile({ name: u.file_name, platform: u.platform })} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                     <td style={{ padding: '8px 12px', textTransform: 'capitalize', fontWeight: 600, color: 'var(--text)' }}>{u.platform}</td>
-                    <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{u.file_name}</td>
-                    <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }} title={ids.join(', ')}>{idText}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text)', fontWeight: 700 }}>{a ? money(a.total) : '—'}</td>
-                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', color: 'var(--text3)' }}>{a ? a.orders.toLocaleString() : '—'}</td>
+                    <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{u.file_name}</td>
+                    <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }} title={ids.join(', ')}>{idText}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text)', fontWeight: 700 }}>{a ? money(a.total) : '—'}</td>
+                    <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{a ? a.orders.toLocaleString() : '—'}</td>
                     <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{a ? fmtD(a.depositDate) : '—'}</td>
                     <td style={{ padding: '8px 12px', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{a && a.periodStart ? `${fmtD(a.periodStart)} – ${fmtD(a.periodEnd)}` : '—'}</td>
                     <td style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{new Date(u.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
@@ -261,7 +261,7 @@ function InboxView({ uploads, totals, fileAgg, loading, busy, onFiles }: {
                 )})}
                 <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg2)' }}>
                   <td style={{ padding: '8px 12px', fontWeight: 700, color: 'var(--text)' }} colSpan={3}>Grand total settled</td>
-                  <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'DM Mono', fontWeight: 800, color: 'var(--text)' }}>{money(grand)}</td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--text)' }}>{money(grand)}</td>
                   <td colSpan={4}></td>
                 </tr>
               </tbody>
@@ -340,10 +340,10 @@ function FileDetail({ file, onClose }: { file: { name: string; platform: string 
       ) : (
         <div style={{ padding: 16 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 12 }}>
-            <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--text3)' }}>Total settled</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontFamily: 'DM Mono' }}>{money(summary.total)}</div></div>
-            <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--text3)' }}>Orders</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontFamily: 'DM Mono' }}>{summary.orders.toLocaleString()}</div></div>
-            <div style={{ background: 'var(--dispatched-bg)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--dispatched)' }}>Matched to dispatch</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--dispatched)', fontFamily: 'DM Mono' }}>{summary.matched.toLocaleString()}</div></div>
-            <div style={{ background: 'var(--today-bg)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--today)' }}>Unmatched</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--today)', fontFamily: 'DM Mono' }}>{summary.unmatched.toLocaleString()}</div></div>
+            <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--text3)' }}>Total settled</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>{money(summary.total)}</div></div>
+            <div style={{ background: 'var(--bg2)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--text3)' }}>Orders</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>{summary.orders.toLocaleString()}</div></div>
+            <div style={{ background: 'var(--dispatched-bg)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--dispatched)' }}>Matched to dispatch</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--dispatched)', fontFamily: 'var(--font-mono)' }}>{summary.matched.toLocaleString()}</div></div>
+            <div style={{ background: 'var(--today-bg)', borderRadius: 8, padding: '10px 12px' }}><div style={{ fontSize: 11, color: 'var(--today)' }}>Unmatched</div><div style={{ fontSize: 18, fontWeight: 800, color: 'var(--today)', fontFamily: 'var(--font-mono)' }}>{summary.unmatched.toLocaleString()}</div></div>
           </div>
           <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>{summary.sales.toLocaleString()} sales · {summary.refunds.toLocaleString()} refunds · unmatched = order id not found in dispatch (older orders or account-level rows).</div>
 
@@ -355,10 +355,10 @@ function FileDetail({ file, onClose }: { file: { name: string; platform: string 
               <tbody>
                 {tx.map((t, i) => (
                   <tr key={t.order_id + i} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{t.order_id}</td>
-                    <td style={{ padding: '7px 10px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{t.sku || '—'}</td>
+                    <td style={{ padding: '7px 10px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>{t.order_id}</td>
+                    <td style={{ padding: '7px 10px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{t.sku || '—'}</td>
                     <td style={{ padding: '7px 10px', color: t.type === 'Refund' ? 'var(--today)' : 'var(--text2)' }}>{t.type}</td>
-                    <td style={{ padding: '7px 10px', textAlign: 'right' as const, fontFamily: 'DM Mono', color: t.net < 0 ? 'var(--critical)' : 'var(--text2)' }}>{money(t.net)}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', color: t.net < 0 ? 'var(--critical)' : 'var(--text2)' }}>{money(t.net)}</td>
                     <td style={{ padding: '7px 10px' }}>
                       <span style={{ background: t.matched ? 'var(--dispatched-bg)' : 'var(--today-bg)', color: t.matched ? 'var(--dispatched)' : 'var(--today)', padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{t.matched ? 'matched' : 'unmatched'}</span>
                     </td>
@@ -533,7 +533,7 @@ function DateRangePicker({ from, to, onApply }: { from: string; to: string; onAp
     <div style={{ position: 'relative' as const }} ref={ref}>
       <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
         <Calendar size={14} style={{ color: 'var(--text3)' }} />
-        <span style={{ fontFamily: 'DM Mono' }}>{label}</span>
+        <span style={{ fontFamily: 'var(--font-mono)' }}>{label}</span>
         <ChevronDown size={13} style={{ color: 'var(--text3)' }} />
       </button>
       {open && (
@@ -557,7 +557,7 @@ function DateRangePicker({ from, to, onApply }: { from: string; to: string; onAp
             })}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{pick.start ? fmt(pick.start) : 'start'} \u2013 {pick.end ? fmt(pick.end) : 'end'}</span>
+            <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{pick.start ? fmt(pick.start) : 'start'} \u2013 {pick.end ? fmt(pick.end) : 'end'}</span>
             {pick.start && !pick.end && <span style={{ fontSize: 11, color: 'var(--text3)' }}>pick end date</span>}
           </div>
         </div>
@@ -649,17 +649,17 @@ function ChargesView() {
   const pctSub = (fee: number | null | undefined, sale: number | null | undefined) => (fee && sale) ? <span style={{ display: 'block', fontSize: 10, color: 'var(--text3)' }}>{(Math.abs(fee) / sale * 100).toFixed(1)}%</span> : null
 
   const COLS: ChgCol[] = useMemo(() => [
-    { key: 'sale', label: 'Sale', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.sale)}</span> },
-    { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.commission)}</span> },
-    { key: 'commissionPct', label: 'Comm %', type: 'number', align: 'right', get: r => r.agg?.commissionPct ?? -1, render: r => r.agg?.commissionPct != null ? <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--accent)' }}>{r.agg.commissionPct.toFixed(1)}%</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
-    { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.closing)}{pctSub(r.agg?.closing, r.agg?.sale)}</span> },
-    { key: 'shipping', label: 'Shipping', type: 'number', align: 'right', get: r => r.agg?.shipping ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.shipping)}{pctSub(r.agg?.shipping, r.agg?.sale)}</span> },
-    { key: 'fba', label: 'FBA', type: 'number', align: 'right', get: r => r.agg?.fba ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.fba)}{pctSub(r.agg?.fba, r.agg?.sale)}</span> },
-    { key: 'productTax', label: 'Tax', type: 'number', align: 'right', get: r => r.agg?.productTax ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.productTax)}</span> },
-    { key: 'tcs', label: 'TCS', type: 'number', align: 'right', get: r => r.agg?.tcs ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.tcs)}</span> },
-    { key: 'tds', label: 'TDS', type: 'number', align: 'right', get: r => r.agg?.tds ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.agg?.tds)}</span> },
-    { key: 'gstOnFees', label: 'GST on fees', type: 'number', align: 'right', get: r => r.agg?.gstOnFees ?? 0, render: r => <span style={{ fontFamily: 'DM Mono', color: 'var(--text3)' }}>{money(r.agg?.gstOnFees)}</span> },
-    { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
+    { key: 'sale', label: 'Sale', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.sale)}</span> },
+    { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.commission)}</span> },
+    { key: 'commissionPct', label: 'Comm %', type: 'number', align: 'right', get: r => r.agg?.commissionPct ?? -1, render: r => r.agg?.commissionPct != null ? <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)' }}>{r.agg.commissionPct.toFixed(1)}%</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
+    { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.closing)}{pctSub(r.agg?.closing, r.agg?.sale)}</span> },
+    { key: 'shipping', label: 'Shipping', type: 'number', align: 'right', get: r => r.agg?.shipping ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.shipping)}{pctSub(r.agg?.shipping, r.agg?.sale)}</span> },
+    { key: 'fba', label: 'FBA', type: 'number', align: 'right', get: r => r.agg?.fba ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.fba)}{pctSub(r.agg?.fba, r.agg?.sale)}</span> },
+    { key: 'productTax', label: 'Tax', type: 'number', align: 'right', get: r => r.agg?.productTax ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.productTax)}</span> },
+    { key: 'tcs', label: 'TCS', type: 'number', align: 'right', get: r => r.agg?.tcs ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.tcs)}</span> },
+    { key: 'tds', label: 'TDS', type: 'number', align: 'right', get: r => r.agg?.tds ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.tds)}</span> },
+    { key: 'gstOnFees', label: 'GST on fees', type: 'number', align: 'right', get: r => r.agg?.gstOnFees ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{money(r.agg?.gstOnFees)}</span> },
+    { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
   ], [])
 
   // Rows filtered by platform/returned/text — but NOT by the commission-% filter. The %
@@ -724,7 +724,7 @@ function ChargesView() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '5px 10px' }}>
           <Search size={13} style={{ color: 'var(--text3)' }} />
-          <input value={text} onChange={e => setText(e.target.value)} placeholder="Order ID or SKU" style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 12, outline: 'none', width: 150, fontFamily: 'DM Mono' }} />
+          <input value={text} onChange={e => setText(e.target.value)} placeholder="Order ID or SKU" style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 12, outline: 'none', width: 150, fontFamily: 'var(--font-mono)' }} />
         </div>
         <div style={{ position: 'relative' as const }} ref={pctPopRef}>
           <button onClick={() => setPctOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: pctFilter.length ? 'var(--accent)' : 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '6px 11px', color: pctFilter.length ? '#fff' : 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
@@ -735,7 +735,7 @@ function ChargesView() {
             <div style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, zIndex: 50, width: 240, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 10, boxShadow: '0 8px 28px rgba(0,0,0,0.16)', overflow: 'hidden' }}>
               <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 12, fontWeight: 700 }}>Commission % charged</span>
-                <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>this window</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>this window</span>
               </div>
               <div style={{ maxHeight: 240, overflowY: 'auto' as const }}>
                 {pctDist.length === 0 ? (
@@ -745,8 +745,8 @@ function ChargesView() {
                   return (
                     <label key={bk} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--border)' }}>
                       <input type="checkbox" checked={on} onChange={() => togglePct(bk)} style={{ width: 14, height: 14 }} />
-                      <span style={{ flex: 1, fontFamily: 'DM Mono', color: bk === '—' ? 'var(--text3)' : 'var(--text)' }}>{bk === '—' ? '— (no sale)' : bk + '%'}</span>
-                      <span style={{ fontFamily: 'DM Mono', color: 'var(--text3)' }}>{n}</span>
+                      <span style={{ flex: 1, fontFamily: 'var(--font-mono)', color: bk === '—' ? 'var(--text3)' : 'var(--text)' }}>{bk === '—' ? '— (no sale)' : bk + '%'}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{n}</span>
                     </label>
                   )
                 })}
@@ -759,7 +759,7 @@ function ChargesView() {
             </div>
           )}
         </div>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filtered.length} orders</span>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{filtered.length} orders</span>
       </div>
 
       {loading ? (
@@ -785,10 +785,10 @@ function ChargesView() {
                       <td style={{ padding: '9px 10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {expanded === r.order_id ? <ChevronDown size={13} style={{ color: 'var(--text3)' }} /> : <ChevronRight size={13} style={{ color: 'var(--text3)' }} />}
-                          <span style={{ fontFamily: 'DM Mono', fontSize: 11 }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</span>
                           {r.agg?.returned && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--today)', border: '1px solid #fed7aa', borderRadius: 4, padding: '0 4px' }}>returned</span>}
                         </div>
-                        <div style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 19, fontFamily: 'DM Mono' }}>{r.platform} · {r.sku || '—'}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 19, fontFamily: 'var(--font-mono)' }}>{r.platform} · {r.sku || '—'}</div>
                       </td>
                       {COLS.map(c => (
                         <td key={c.key} style={{ padding: '9px 10px', textAlign: (c.align === 'right' ? 'right' : 'left') as 'right' | 'left', whiteSpace: 'nowrap' as const }}>{c.render ? c.render(r) : c.get(r)}</td>
@@ -801,7 +801,7 @@ function ChargesView() {
                           <table style={{ width: 'auto', borderCollapse: 'collapse' as const, fontSize: 11 }}>
                             <tbody>
                               {r.agg.detail.map((d, j) => (
-                                <tr key={j}><td style={{ padding: '3px 16px 3px 0', color: 'var(--text2)' }}>{d.label}</td><td style={{ padding: '3px 0', textAlign: 'right' as const, fontFamily: 'DM Mono', color: d.amount < 0 ? 'var(--critical)' : 'var(--text2)' }}>{d.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+                                <tr key={j}><td style={{ padding: '3px 16px 3px 0', color: 'var(--text2)' }}>{d.label}</td><td style={{ padding: '3px 0', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', color: d.amount < 0 ? 'var(--critical)' : 'var(--text2)' }}>{d.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
                               ))}
                             </tbody>
                           </table>
@@ -816,7 +816,7 @@ function ChargesView() {
           {pageCount > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--border)' }}>
               <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={pageSafe === 0} style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe === 0 ? 'var(--text3)' : 'var(--text)', fontSize: 12, cursor: pageSafe === 0 ? 'default' : 'pointer' }}>Prev</button>
-              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>Page {pageSafe + 1} of {pageCount}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>Page {pageSafe + 1} of {pageCount}</span>
               <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={pageSafe >= pageCount - 1} style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe >= pageCount - 1 ? 'var(--text3)' : 'var(--text)', fontSize: 12, cursor: pageSafe >= pageCount - 1 ? 'default' : 'pointer' }}>Next</button>
             </div>
           )}
@@ -964,15 +964,15 @@ function OrdersView() {
   }
 
   const COLS: OrdCol[] = useMemo(() => [
-    { key: 'order_id', label: 'Order ID', type: 'text', get: r => r.order_id, render: r => <span style={{ fontFamily: 'DM Mono', fontSize: 11 }}>{r.order_id}</span> },
+    { key: 'order_id', label: 'Order ID', type: 'text', get: r => r.order_id, render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{r.order_id}</span> },
     { key: 'order_date', label: 'Order date', type: 'date', get: r => r.order_date || '', render: r => fmt(r.order_date) },
     { key: 'dispatched_at', label: 'Dispatch date', type: 'date', get: r => r.dispatched_at || '', render: r => fmt(r.dispatched_at) },
     { key: 'delivered_at', label: 'Delivery date', type: 'date', get: r => r.delivered_at || '', render: r => fmt(r.delivered_at) },
     { key: 'payment_date', label: 'Payment date', type: 'date', get: r => toDay(r.payment_date || ''), render: r => fmt(toDay(r.payment_date || '')) },
-    { key: 'tracking_ids', label: 'Tracking ID(s)', type: 'text', get: r => r.tracking_ids, render: r => <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{r.tracking_ids}</span> },
+    { key: 'tracking_ids', label: 'Tracking ID(s)', type: 'text', get: r => r.tracking_ids, render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{r.tracking_ids}</span> },
     { key: 'platform', label: 'Platform', type: 'category', get: r => r.platform },
     { key: 'tracking_status', label: 'Tracking status', type: 'category', get: r => r.tracking_status || '(blank)', render: r => <span style={{ color: 'var(--text3)' }}>{r.tracking_status || '—'}</span> },
-    { key: 'invoiced', label: 'Amount', type: 'number', align: 'right', get: r => r.invoiced ?? 0, render: r => <span style={{ fontFamily: 'DM Mono' }}>{money(r.invoiced)}</span> },
+    { key: 'invoiced', label: 'Amount', type: 'number', align: 'right', get: r => r.invoiced ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.invoiced)}</span> },
     { key: 'status', label: 'Status', type: 'category', get: r => statusLabel[r.status], render: r => pill(r) },
   ], [])
   const colByKey = useMemo(() => Object.fromEntries(COLS.map(c => [c.key, c])), [COLS])
@@ -1165,7 +1165,7 @@ function OrdersView() {
                                             {treeNodeOpen(mKey) && days.map(d => {
                                               const on = (dateFilters[col.key] || []).includes(d)
                                               return (
-                                                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'DM Mono' }}>
+                                                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
                                                   <input type="checkbox" checked={on} onChange={() => toggleDays(col.key, [d], !on)} />{dayNum(d)}
                                                 </label>
                                               )
@@ -1213,7 +1213,7 @@ function OrdersView() {
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={pageSafe === 0} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe === 0 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Prev</button>
-            <span style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono' }}>{pageSafe + 1} / {pageCount}</span>
+            <span style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>{pageSafe + 1} / {pageCount}</span>
             <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={pageSafe >= pageCount - 1} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: pageSafe >= pageCount - 1 ? 'var(--text3)' : 'var(--text2)', cursor: pageSafe >= pageCount - 1 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700 }}>Next</button>
           </div>
         </div>

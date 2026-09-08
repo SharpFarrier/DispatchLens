@@ -137,9 +137,9 @@ export default function HandlingTimeTab({ userEmail }: { userEmail: string }) {
                             <span style={{ fontWeight: 500 }}>{s.product_name || s.master_sku}</span>
                             {pend.length > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--today)', border: '1px solid #fed7aa', borderRadius: 4, padding: '0 5px' }}>pending</span>}
                           </div>
-                          <div style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', marginLeft: 20 }}>{s.master_sku}</div>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)', marginLeft: 20 }}>{s.master_sku}</div>
                         </td>
-                        <td style={{ padding: '11px 12px', textAlign: 'center' as const, fontFamily: 'DM Mono', color: 'var(--text2)' }}>{stock[s.master_sku] ?? 0}</td>
+                        <td style={{ padding: '11px 12px', textAlign: 'center' as const, fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{stock[s.master_sku] ?? 0}</td>
                         {PLATFORMS.map(p => {
                           const d = daysFor(s.master_sku, p.key)
                           const b = band(d)
@@ -148,9 +148,9 @@ export default function HandlingTimeTab({ userEmail }: { userEmail: string }) {
                           return (
                             <td key={p.key} style={{ padding: '11px 12px', textAlign: 'center' as const }}>
                               {editingThis ? (
-                                <input autoFocus type="number" defaultValue={d ?? ''} onBlur={e => setValue(s.master_sku, p.key, e.target.value === '' ? null : parseInt(e.target.value))} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} style={{ width: 46, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--accent)', textAlign: 'center' as const, fontFamily: 'DM Mono' }} />
+                                <input autoFocus type="number" defaultValue={d ?? ''} onBlur={e => setValue(s.master_sku, p.key, e.target.value === '' ? null : parseInt(e.target.value))} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} style={{ width: 46, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--accent)', textAlign: 'center' as const, fontFamily: 'var(--font-mono)' }} />
                               ) : (
-                                <span onClick={() => setEditCell({ sku: s.master_sku, platform: p.key })} title="Click to set the current live value" style={{ cursor: 'pointer', fontFamily: 'DM Mono', fontWeight: 600, color: b.fg, background: b.bg, padding: '3px 9px', borderRadius: 6 }}>{d == null ? '—' : `${d}d`}</span>
+                                <span onClick={() => setEditCell({ sku: s.master_sku, platform: p.key })} title="Click to set the current live value" style={{ cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 600, color: b.fg, background: b.bg, padding: '3px 9px', borderRadius: 6 }}>{d == null ? '—' : `${d}d`}</span>
                               )}
                               {pr && <div style={{ fontSize: 10, color: 'var(--today)', marginTop: 2 }}>→ {pr.to_days}d requested</div>}
                             </td>
@@ -171,8 +171,8 @@ export default function HandlingTimeTab({ userEmail }: { userEmail: string }) {
                                 <tbody>
                                   {hist.map(r => (
                                     <tr key={r.id}>
-                                      <td style={{ padding: '3px 14px 3px 0', fontFamily: 'DM Mono', textTransform: 'capitalize' as const }}>{r.platform}</td>
-                                      <td style={{ padding: '3px 14px 3px 0', fontFamily: 'DM Mono' }}>{r.from_days ?? '—'}d → {r.to_days}d</td>
+                                      <td style={{ padding: '3px 14px 3px 0', fontFamily: 'var(--font-mono)', textTransform: 'capitalize' as const }}>{r.platform}</td>
+                                      <td style={{ padding: '3px 14px 3px 0', fontFamily: 'var(--font-mono)' }}>{r.from_days ?? '—'}d → {r.to_days}d</td>
                                       <td style={{ padding: '3px 14px 3px 0', color: r.status === 'approved' ? 'var(--dispatched)' : r.status === 'rejected' ? 'var(--critical)' : 'var(--today)', fontWeight: 600, textTransform: 'capitalize' as const }}>{r.status}</td>
                                       <td style={{ padding: '3px 14px 3px 0', color: 'var(--text3)' }}>{r.reason || ''}</td>
                                       <td style={{ padding: '3px 0', color: 'var(--text3)' }}>by {(r.requested_by || '').split('@')[0]} · {fmt(r.requested_at)}{r.decided_by ? ` · ${r.status} by ${(r.decided_by).split('@')[0]}` : ''}</td>
@@ -225,7 +225,7 @@ function RequestModal({ ctx, onClose, onSubmit, daysFor }: { ctx: { sku: string;
       <select value={platform} onChange={e => setPlatform(e.target.value as Platform)} style={{ ...inp, marginBottom: 12, cursor: 'pointer' }}>
         {PLATFORMS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
       </select>
-      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>Current: <b style={{ fontFamily: 'DM Mono' }}>{current == null ? 'not set' : `${current}d`}</b></div>
+      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>Current: <b style={{ fontFamily: 'var(--font-mono)' }}>{current == null ? 'not set' : `${current}d`}</b></div>
       <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 5, fontWeight: 600 }}>Requested handling (days)</label>
       <input type="number" value={to} onChange={e => setTo(e.target.value)} placeholder="e.g. 1" style={{ ...inp, marginBottom: 12 }} />
       <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 5, fontWeight: 600 }}>Reason</label>
@@ -239,7 +239,7 @@ function ReviewModal({ r, onClose, onDecide }: { r: ReqRow; onClose: () => void;
   const [note, setNote] = useState('')
   return (
     <Modal title={`Review · ${r.master_sku} · ${r.platform}`} onClose={onClose}>
-      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}><b style={{ fontFamily: 'DM Mono' }}>{r.from_days ?? '—'}d → {r.to_days}d</b> requested by {(r.requested_by || '').split('@')[0]}</div>
+      <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}><b style={{ fontFamily: 'var(--font-mono)' }}>{r.from_days ?? '—'}d → {r.to_days}d</b> requested by {(r.requested_by || '').split('@')[0]}</div>
       {r.reason && <div style={{ fontSize: 13, color: 'var(--text3)', marginBottom: 12 }}>&ldquo;{r.reason}&rdquo;</div>}
       <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8, background: 'var(--bg2)', padding: '8px 10px', borderRadius: 7 }}>Set this on {r.platform === 'amazon' ? 'Amazon Seller Central' : r.platform === 'flipkart' ? 'Flipkart Seller Hub' : 'your D2C site'} first, then approve to record it as live.</div>
       <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Note (optional)" style={{ ...inp, height: 48, resize: 'vertical' as const, marginBottom: 14 }} />

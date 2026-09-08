@@ -2409,7 +2409,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       {fulfillableConfirm && (
         <Modal title="Mark SKU fulfillable" onClose={() => setFulfillableConfirm(null)}>
           <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 8 }}>
-            Mark <strong style={{ fontFamily: 'DM Mono' }}>{fulfillableConfirm.sku}</strong> fulfillable again?
+            Mark <strong style={{ fontFamily: 'var(--font-mono)' }}>{fulfillableConfirm.sku}</strong> fulfillable again?
           </p>
           <p style={{ color: 'var(--text3)', fontSize: 13, marginBottom: 16 }}>
             New imports of this SKU will go to undecided again, and its {fulfillableConfirm.count} currently-unfulfillable order{fulfillableConfirm.count === 1 ? '' : 's'} will return to the undecided tab.
@@ -2435,7 +2435,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 value={bulkScheduleDate}
                 min={new Date().toISOString().split('T')[0]}
                 onChange={e => setBulkScheduleDate(e.target.value)}
-                style={{ padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Mono' }}
+                style={{ padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-mono)' }}
               />
             </div>
           )}
@@ -2444,7 +2444,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               const o = orders.find(x => x.id === id)
               if (!o) return null
               return (
-                <div key={id} style={{ padding: '7px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, fontFamily: 'DM Mono', display: 'flex', gap: 12, color: 'var(--text2)' }}>
+                <div key={id} style={{ padding: '7px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, fontFamily: 'var(--font-mono)', display: 'flex', gap: 12, color: 'var(--text2)' }}>
                   <span style={{ color: 'var(--text)' }}>{o.customer_name}</span>
                   <span>{o.sku}</span>
                   <span style={{ color: 'var(--text3)' }}>{o.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
@@ -2463,7 +2463,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       {manualDispatchOrder && (
         <Modal title="Mark as Dispatched" onClose={() => { setManualDispatchOrder(null); setManualDispatchSku('') }}>
           <div style={{ marginBottom: 4 }}>
-            <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '12px 14px', fontFamily: 'DM Mono', fontSize: 12, marginBottom: 16, display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
+            <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, marginBottom: 16, display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
               <span style={{ color: 'var(--text)', fontWeight: 500 }}>{manualDispatchOrder.customer_name}</span>
               <span style={{ color: 'var(--text2)' }}>{manualDispatchOrder.sku}</span>
               <span style={{ color: 'var(--text3)' }}>{manualDispatchOrder.order_id}</span>
@@ -2482,7 +2482,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 width: '100%', padding: '9px 12px',
                 borderRadius: 7, border: '1px solid var(--border)',
                 background: 'var(--bg)', color: 'var(--text)',
-                fontSize: 13, fontFamily: 'DM Mono', outline: 'none',
+                fontSize: 13, fontFamily: 'var(--font-mono)', outline: 'none',
               }}
               onFocus={e => e.target.style.borderColor = 'var(--dispatched)'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
@@ -2507,7 +2507,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 16 }}>
               Manually cancel this order? This is typically done after confirming with the customer.
             </p>
-            <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '12px 14px', fontFamily: 'DM Mono', fontSize: 12, display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
+            <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '12px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
               <span style={{ color: 'var(--text)', fontWeight: 500 }}>{cancelOrder.customer_name}</span>
               <span style={{ color: 'var(--text2)' }}>{cancelOrder.sku}</span>
               <span style={{ color: 'var(--text3)' }}>{cancelOrder.order_id}</span>
@@ -2528,7 +2528,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         return (
           <Modal title="Mark SKU Unfulfillable" onClose={closeModal} width={520}>
             {/* SKU pill */}
-            <div style={{ fontFamily: 'DM Mono', fontSize: 13, background: 'var(--bg2)', padding: '8px 12px', borderRadius: 6, marginBottom: 20, color: 'var(--text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, background: 'var(--bg2)', padding: '8px 12px', borderRadius: 6, marginBottom: 20, color: 'var(--text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>{unfulfillableSku}</span>
               <span style={{ color: 'var(--text3)', fontSize: 12 }}>{skuOrders.length} orders · {totalQty} pcs total</span>
             </div>
@@ -2548,7 +2548,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     setAllocationPreview(null)
                   }}
                   placeholder={`0 – ${totalQty}`}
-                  style={{ width: 100, padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 14, fontFamily: 'DM Mono', outline: 'none', textAlign: 'center' as const }}
+                  style={{ width: 100, padding: '8px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 14, fontFamily: 'var(--font-mono)', outline: 'none', textAlign: 'center' as const }}
                   onFocus={e => e.target.style.borderColor = 'var(--accent)'}
                   onBlur={e => e.target.style.borderColor = 'var(--border)'}
                 />
@@ -2586,11 +2586,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               <div style={{ marginBottom: 20 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
                   <div style={{ background: 'var(--dispatched-bg)', border: '1px solid #bbf7d0', borderRadius: 7, padding: '10px 14px', textAlign: 'center' as const }}>
-                    <div style={{ fontSize: 20, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)' }}>{allocationPreview.dispatch.length}</div>
+                    <div style={{ fontSize: 20, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--dispatched)' }}>{allocationPreview.dispatch.length}</div>
                     <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>Will dispatch</div>
                   </div>
                   <div style={{ background: 'var(--critical-bg)', border: '1px solid #fecaca', borderRadius: 7, padding: '10px 14px', textAlign: 'center' as const }}>
-                    <div style={{ fontSize: 20, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)' }}>{allocationPreview.unfulfillable.length}</div>
+                    <div style={{ fontSize: 20, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--critical)' }}>{allocationPreview.unfulfillable.length}</div>
                     <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>Unfulfillable</div>
                   </div>
                 </div>
@@ -2611,10 +2611,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         background: '#f0fdf4',
                         display: 'flex', alignItems: 'center', gap: 10,
                       }}>
-                        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0', whiteSpace: 'nowrap' as const }}>DISPATCH</span>
-                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{liveUrgency(o)}</span>
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0', whiteSpace: 'nowrap' as const }}>DISPATCH</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: uc, minWidth: 60 }}>{liveUrgency(o)}</span>
                         <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{o.customer_name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{displayDaysLeft(o) ?? '?'}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>d{displayDaysLeft(o) ?? '?'}</span>
                       </div>
                     )
                   })}
@@ -2631,10 +2631,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         background: '#fef2f2',
                         display: 'flex', alignItems: 'center', gap: 10,
                       }}>
-                        <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #fecaca', whiteSpace: 'nowrap' as const }}>UNFULFIL.</span>
-                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: uc, minWidth: 60 }}>{liveUrgency(o)}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, fontFamily: 'DM Mono' }}>{o.tracking_number || '— no AWB —'}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>d{displayDaysLeft(o) ?? '?'}</span>
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #fecaca', whiteSpace: 'nowrap' as const }}>UNFULFIL.</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: uc, minWidth: 60 }}>{liveUrgency(o)}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, fontFamily: 'var(--font-mono)' }}>{o.tracking_number || '— no AWB —'}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>d{displayDaysLeft(o) ?? '?'}</span>
                       </div>
                     )
                   })}
@@ -2655,7 +2655,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 </label>
                 <textarea value={unfulfillableNote} onChange={e => setUnfulfillableNote(e.target.value)}
                   placeholder={unfulfillableReason === 'Other' ? 'Describe the issue...' : 'Any additional context...'}
-                  style={{ width: '100%', height: 68, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'DM Sans', resize: 'vertical' as const, outline: 'none' }}
+                  style={{ width: '100%', height: 68, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-sans)', resize: 'vertical' as const, outline: 'none' }}
                   onFocus={e => e.target.style.borderColor = 'var(--critical)'}
                   onBlur={e => e.target.style.borderColor = 'var(--border)'}
                 />
@@ -2678,11 +2678,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         <Modal title="Confirm EOD Dispatch" onClose={() => setShowEodConfirm(false)} width={520}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
             <div style={{ padding: '12px 16px', background: 'var(--dispatched-bg)', border: '1px solid #bbf7d0', borderRadius: 7, textAlign: 'center' as const }}>
-              <div style={{ fontSize: 24, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)' }}>{eodMatchResult.matched.length}</div>
+              <div style={{ fontSize: 24, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--dispatched)' }}>{eodMatchResult.matched.length}</div>
               <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>AWBs matched</div>
             </div>
             <div style={{ padding: '12px 16px', background: eodMatchResult.unmatched.length > 0 ? 'var(--critical-bg)' : 'var(--bg2)', border: `1px solid ${eodMatchResult.unmatched.length > 0 ? '#fecaca' : 'var(--border)'}`, borderRadius: 7, textAlign: 'center' as const }}>
-              <div style={{ fontSize: 24, fontFamily: 'DM Mono', fontWeight: 600, color: eodMatchResult.unmatched.length > 0 ? 'var(--critical)' : 'var(--text3)' }}>{eodMatchResult.unmatched.length}</div>
+              <div style={{ fontSize: 24, fontFamily: 'var(--font-mono)', fontWeight: 600, color: eodMatchResult.unmatched.length > 0 ? 'var(--critical)' : 'var(--text3)' }}>{eodMatchResult.unmatched.length}</div>
               <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>Unmatched</div>
             </div>
           </div>
@@ -2691,7 +2691,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               <p style={{ fontSize: 12, color: 'var(--critical)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={13} /> These orders had no AWB — will remain pending:</p>
               <div style={{ border: '1px solid #fecaca', borderRadius: 6, maxHeight: 120, overflowY: 'auto' }}>
                 {eodMatchResult.unmatched.map(o => (
-                  <div key={o.orderId} style={{ padding: '6px 12px', borderBottom: '1px solid #fecaca', fontSize: 12, fontFamily: 'DM Mono', color: 'var(--critical)' }}>{o.customerName} — {o.sku}</div>
+                  <div key={o.orderId} style={{ padding: '6px 12px', borderBottom: '1px solid #fecaca', fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--critical)' }}>{o.customerName} — {o.sku}</div>
                 ))}
               </div>
             </div>
@@ -2748,14 +2748,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       <Sidebar items={navItems} tab={tab === 'warehouse' ? `wh:${warehouseTab}` : tab} setTab={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />
       <div className="dl-content-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, minHeight: '100vh' }}>
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-        <div className="dl-breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, flexShrink: 0 }}>
-          <span style={{ fontSize: 12.5, color: 'var(--ink-3)', fontWeight: 500, textTransform: 'capitalize' as const }}>{(navItems.find(i => i.key === (tab === 'warehouse' ? `wh:${warehouseTab}` : tab))?.section) || 'orders'}</span>
-          <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>&rsaquo;</span>
-          <b style={{ color: 'var(--ink)', fontWeight: 600, fontSize: 15, whiteSpace: 'nowrap' as const }}>{navItems.find(i => i.key === (tab === 'warehouse' ? `wh:${warehouseTab}` : tab))?.label || ''}</b>
-        </div>
         <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
-          <div style={{ width: 30, height: 30, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'DM Mono', fontWeight: 500, fontSize: 14, color: '#fff' }}>D</div>
-          <span className="dl-wordmark" style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>DispatchLens</span>
+          <div style={{ width: 30, height: 30, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 14, color: '#fff' }}>D</div>
+          <span className="dl-wordmark" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>DispatchLens</span>
         </div>
         <nav ref={navRef} className="dl-nav" style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, minWidth: 0, overflowX: 'auto' as const }}>
           {/* Pipeline stages, in workflow order, joined by chevrons */}
@@ -2773,14 +2768,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 padding: '6px 11px', border: 'none', borderRadius: 6,
                 background: tab === key ? 'var(--accent-bg)' : 'transparent',
                 color: tab === key ? 'var(--accent)' : 'var(--text2)',
-                fontFamily: 'DM Sans', fontWeight: tab === key ? 600 : 400, fontSize: 13,
+                fontFamily: 'var(--font-sans)', fontWeight: tab === key ? 600 : 400, fontSize: 13,
                 cursor: 'pointer', transition: 'all 0.15s',
                 display: 'flex', alignItems: 'center', gap: 5,
                 position: 'relative' as const, whiteSpace: 'nowrap' as const,
               }}>
                 {label}
                 {count > 0 && (
-                  <span style={{ fontFamily: 'DM Mono', fontSize: 10, fontWeight: 600, background: tab === key ? 'var(--surface)' : 'var(--bg2)', color: tab === key ? 'var(--accent)' : 'var(--text3)', borderRadius: 8, padding: '1px 6px' }}>{count}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, background: tab === key ? 'var(--surface)' : 'var(--bg2)', color: tab === key ? 'var(--accent)' : 'var(--text3)', borderRadius: 8, padding: '1px 6px' }}>{count}</span>
                 )}
                 {key === 'review' && reviewCount > 0 && (
                   <span style={{ position: 'absolute' as const, top: 2, right: 2, width: 6, height: 6, borderRadius: '50%', background: 'var(--today)' }} />
@@ -2806,7 +2801,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               padding: '6px 10px', border: 'none', borderRadius: 6,
               background: tab === key ? 'var(--accent-bg)' : 'transparent',
               color: tab === key ? 'var(--accent)' : 'var(--text3)',
-              fontFamily: 'DM Sans', fontWeight: tab === key ? 600 : 400, fontSize: 12.5,
+              fontFamily: 'var(--font-sans)', fontWeight: tab === key ? 600 : 400, fontSize: 12.5,
               cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap' as const, flexShrink: 0,
             }}>
               {label}
@@ -2836,7 +2831,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 style={{
                   border: 'none', background: 'transparent',
                   color: 'var(--text)', fontSize: 13, outline: 'none',
-                  width: '100%', fontFamily: 'DM Sans',
+                  width: '100%', fontFamily: 'var(--font-sans)',
                 }}
               />
               {searchQuery && (
@@ -2856,7 +2851,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                 overflow: 'hidden',
               }}>
-                <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                <div style={{ padding: '8px 12px 6px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
                   {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
                 </div>
                 {searchResults.slice(0, 10).map(order => {
@@ -2876,15 +2871,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.order_id}</span>
-                          {lu && <span style={{ fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600, color: uc, flexShrink: 0 }}>{lu}</span>}
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.order_id}</span>
+                          {lu && <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600, color: uc, flexShrink: 0 }}>{lu}</span>}
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                           <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>{order.customer_name}</span>
-                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{order.sku}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{order.sku}</span>
                         </div>
                       </div>
-                      <div style={{ flexShrink: 0, fontSize: 10, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                      <div style={{ flexShrink: 0, fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
                         {order.is_dispatched ? '✓ dispatched' : order.is_cancelled ? 'cancelled' : order.plan_decision === 'scheduled' ? `📅 ${order.scheduled_date ? new Date(order.scheduled_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}` : order.plan_decision}
                       </div>
                     </button>
@@ -2913,7 +2908,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Search size={15} style={{ color: 'var(--text3)' }} />
                     <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Multi-order search</span>
-                    <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{searchResults.length} found{notFoundTerms.length ? ` \u00b7 ${notFoundTerms.length} not found` : ''}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{searchResults.length} found{notFoundTerms.length ? ` \u00b7 ${notFoundTerms.length} not found` : ''}</span>
                     <button onClick={() => setMultiSearchOpen(false)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', display: 'flex' }}><X size={16} /></button>
                   </div>
                   <div style={{ overflowY: 'auto' as const, flex: 1 }}>
@@ -2923,9 +2918,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         onMouseEnter={e => e.currentTarget.style.background = 'var(--bg2)'} onMouseLeave={e => e.currentTarget.style.background = 'none'}>
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3, flexWrap: 'wrap' as const }}>
-                            <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: 170 }}>{order.order_id}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: 170 }}>{order.order_id}</span>
                             <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{order.customer_name}</span>
-                            <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{order.sku}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{order.sku}</span>
                           </div>
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
                             <span style={{ fontSize: 11, fontWeight: 600, color: t.c, background: t.b, padding: '2px 8px', borderRadius: 4, whiteSpace: 'nowrap' as const, flexShrink: 0 }}>{u.label}</span>
@@ -2938,7 +2933,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     {notFoundTerms.map(t => (
                       <div key={t} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg2)' }}>
                         <AlertCircle size={14} style={{ color: 'var(--text3)', flexShrink: 0 }} />
-                        <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{t} \u2014 no order found</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{t} \u2014 no order found</span>
                       </div>
                     ))}
                     {searchResults.length === 0 && notFoundTerms.length === 0 && (
@@ -2950,9 +2945,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             )}
           </div>
 
-          <span className="dl-date-pill" style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)', whiteSpace: 'nowrap' as const }}>
+          <span className="dl-date-pill" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text3)', background: 'var(--bg2)', padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)', whiteSpace: 'nowrap' as const }}>
             {new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
           </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {user.user_metadata?.avatar_url && <img src={user.user_metadata.avatar_url} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />}
+            <span className="dl-username" style={{ fontSize: 13, color: 'var(--text2)' }}>{user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0]}</span>
+          </div>
+          <button onClick={() => setShowLogoutConfirm(true)} title="Sign out" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text3)', cursor: 'pointer', padding: '5px 8px', display: 'flex', alignItems: 'center', marginLeft: 4 }}><LogOut size={13} /></button>
         </div>
       </header>
 
@@ -2964,7 +2964,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Import Orders</h1>
               {orders.length > 0 && (
-                <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
                   {orders.filter(o => !o.is_cancelled && !o.is_dispatched).length} active orders in pool
                 </span>
               )}
@@ -2978,12 +2978,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <div key={key} style={{ ...card, padding: 20, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />
-                        <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color: 'var(--text2)', letterSpacing: '0.05em' }}>{label}</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, color: 'var(--text2)', letterSpacing: '0.05em' }}>{label}</span>
                         {text.trim() && <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)' }}>~{text.trim().split('\n').length - 1} rows</span>}
                       </div>
                       <textarea value={text} onChange={e => set(e.target.value)}
                         placeholder={`Copy from ${label} planning sheet (include header row) and paste here`}
-                        style={{ height: 260, width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', fontFamily: 'DM Mono', fontSize: 12, resize: 'vertical' as const, outline: 'none', lineHeight: 1.5, transition: 'border-color 0.15s' }}
+                        style={{ height: 260, width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: 12, resize: 'vertical' as const, outline: 'none', lineHeight: 1.5, transition: 'border-color 0.15s' }}
                         onFocus={e => e.target.style.borderColor = color}
                         onBlur={e => e.target.style.borderColor = 'var(--border)'}
                       />
@@ -3007,8 +3007,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           </div>
                           <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
                             <div style={{ display: 'flex', gap: 10 }}>
-                              <div style={{ flex: 1, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Bluedart</div><div style={{ fontSize: 24, fontWeight: 600, fontFamily: 'DM Mono' }}>{p.bdCount}</div></div>
-                              <div style={{ flex: 1, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Delhivery</div><div style={{ fontSize: 24, fontWeight: 600, fontFamily: 'DM Mono' }}>{p.dlCount}</div></div>
+                              <div style={{ flex: 1, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Bluedart</div><div style={{ fontSize: 24, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{p.bdCount}</div></div>
+                              <div style={{ flex: 1, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Delhivery</div><div style={{ fontSize: 24, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{p.dlCount}</div></div>
                               <div style={{ flex: 1.4, background: 'var(--bg2)', borderRadius: 10, padding: 12 }}><div style={{ fontSize: 12, color: 'var(--text3)' }}>Order dates</div><div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{fmtD(p.oldest)} \u2013 {fmtD(p.newest)}</div></div>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
@@ -3077,7 +3077,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 6 }}>
                       {importResult.unmappedSkus.map(u => (
-                        <span key={u.sku} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', background: 'var(--surface)', border: '1px solid #fed7aa', borderRadius: 5, fontSize: 12, fontFamily: 'DM Mono', color: 'var(--text)' }}>
+                        <span key={u.sku} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', background: 'var(--surface)', border: '1px solid #fed7aa', borderRadius: 5, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>
                           {u.sku} <span style={{ color: 'var(--text3)' }}>×{u.count}</span>
                         </span>
                       ))}
@@ -3097,7 +3097,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' as const }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg2)' }}>
                   <span style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}><Flag size={15} style={{ color: 'var(--critical)' }} /> SKUs marked unfulfillable</span>
-                  <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{Object.keys(flaggedSkus).length} flagged</span>
+                  <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{Object.keys(flaggedSkus).length} flagged</span>
                 </div>
                 {Object.entries(flaggedSkus).sort((a, b) => b[1].set_at.localeCompare(a[1].set_at)).map(([sku, f], i, arr) => {
                   const affected = orders.filter(o => (o.barcode_sku === sku || o.sku === sku) && o.plan_decision === 'unfulfillable' && !o.is_cancelled && !o.is_dispatched).length
@@ -3105,10 +3105,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   return (
                     <div key={sku} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700 }}>{sku}</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700 }}>{sku}</div>
                         <div style={{ fontSize: 12, color: 'var(--text3)' }}>{f.reason}{f.note ? ` · "${f.note}"` : ''}{when ? ` · flagged ${when}` : ''}{f.set_by ? ` by ${f.set_by.split('@')[0]}` : ''}</div>
                       </div>
-                      <span style={{ fontSize: 12, fontFamily: 'DM Mono', color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 8px', borderRadius: 6, whiteSpace: 'nowrap' as const }}>{affected} order{affected === 1 ? '' : 's'}</span>
+                      <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 8px', borderRadius: 6, whiteSpace: 'nowrap' as const }}>{affected} order{affected === 1 ? '' : 's'}</span>
                       <button onClick={() => setFulfillableConfirm({ sku, count: affected })}
                         style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
                         Mark fulfillable
@@ -3178,7 +3178,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   const uc = urgencyStyle(tier)
                   const isActive = activeFilter === tier
                   return (
-                    <button key={tier} onClick={() => toggleFilter(tier)} style={{ padding: '5px 12px', borderRadius: 6, border: `1px solid ${isActive ? uc.border : 'var(--border)'}`, background: isActive ? uc.bg : 'var(--surface)', color: isActive ? uc.color : 'var(--text2)', fontSize: 11, fontFamily: 'DM Mono', cursor: 'pointer', fontWeight: 500 }}>
+                    <button key={tier} onClick={() => toggleFilter(tier)} style={{ padding: '5px 12px', borderRadius: 6, border: `1px solid ${isActive ? uc.border : 'var(--border)'}`, background: isActive ? uc.bg : 'var(--surface)', color: isActive ? uc.color : 'var(--text2)', fontSize: 11, fontFamily: 'var(--font-mono)', cursor: 'pointer', fontWeight: 500 }}>
                       {tier}{tierCounts[tier] ? ` (${tierCounts[tier]})` : ''}
                     </button>
                   )
@@ -3261,7 +3261,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           if (label === 'SKU_FILTER_SPECIAL') return (
                             <th key="sku" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span onClick={() => handleColSort('sku')} style={{ color: sortCol === 'sku' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}>
+                                <span onClick={() => handleColSort('sku')} style={{ color: sortCol === 'sku' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}>
                                   SKU{sortCol === 'sku' ? <span style={{ marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
                                 </span>
                                 <button onClick={e => {
@@ -3275,7 +3275,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   border: skuFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                   borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                   color: skuFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                                 }}>
                                   {skuFilter.size > 0 ? `${skuFilter.size} ▾` : '▾'}
                                 </button>
@@ -3284,11 +3284,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               {showSkuPopover && (
                                 <div style={{ position: 'fixed' as const, top: skuPopoverPos.top, left: skuPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 220, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>SKU</span>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>SKU</span>
                                     <button onClick={() => { setSkuFilter(new Set()); setShowSkuPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                                   </div>
                                   <input value={skuSearch} onChange={e => setSkuSearch(e.target.value)} placeholder="Search SKUs…"
-                                    style={{ width: '100%', padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, outline: 'none', marginBottom: 6, fontFamily: 'DM Mono' }} />
+                                    style={{ width: '100%', padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, outline: 'none', marginBottom: 6, fontFamily: 'var(--font-mono)' }} />
                                   <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
                                     {Array.from(new Set([...skuFacet.map(o => o.sku), ...skuFilter])).filter(s => !skuSearch || s.toLowerCase().includes(skuSearch.toLowerCase())).sort().map(sku => {
                                       const isSelected = skuFilter.has(sku)
@@ -3299,7 +3299,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                           <span style={{ width: 13, height: 13, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                             {isSelected && <span style={{ color: '#fff', fontSize: 8 }}>✓</span>}
                                           </span>
-                                          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
+                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
                                           <span style={{ fontSize: 10, color: 'var(--text3)' }}>{count}</span>
                                         </button>
                                       )
@@ -3317,7 +3317,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span
                                   onClick={() => handleColSort('courier')}
-                                  style={{ color: sortCol === 'courier' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
+                                  style={{ color: sortCol === 'courier' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
                                 >
                                   Cour.{sortCol === 'courier' ? <span style={{ marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
                                 </span>
@@ -3334,7 +3334,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                     border: courierFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                     borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                     color: courierFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                    fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                    fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                                   }}
                                 >
                                   {courierFilter.size > 0 ? `${courierFilter.size} ▾` : '▾'}
@@ -3358,7 +3358,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   onClick={e => e.stopPropagation()}
                                 >
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>COURIER</span>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>COURIER</span>
                                     <button onClick={() => { setCourierFilter(new Set()); setShowCourierPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
@@ -3382,7 +3382,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                           <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                             {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
                                           </span>
-                                          <span style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 600, color }}>{courier === 'Bluedart' ? 'BD' : 'DL'}</span>
+                                          <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600, color }}>{courier === 'Bluedart' ? 'BD' : 'DL'}</span>
                                           <span style={{ fontSize: 11, color: 'var(--text)', flex: 1 }}>{courier}</span>
                                           <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
                                         </button>
@@ -3397,7 +3397,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           if (label === 'Dispatch By') return (
                             <th key="dispatch_by" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span onClick={() => handleColSort('dispatch_by')} style={{ color: sortCol === 'dispatch_by' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}>
+                                <span onClick={() => handleColSort('dispatch_by')} style={{ color: sortCol === 'dispatch_by' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}>
                                   Dispatch By{sortCol === 'dispatch_by' ? <span style={{ marginLeft: 3 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
                                 </span>
                                 <button onClick={e => {
@@ -3411,7 +3411,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   border: dispatchByFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                   borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                   color: dispatchByFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                                 }}>
                                   {dispatchByFilter.size > 0 ? `${dispatchByFilter.size} ▾` : '▾'}
                                 </button>
@@ -3420,7 +3420,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               {showDispatchByPopover && (
                                 <div style={{ position: 'fixed' as const, top: dispatchByPopoverPos.top, left: dispatchByPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DISPATCH BY</span>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>DISPATCH BY</span>
                                     <button onClick={() => { setDispatchByFilter(new Set()); setShowDispatchByPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
@@ -3438,7 +3438,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                           <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                             {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
                                           </span>
-                                          <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color, flex: 1 }}>{label}{isToday && ' (Today)'}</span>
+                                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, color, flex: 1 }}>{label}{isToday && ' (Today)'}</span>
                                           <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
                                         </button>
                                       )
@@ -3478,7 +3478,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span
                               onClick={() => handleColSort('days_left')}
-                              style={{ color: sortCol === 'days_left' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
+                              style={{ color: sortCol === 'days_left' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
                             >
                               Days Left
                               {sortCol === 'days_left' ? <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 4, opacity: 0.3 }}>↕</span>}
@@ -3496,7 +3496,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 border: daysFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                 borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                 color: daysFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                               }}
                             >
                               {daysFilter.size > 0 ? `${daysFilter.size} ▾` : '▾'}
@@ -3520,7 +3520,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               onClick={e => e.stopPropagation()}
                             >
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DAYS LEFT</span>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>DAYS LEFT</span>
                                 <button onClick={() => { setDaysFilter(new Set()); setShowDaysPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 220, overflowY: 'auto' }}>
@@ -3543,7 +3543,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                       <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                         {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
                                       </span>
-                                      <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color }}>{d}</span>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color }}>{d}</span>
                                       <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 'auto' }}>
                                         {daysFacet.filter(o => displayDaysLeft(o) === d).length}
                                       </span>
@@ -3557,7 +3557,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </th>
                         <th style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Decision</span>
+                            <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500 }}>Decision</span>
                             <button
                               onClick={e => {
                                 e.stopPropagation()
@@ -3572,7 +3572,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 border: dispatchDateFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                 borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                 color: dispatchDateFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                               }}
                             >
                               {dispatchDateFilter.size > 0 ? `${dispatchDateFilter.size} ▾` : '▾'}
@@ -3596,7 +3596,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               onClick={e => e.stopPropagation()}
                             >
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DISPATCH DATE</span>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>DISPATCH DATE</span>
                                 <button onClick={() => { setDispatchDateFilter(new Set()); setShowDispatchDatePopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
@@ -3623,7 +3623,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                       <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                         {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
                                       </span>
-                                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color, flex: 1 }}>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, color, flex: 1 }}>
                                         {label}{isToday && ' (Today)'}
                                       </span>
                                       <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
@@ -3686,7 +3686,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 {showCancelled && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px' }}>
                     {cancelledOrders.map(o => (
-                      <div key={o.id} style={{ padding: '5px 0', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16 }}>
+                      <div key={o.id} style={{ padding: '5px 0', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text3)', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16 }}>
                         <span>{o.order_id}</span><span>{o.sku}</span><span>{o.customer_name}</span>
                         {o.manual_cancelled && <span style={{ color: 'var(--critical)', fontSize: 10 }}>MANUAL</span>}
                       </div>
@@ -3704,7 +3704,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 {showDispatched && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px' }}>
                     {dispatchedOrders.map(o => (
-                      <div key={o.id} style={{ padding: '5px 0', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--dispatched)', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16 }}>
+                      <div key={o.id} style={{ padding: '5px 0', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--dispatched)', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16 }}>
                         <span>{o.order_id}</span><span>{o.sku}</span><span>{o.customer_name}</span>
                       </div>
                     ))}
@@ -3737,7 +3737,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   return (
                     <div key={reason} style={{ ...card, overflow: 'hidden' }}>
                       <div style={{ padding: '12px 20px', background: 'var(--bg2)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 13, color: 'var(--critical)' }}>{reason}</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 13, color: 'var(--critical)' }}>{reason}</span>
                         <span style={{ fontSize: 12, color: 'var(--text3)' }}>{group.length} order{group.length !== 1 ? 's' : ''}</span>
                       </div>
                       <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 320px)' }}>
@@ -3745,7 +3745,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--border)' }}>
                             {['Customer', 'SKU', 'Courier', 'Promise', 'Days Left', 'Urgency', 'Note', 'Target Dispatch Date', 'Action'].map(h => (
-                              <th key={h} style={{ padding: '8px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
+                              <th key={h} style={{ padding: '8px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const }}>{h}</th>
                             ))}
                           </tr>
                         </thead>
@@ -3758,30 +3758,30 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               <tr key={order.id} style={{ borderBottom: i < group.length - 1 ? '1px solid var(--border)' : 'none', background: savedDate ? '#f0fdf4' : 'transparent' }}>
                                 <td style={{ padding: '10px 16px' }}>
                                   <div style={{ fontSize: 13, fontWeight: 500 }}>{order.customer_name}</div>
-                                  <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', marginTop: 2 }}>{order.order_id.slice(0, 18)}</div>
+                                  <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)', marginTop: 2 }}>{order.order_id.slice(0, 18)}</div>
                                 </td>
                                 <td style={{ padding: '10px 16px' }}>
-                                  <span style={{ fontFamily: 'DM Mono', fontSize: 11, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span>
                                 </td>
                                 <td style={{ padding: '10px 16px' }}>
-                                  <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>
+                                  <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>
                                     {order.courier === 'Bluedart' ? 'BD' : 'DL'}
                                   </span>
                                 </td>
                                 <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
-                                  <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>
                                   {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
                                 </td>
                                 <td style={{ padding: '10px 16px' }}>
-                                  <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>
                                     {order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
                                   </span>
                                 </td>
                                 <td style={{ padding: '10px 16px', textAlign: 'center' as const }}>
-                                  <span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span>
                                 </td>
                                 <td style={{ padding: '10px 16px' }}>
-                                  <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: uc.color, background: uc.bg, border: `1px solid ${uc.border}` }}>
+                                  <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 500, color: uc.color, background: uc.bg, border: `1px solid ${uc.border}` }}>
                                     {liveUrgency(order) || '—'}
                                   </span>
                                 </td>
@@ -3836,7 +3836,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   return (
                     <div style={{ ...card, overflow: 'hidden' }}>
                       <div style={{ padding: '12px 20px', background: 'var(--bg2)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontFamily: 'DM Mono', fontWeight: 500, fontSize: 13, color: 'var(--text2)' }}>No reason assigned</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 13, color: 'var(--text2)' }}>No reason assigned</span>
                         <span style={{ fontSize: 12, color: 'var(--text3)' }}>{noReason.length} order{noReason.length !== 1 ? 's' : ''}</span>
                       </div>
                       <div style={{ overflowX: 'auto' as const, overflowY: 'auto' as const, maxHeight: 'calc(100vh - 320px)' }}>
@@ -3844,7 +3844,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <thead>
                           <tr style={{ borderBottom: '1px solid var(--border)' }}>
                             {['Customer', 'SKU', 'Courier', 'Promise', 'Days Left', 'Target Dispatch Date', 'Action'].map(h => (
-                              <th key={h} style={{ padding: '8px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>{h}</th>
+                              <th key={h} style={{ padding: '8px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{h}</th>
                             ))}
                           </tr>
                         </thead>
@@ -3857,16 +3857,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               <tr key={order.id} style={{ borderBottom: i < noReason.length - 1 ? '1px solid var(--border)' : 'none', background: savedDate ? '#f0fdf4' : 'transparent' }}>
                                 <td style={{ padding: '10px 16px' }}>
                                   <div style={{ fontSize: 13, fontWeight: 500 }}>{order.customer_name}</div>
-                                  <div style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', marginTop: 2 }}>{order.order_id.slice(0, 18)}</div>
+                                  <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)', marginTop: 2 }}>{order.order_id.slice(0, 18)}</div>
                                 </td>
-                                <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 11, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
-                                <td style={{ padding: '10px 16px' }}><span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed' }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span></td>
-                                <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>{order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}{order.dispatch_generated_at && (order.dispatch_gen_status === 'failed'
-                                  ? <span title={`Dispatch doc issue: ${order.dispatch_gen_error || 'failed'}`} style={{ marginLeft: 8, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '1px 6px', borderRadius: 4 }}>⚠ gen: {order.dispatch_gen_error || 'failed'}</span>
-                                  : <span title={`Dispatch generated ${new Date(order.dispatch_generated_at).toLocaleString('en-IN')}`} style={{ marginLeft: 8, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '1px 6px', borderRadius: 4 }}>✓ gen</span>
+                                <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{order.sku}</span></td>
+                                <td style={{ padding: '10px 16px' }}><span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 500, color: order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed' }}>{order.courier === 'Bluedart' ? 'BD' : 'DL'}</span></td>
+                                <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>{order.pincode}</span>{order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}{order.dispatch_generated_at && (order.dispatch_gen_status === 'failed'
+                                  ? <span title={`Dispatch doc issue: ${order.dispatch_gen_error || 'failed'}`} style={{ marginLeft: 8, fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '1px 6px', borderRadius: 4 }}>⚠ gen: {order.dispatch_gen_error || 'failed'}</span>
+                                  : <span title={`Dispatch generated ${new Date(order.dispatch_generated_at).toLocaleString('en-IN')}`} style={{ marginLeft: 8, fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '1px 6px', borderRadius: 4 }}>✓ gen</span>
                                 )}</td>
-                                <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
-                                <td style={{ padding: '10px 16px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span></td>
+                                <td style={{ padding: '10px 16px' }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
+                                <td style={{ padding: '10px 16px', textAlign: 'center' as const }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span></td>
                                 <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <DrumDatePicker value={inputDate} min={new Date().toISOString().split('T')[0]} onChange={v => setTargetDates(prev => ({ ...prev, [order.id]: v }))} placeholder="Set date" />
@@ -3917,7 +3917,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   {([['all', 'All'], ['Bluedart', 'BD'], ['Delhivery', 'DL']] as const).map(([val, lbl]) => (
                     <button key={val} onClick={() => setPickCourierFilter(val)}
                       style={{ padding: '5px 12px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                        fontFamily: 'DM Mono',
+                        fontFamily: 'var(--font-mono)',
                         background: pickCourierFilter === val ? 'var(--surface)' : 'transparent',
                         color: pickCourierFilter === val ? (val === 'Bluedart' ? '#2563eb' : val === 'Delhivery' ? '#7c3aed' : 'var(--text)') : 'var(--text3)',
                         boxShadow: pickCourierFilter === val ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>
@@ -3947,12 +3947,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <thead style={{ position: 'sticky' as const, top: 0, zIndex: 20 }}>
                       <tr style={{ background: 'var(--bg2)', borderBottom: '1px solid var(--border)' }}>
                         {/* Date — sortable + filter */}
-                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>
+                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span onClick={() => { setPickSortDir(d => pickSortKey === 'date' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('date') }} style={{ cursor: 'pointer', userSelect: 'none' as const, color: pickSortKey === 'date' ? 'var(--accent)' : 'var(--text3)' }}>
                               Date {pickSortKey === 'date' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
                             </span>
-                            <button onClick={e => { e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect(); setPickPopoverPos({ top: rect.bottom + 6, left: rect.left }); setShowPickDatePopover(v => !v); setShowPickSkuPopover(false) }} style={{ background: pickDateFilter.size > 0 ? 'var(--accent-bg)' : 'none', border: pickDateFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: '1px 5px', color: pickDateFilter.size > 0 ? 'var(--accent)' : 'var(--text3)', fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4 }}>
+                            <button onClick={e => { e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect(); setPickPopoverPos({ top: rect.bottom + 6, left: rect.left }); setShowPickDatePopover(v => !v); setShowPickSkuPopover(false) }} style={{ background: pickDateFilter.size > 0 ? 'var(--accent-bg)' : 'none', border: pickDateFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: '1px 5px', color: pickDateFilter.size > 0 ? 'var(--accent)' : 'var(--text3)', fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
                               {pickDateFilter.size > 0 ? `${pickDateFilter.size} ▾` : '▾'}
                             </button>
                             {pickDateFilter.size > 0 && <button onClick={() => setPickDateFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
@@ -3960,7 +3960,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           {showPickDatePopover && (
                             <div style={{ position: 'fixed' as const, top: pickPopoverPos.top, left: pickPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DATE</span>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>DATE</span>
                                 <button onClick={() => { setPickDateFilter(new Set()); setShowPickDatePopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
@@ -3971,7 +3971,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   return (
                                     <button key={date} onClick={() => setPickDateFilter(prev => { const n = new Set(prev); n.has(date) ? n.delete(date) : n.add(date); return n })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
                                       <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{isSelected && <span style={{ color: '#fff', fontSize: 9 }}>✓</span>}</span>
-                                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: date === today ? '#059669' : 'var(--text)', flex: 1 }}>{date === today ? `Today · ${label}` : label}</span>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: date === today ? '#059669' : 'var(--text)', flex: 1 }}>{date === today ? `Today · ${label}` : label}</span>
                                       <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
                                     </button>
                                   )
@@ -3982,16 +3982,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           )}
                         </th>
                         {/* Courier — sortable */}
-                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'courier' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('courier') }} style={{ padding: '9px 16px', textAlign: 'left' as const, color: pickSortKey === 'courier' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
+                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'courier' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('courier') }} style={{ padding: '9px 16px', textAlign: 'left' as const, color: pickSortKey === 'courier' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
                           Courier {pickSortKey === 'courier' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
                         </th>
                         {/* SKU — sortable + filter */}
-                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>
+                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span onClick={() => { setPickSortDir(d => pickSortKey === 'sku' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('sku') }} style={{ cursor: 'pointer', userSelect: 'none' as const, color: pickSortKey === 'sku' ? 'var(--accent)' : 'var(--text3)' }}>
                               SKU {pickSortKey === 'sku' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
                             </span>
-                            <button onClick={e => { e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect(); setPickPopoverPos({ top: rect.bottom + 6, left: rect.left }); setShowPickSkuPopover(v => !v); setShowPickDatePopover(false) }} style={{ background: pickSkuFilter.size > 0 ? 'var(--accent-bg)' : 'none', border: pickSkuFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: '1px 5px', color: pickSkuFilter.size > 0 ? 'var(--accent)' : 'var(--text3)', fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4 }}>
+                            <button onClick={e => { e.stopPropagation(); const rect = e.currentTarget.getBoundingClientRect(); setPickPopoverPos({ top: rect.bottom + 6, left: rect.left }); setShowPickSkuPopover(v => !v); setShowPickDatePopover(false) }} style={{ background: pickSkuFilter.size > 0 ? 'var(--accent-bg)' : 'none', border: pickSkuFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', padding: '1px 5px', color: pickSkuFilter.size > 0 ? 'var(--accent)' : 'var(--text3)', fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
                               {pickSkuFilter.size > 0 ? `${pickSkuFilter.size} ▾` : '▾'}
                             </button>
                             {pickSkuFilter.size > 0 && <button onClick={() => setPickSkuFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '0 2px' }}>✕</button>}
@@ -3999,10 +3999,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           {showPickSkuPopover && (
                             <div style={{ position: 'fixed' as const, top: pickPopoverPos.top, left: pickPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 220, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>SKU</span>
+                                <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>SKU</span>
                                 <button onClick={() => { setPickSkuFilter(new Set()); setShowPickSkuPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                               </div>
-                              <input value={pickSkuSearch} onChange={e => setPickSkuSearch(e.target.value)} placeholder="Search SKUs…" style={{ width: '100%', padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, outline: 'none', marginBottom: 6, fontFamily: 'DM Mono' }} />
+                              <input value={pickSkuSearch} onChange={e => setPickSkuSearch(e.target.value)} placeholder="Search SKUs…" style={{ width: '100%', padding: '5px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, outline: 'none', marginBottom: 6, fontFamily: 'var(--font-mono)' }} />
                               <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
                                 {pickSkus.filter(s => !pickSkuSearch || s.toLowerCase().includes(pickSkuSearch.toLowerCase())).map(sku => {
                                   const isSelected = pickSkuFilter.has(sku)
@@ -4010,7 +4010,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   return (
                                     <button key={sku} onClick={() => setPickSkuFilter(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 5, border: 'none', background: isSelected ? 'var(--accent-bg)' : 'transparent', cursor: 'pointer', textAlign: 'left' as const, width: '100%' }}>
                                       <span style={{ width: 13, height: 13, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{isSelected && <span style={{ color: '#fff', fontSize: 8 }}>✓</span>}</span>
-                                      <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
                                       <span style={{ fontSize: 10, color: 'var(--text3)' }}>{count}</span>
                                     </button>
                                   )
@@ -4021,15 +4021,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           )}
                         </th>
                         {/* Qty — sortable */}
-                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'qty' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('qty') }} style={{ padding: '9px 16px', textAlign: 'right' as const, color: pickSortKey === 'qty' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
+                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'qty' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('qty') }} style={{ padding: '9px 16px', textAlign: 'right' as const, color: pickSortKey === 'qty' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
                           Qty {pickSortKey === 'qty' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
                         </th>
                         {/* Orders — sortable */}
-                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'count' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('count') }} style={{ padding: '9px 16px', textAlign: 'right' as const, color: pickSortKey === 'count' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
+                        <th onClick={() => { setPickSortDir(d => pickSortKey === 'count' ? (d === 'asc' ? 'desc' : 'asc') : 'asc'); setPickSortKey('count') }} style={{ padding: '9px 16px', textAlign: 'right' as const, color: pickSortKey === 'count' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)', cursor: 'pointer', userSelect: 'none' as const }}>
                           Orders {pickSortKey === 'count' ? (pickSortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.3 }}>↕</span>}
                         </th>
                         {/* Action */}
-                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>Action</th>
+                        <th style={{ padding: '9px 16px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4042,13 +4042,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         return (
                           <tr key={`${row.date}__${row.courier}__${row.sku}`} style={{ borderBottom: '1px solid var(--border)', background: isUnfulfillable ? 'var(--critical-bg)' : (i % 2 === 0 ? 'transparent' : 'var(--bg2)') }}>
                             <td style={{ padding: '9px 16px', whiteSpace: 'nowrap' as const }}>
-                              <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 600, color: isToday ? '#059669' : 'var(--text2)' }}>{isToday ? `Today · ${dateLabel}` : dateLabel}</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: isToday ? '#059669' : 'var(--text2)' }}>{isToday ? `Today · ${dateLabel}` : dateLabel}</span>
                             </td>
                             <td style={{ padding: '9px 16px', whiteSpace: 'nowrap' as const }}>
-                              <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: cc, background: row.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>{row.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
+                              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: cc, background: row.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>{row.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
                             </td>
-                            <td style={{ padding: '9px 16px', fontFamily: 'DM Mono', fontSize: 12, color: isUnfulfillable ? 'var(--critical)' : 'var(--text)' }}>{row.sku}</td>
-                            <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: cc, fontSize: 14 }}>{row.qty}</td>
+                            <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: isUnfulfillable ? 'var(--critical)' : 'var(--text)' }}>{row.sku}</td>
+                            <td style={{ padding: '9px 16px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontWeight: 700, color: cc, fontSize: 14 }}>{row.qty}</td>
                             <td style={{ padding: '9px 16px', textAlign: 'right' as const, color: 'var(--text2)', fontSize: 13 }}>{row.count}</td>
                             <td style={{ padding: '9px 16px', whiteSpace: 'nowrap' as const }}>
                               {!isUnfulfillable ? (
@@ -4058,7 +4058,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   Unfulfillable
                                 </button>
                               ) : (
-                                <span style={{ fontSize: 11, color: 'var(--critical)', fontFamily: 'DM Mono', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <span style={{ fontSize: 11, color: 'var(--critical)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 3 }}>
                                   <AlertCircle size={11} />
                                   {orders.find(o => o.sku === row.sku && o.unfulfillable_reason)?.unfulfillable_reason || 'Unfulfillable'}
                                 </span>
@@ -4073,10 +4073,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <td style={{ padding: '10px 16px', fontWeight: 700, fontSize: 13 }} colSpan={3}>
                           Total{pickCourierFilter !== 'all' ? ` · ${pickCourierFilter === 'Bluedart' ? 'BD' : 'DL'}` : ''} · {pickView.length} lines
                         </td>
-                        <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
                           {pickView.reduce((sum, r) => sum + r.qty, 0)}
                         </td>
-                        <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 14, color: 'var(--text2)' }}>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: 'var(--text2)' }}>
                           {pickView.reduce((sum, r) => sum + r.count, 0)}
                         </td>
                         <td />
@@ -4098,7 +4098,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   { label: 'SKUs', value: upcomingDemand.allSkus.length, color: 'var(--accent)', bg: 'var(--accent-bg)', border: 'var(--accent)' },
                 ].map(k => (
                   <div key={k.label} style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '5px 14px', background: k.bg, border: `1px solid ${k.border}`, borderRadius: 20 }}>
-                    <span style={{ fontFamily: 'DM Mono', fontSize: 15, fontWeight: 700, color: k.color }}>{k.value}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700, color: k.color }}>{k.value}</span>
                     <span style={{ fontSize: 11, color: 'var(--text3)' }}>{k.label}</span>
                   </div>
                 ))}
@@ -4121,12 +4121,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 260, padding: 12,
                     }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, color: 'var(--text2)' }}>FILTER SKUs</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--text2)' }}>FILTER SKUs</span>
                         <button onClick={() => setDemandSkuFilter(new Set())} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear all</button>
                       </div>
                       <input value={demandSkuSearch} onChange={e => setDemandSkuSearch(e.target.value)}
                         placeholder="Search SKUs…"
-                        style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', marginBottom: 8, fontFamily: 'DM Mono' }}
+                        style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, outline: 'none', marginBottom: 8, fontFamily: 'var(--font-mono)' }}
                       />
                       <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
                         {upcomingDemand.allSkus.filter(s => !demandSkuSearch || s.toLowerCase().includes(demandSkuSearch.toLowerCase())).map(sku => (
@@ -4135,8 +4135,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             <span style={{ width: 13, height: 13, borderRadius: 3, border: `2px solid ${demandSkuFilter.has(sku) ? 'var(--accent)' : 'var(--border2)'}`, background: demandSkuFilter.has(sku) ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                               {demandSkuFilter.has(sku) && <span style={{ color: '#fff', fontSize: 8 }}>✓</span>}
                             </span>
-                            <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
-                            <span style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{upcomingDemand.skuTotals[sku]}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)', flex: 1 }}>{sku}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{upcomingDemand.skuTotals[sku]}</span>
                           </button>
                         ))}
                       </div>
@@ -4187,13 +4187,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 12 }}>
                       <thead>
                         <tr style={{ background: 'var(--bg2)', borderBottom: '2px solid var(--border2)' }}>
-                          <th onClick={() => setDemandSort(s => ({ key: 'sku', dir: s.key === 'sku' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'asc' }))} style={{ padding: '9px 16px', textAlign: 'left' as const, fontFamily: 'DM Mono', fontSize: 11, color: demandSort.key === 'sku' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'sticky' as const, left: 0, background: 'var(--bg2)', zIndex: 1, minWidth: 160, cursor: 'pointer', userSelect: 'none' as const }}>SKU{demandArrow('sku') || (demandSort.key !== 'sku' ? ' ↕' : '')}</th>
-                          <th onClick={() => setDemandSort(s => ({ key: 'total', dir: s.key === 'total' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'desc' }))} style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: demandSort.key === 'total' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }}>Total{demandArrow('total') || (demandSort.key !== 'total' ? ' ↕' : '')}</th>
-                          <th onClick={() => setDemandSort(s => ({ key: 'stock', dir: s.key === 'stock' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'desc' }))} style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontSize: 11, color: demandSort.key === 'stock' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }} title="Stock remaining after the picklist is fulfilled (stock − committed to picklist)">Stock avail.{demandArrow('stock') || (demandSort.key !== 'stock' ? ' ↕' : '')}</th>
+                          <th onClick={() => setDemandSort(s => ({ key: 'sku', dir: s.key === 'sku' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'asc' }))} style={{ padding: '9px 16px', textAlign: 'left' as const, fontFamily: 'var(--font-mono)', fontSize: 11, color: demandSort.key === 'sku' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, position: 'sticky' as const, left: 0, background: 'var(--bg2)', zIndex: 1, minWidth: 160, cursor: 'pointer', userSelect: 'none' as const }}>SKU{demandArrow('sku') || (demandSort.key !== 'sku' ? ' ↕' : '')}</th>
+                          <th onClick={() => setDemandSort(s => ({ key: 'total', dir: s.key === 'total' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'desc' }))} style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontSize: 11, color: demandSort.key === 'total' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }}>Total{demandArrow('total') || (demandSort.key !== 'total' ? ' ↕' : '')}</th>
+                          <th onClick={() => setDemandSort(s => ({ key: 'stock', dir: s.key === 'stock' ? (s.dir === 'asc' ? 'desc' : 'asc') : 'desc' }))} style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontSize: 11, color: demandSort.key === 'stock' ? 'var(--accent)' : 'var(--text3)', fontWeight: 500, whiteSpace: 'nowrap' as const, cursor: 'pointer', userSelect: 'none' as const }} title="Stock remaining after the picklist is fulfilled (stock − committed to picklist)">Stock avail.{demandArrow('stock') || (demandSort.key !== 'stock' ? ' ↕' : '')}</th>
                           {cols.map(col => (
                             <th key={col.key} style={{
                               padding: '9px 12px', textAlign: 'center' as const,
-                              fontFamily: 'DM Mono', fontSize: 11, fontWeight: 600,
+                              fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600,
                               whiteSpace: 'nowrap' as const, minWidth: 80,
                               color: col.isOverdue ? '#dc2626' : col.isUrgent ? '#059669' : 'var(--text2)',
                               background: col.isOverdue ? '#fef2f2' : col.isUrgent ? '#ecfdf5' : 'transparent',
@@ -4213,15 +4213,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           const rowTotal = upcomingDemand.skuTotals[sku] || 0
                           return (
                             <tr key={sku} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
-                              <td style={{ padding: '8px 16px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)', fontWeight: 500, position: 'sticky' as const, left: 0, background: i % 2 === 0 ? 'var(--surface)' : 'var(--bg2)', zIndex: 1, whiteSpace: 'nowrap' as const }}>{sku}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--text)', fontSize: 13 }}>{rowTotal}</td>
+                              <td style={{ padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)', fontWeight: 500, position: 'sticky' as const, left: 0, background: i % 2 === 0 ? 'var(--surface)' : 'var(--bg2)', zIndex: 1, whiteSpace: 'nowrap' as const }}>{sku}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text)', fontSize: 13 }}>{rowTotal}</td>
                               {(() => {
                                 const stk = stockByPlatformSku[sku]
                                 const committed = picklistCommittedBySku[sku] || 0
                                 const remaining = stk === undefined ? undefined : stk - committed
                                 const covered = remaining !== undefined && remaining >= rowTotal
                                 return (
-                                  <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 600, fontSize: 12,
+                                  <td style={{ padding: '8px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 12,
                                     color: remaining === undefined ? 'var(--text3)' : covered ? 'var(--dispatched)' : 'var(--critical)' }}
                                     title={stk !== undefined && committed > 0 ? `${stk} in stock − ${committed} committed to picklist = ${remaining} available` : undefined}>
                                     {remaining === undefined ? '—' : remaining}
@@ -4237,7 +4237,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 return (
                                   <td key={col.key} style={{
                                     padding: '8px 12px', textAlign: 'center' as const,
-                                    fontFamily: 'DM Mono',
+                                    fontFamily: 'var(--font-mono)',
                                     background: qty > 0 ? (col.isOverdue ? '#fef2f2' : col.isUrgent ? 'var(--today-bg)' : 'transparent') : 'transparent',
                                   }}>
                                     {qty > 0 ? (
@@ -4257,10 +4257,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       </tbody>
                       <tfoot>
                         <tr style={{ borderTop: '2px solid var(--border2)', background: 'var(--bg2)' }}>
-                          <td style={{ padding: '9px 16px', fontFamily: 'DM Mono', fontSize: 11, fontWeight: 600, color: 'var(--text2)', position: 'sticky' as const, left: 0, background: 'var(--bg2)' }}>Total pcs</td>
-                          <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{upcomingDemand.totalQty}</td>
+                          <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: 'var(--text2)', position: 'sticky' as const, left: 0, background: 'var(--bg2)' }}>Total pcs</td>
+                          <td style={{ padding: '9px 12px', textAlign: 'right' as const, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{upcomingDemand.totalQty}</td>
                           {cols.map(col => (
-                            <td key={col.key} style={{ padding: '9px 12px', textAlign: 'center' as const, fontFamily: 'DM Mono', fontWeight: 700, fontSize: 13, color: col.isOverdue ? '#dc2626' : col.isUrgent ? 'var(--today)' : 'var(--text)' }}>
+                            <td key={col.key} style={{ padding: '9px 12px', textAlign: 'center' as const, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 13, color: col.isOverdue ? '#dc2626' : col.isUrgent ? 'var(--today)' : 'var(--text)' }}>
                               {colTotal(col.key) || '—'}
                             </td>
                           ))}
@@ -4280,7 +4280,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' as const }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Dispatched Orders</h1>
-              <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{filteredDispatched.length} in window</span>
+              <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{filteredDispatched.length} in window</span>
               {/* Sparkline: dispatches per day over the last 7 days (IST), from real dispatched_at data */}
               {(() => {
                 const days: number[] = Array(7).fill(0)
@@ -4324,7 +4324,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               {/* Sync tracking */}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
                 {trackingLastSync && (
-                  <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
                     Synced {trackingLastSync.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 )}
@@ -4344,7 +4344,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   value={dispatchedSearch}
                   onChange={e => setDispatchedSearch(e.target.value)}
                   placeholder="Search dispatched…"
-                  style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'DM Sans', width: 200 }}
+                  style={{ border: 'none', background: 'transparent', color: 'var(--text)', fontSize: 13, outline: 'none', fontFamily: 'var(--font-sans)', width: 200 }}
                 />
                 {dispatchedSearch && <button onClick={() => setDispatchedSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 0 }}><X size={12} /></button>}
               </div>
@@ -4391,7 +4391,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           style={{
                             flex: n, minWidth: 26, border: 'none', cursor: 'pointer', padding: 0,
                             background: sg.bg, color: sg.fg,
-                            fontSize: 11, fontWeight: 600, fontFamily: 'DM Sans',
+                            fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-sans)',
                             whiteSpace: 'nowrap' as const, overflow: 'hidden',
                             boxShadow: isOn ? `inset 0 -3px 0 ${sg.fg}` : 'none',
                             opacity: dispatchedStatusFilter.size > 0 && !isOn ? 0.45 : 1,
@@ -4432,7 +4432,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           return (
                             <th key="courier" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Cour.</span>
+                                <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500 }}>Cour.</span>
                                 <button onClick={e => {
                                   e.stopPropagation()
                                   const rect = e.currentTarget.getBoundingClientRect()
@@ -4443,7 +4443,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   border: dispatchedCourierFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                   borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                   color: dispatchedCourierFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                                 }}>
                                   {dispatchedCourierFilter.size > 0 ? `${dispatchedCourierFilter.size} ▾` : '▾'}
                                 </button>
@@ -4452,7 +4452,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               {showDispatchedCourierPopover && (
                                 <div style={{ position: 'fixed' as const, top: dispatchedCourierPopoverPos.top, left: dispatchedCourierPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>COURIER</span>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>COURIER</span>
                                     <button onClick={() => { setDispatchedCourierFilter(new Set()); setShowDispatchedCourierPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
@@ -4465,7 +4465,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                             {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
                                           </span>
                                           <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{opt}</span>
-                                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{courierCount(opt)}</span>
+                                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{courierCount(opt)}</span>
                                         </button>
                                       )
                                     })}
@@ -4492,7 +4492,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             <th key="delivery" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const, position: 'relative' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <button onClick={() => setDeliverySortDir(d => d === 'desc' ? 'asc' : d === 'asc' ? 'none' : 'desc')}
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: deliverySortDir !== 'none' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: deliverySortDir !== 'none' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
                                   Delivery {deliverySortDir === 'desc' ? '↓' : deliverySortDir === 'asc' ? '↑' : ''}
                                 </button>
                                 <button onClick={e => { e.stopPropagation(); setShowDeliveryPopover(v => !v) }} style={{
@@ -4500,7 +4500,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   border: deliveryFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                   borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                   color: deliveryFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                                 }}>
                                   {deliveryFilter.size > 0 ? `${deliveryFilter.size} ▾` : '▾'}
                                 </button>
@@ -4509,7 +4509,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               {showDeliveryPopover && (
                                 <div style={{ position: 'absolute' as const, top: '100%', left: 0, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 210, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', marginTop: 4 }} onClick={e => e.stopPropagation()}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DELIVERY</span>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>DELIVERY</span>
                                     <button onClick={() => { setDeliveryFilter(new Set()); setShowDeliveryPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                                   </div>
                                   {DELIV_OPTS.map(opt => {
@@ -4519,7 +4519,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                       <button key={opt.key} onClick={() => setDeliveryFilter(prev => { const n = new Set(prev); n.has(opt.key) ? n.delete(opt.key) : n.add(opt.key); return n })}
                                         style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 5, border: 'none', background: on ? 'var(--accent-bg)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text2)', fontSize: 12, cursor: 'pointer', fontWeight: on ? 600 : 400, textAlign: 'left' as const }}>
                                         <span>{opt.label}</span>
-                                        <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{cnt}</span>
+                                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{cnt}</span>
                                       </button>
                                     )
                                   })}
@@ -4547,7 +4547,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           return (
                             <th key="status" style={{ background: 'var(--bg2)', padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500 }}>Status</span>
+                                <span style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500 }}>Status</span>
                                 <button onClick={e => {
                                   e.stopPropagation()
                                   const rect = e.currentTarget.getBoundingClientRect()
@@ -4558,7 +4558,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   border: dispatchedStatusFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                   borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                   color: dispatchedStatusFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                                 }}>
                                   {dispatchedStatusFilter.size > 0 ? `${dispatchedStatusFilter.size} ▾` : '▾'}
                                 </button>
@@ -4567,7 +4567,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                               {showDispatchedStatusPopover && (
                                 <div style={{ position: 'fixed' as const, top: dispatchedStatusPopoverPos.top, left: dispatchedStatusPopoverPos.left, zIndex: 500, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, minWidth: 190, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>STATUS</span>
+                                    <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>STATUS</span>
                                     <button onClick={() => { setDispatchedStatusFilter(new Set()); setShowDispatchedStatusPopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 280, overflowY: 'auto' }}>
@@ -4580,7 +4580,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                             {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
                                           </span>
                                           <span style={{ fontSize: 12, color: 'var(--text)', flex: 1 }}>{opt.label}</span>
-                                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{statusCount(opt.key)}</span>
+                                          <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{statusCount(opt.key)}</span>
                                         </button>
                                       )
                                     })}
@@ -4600,7 +4600,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   if (dispatchedSortCol === 'dispatched_at') setDispatchedSortDir(d => d === 'asc' ? 'desc' : 'asc')
                                   else { setDispatchedSortCol('dispatched_at'); setDispatchedSortDir('desc') }
                                 }}
-                                style={{ color: dispatchedSortCol === 'dispatched_at' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
+                                style={{ color: dispatchedSortCol === 'dispatched_at' ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, cursor: 'pointer', userSelect: 'none' as const }}
                               >
                                 Dispatched{dispatchedSortCol === 'dispatched_at' ? <span style={{ marginLeft: 3 }}>{dispatchedSortDir === 'asc' ? '↑' : '↓'}</span> : <span style={{ marginLeft: 3, opacity: 0.3 }}>↕</span>}
                               </span>
@@ -4616,7 +4616,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                   border: dispatchedDateFilter.size > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
                                   borderRadius: 4, cursor: 'pointer', padding: '1px 5px',
                                   color: dispatchedDateFilter.size > 0 ? 'var(--accent)' : 'var(--text3)',
-                                  fontSize: 10, fontFamily: 'DM Mono', lineHeight: 1.4,
+                                  fontSize: 10, fontFamily: 'var(--font-mono)', lineHeight: 1.4,
                                 }}
                               >
                                 {dispatchedDateFilter.size > 0 ? `${dispatchedDateFilter.size} ▾` : '▾'}
@@ -4639,7 +4639,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 onClick={e => e.stopPropagation()}
                               >
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                  <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'DM Mono', fontWeight: 500 }}>DISPATCH DATE</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>DISPATCH DATE</span>
                                   <button onClick={() => { setDispatchedDateFilter(new Set()); setShowDispatchedDatePopover(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 11 }}>Clear</button>
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2, maxHeight: 240, overflowY: 'auto' }}>
@@ -4653,7 +4653,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                         <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${isSelected ? 'var(--accent)' : 'var(--border2)'}`, background: isSelected ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                           {isSelected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
                                         </span>
-                                        <span style={{ fontSize: 12, fontFamily: 'DM Mono', color: 'var(--text)', flex: 1 }}>{label}</span>
+                                        <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text)', flex: 1 }}>{label}</span>
                                         <span style={{ fontSize: 11, color: 'var(--text3)' }}>{count}</span>
                                       </button>
                                     )
@@ -4675,7 +4675,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             background: 'var(--bg2)',
                             padding: '9px 12px', textAlign: 'left' as const,
                             color: dispatchedSortCol === col ? 'var(--accent)' : 'var(--text3)',
-                            fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500,
+                            fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500,
                             whiteSpace: 'nowrap' as const,
                             cursor: col ? 'pointer' : 'default',
                             userSelect: 'none' as const,
@@ -4710,13 +4710,13 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       const dispDate = order.dispatched_at ? new Date(order.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
                       return (
                         <tr key={order.id} style={{ borderBottom: i < pagedDispatched.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
-                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', whiteSpace: 'nowrap' as const }}>{dispDate}</td>
-                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
-                          <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}{order.rescheduled_from_hold && <span title="Rescheduled out of hold — cleared to dispatch" style={{ marginLeft: 6, fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600, color: '#7c3aed', background: '#f5f3ff', padding: '1px 5px', borderRadius: 4 }}>↻ resched</span>}</td>
-                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text)' }}>{order.sku}</td>
-                          <td style={{ padding: '9px 12px', fontFamily: 'DM Mono', fontSize: 11, color: order.scanned_barcode ? 'var(--text2)' : 'var(--text3)' }}>{order.scanned_barcode || '—'}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--dispatched)', whiteSpace: 'nowrap' as const }}>{dispDate}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
+                          <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}{order.rescheduled_from_hold && <span title="Rescheduled out of hold — cleared to dispatch" style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#7c3aed', background: '#f5f3ff', padding: '1px 5px', borderRadius: 4 }}>↻ resched</span>}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>{order.sku}</td>
+                          <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: order.scanned_barcode ? 'var(--text2)' : 'var(--text3)' }}>{order.scanned_barcode || '—'}</td>
                           <td style={{ padding: '9px 12px' }}>
-                            <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: cc, background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>
+                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: cc, background: order.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>
                               {order.courier === 'Bluedart' ? 'BD' : 'DL'}
                             </span>
                           </td>
@@ -4730,7 +4730,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 style={{
-                                  fontFamily: 'DM Mono', fontSize: 11,
+                                  fontFamily: 'var(--font-mono)', fontSize: 11,
                                   color: 'var(--dispatched)',
                                   background: 'var(--dispatched-bg)',
                                   padding: '2px 7px', borderRadius: 4,
@@ -4749,7 +4749,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             )}
                           </td>
                           <td style={{ padding: '9px 12px', whiteSpace: 'nowrap' as const }}>
-                            <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{order.pincode}</span>
                             {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
                           </td>
                           <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' as const }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</td>
@@ -4822,12 +4822,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               {/* Pager — 100 per page */}
               {!dispWindowLoading && filteredDispatched.length > DISP_PAGE_SIZE && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
                     {dispPageSafe * DISP_PAGE_SIZE + 1}–{Math.min((dispPageSafe + 1) * DISP_PAGE_SIZE, filteredDispatched.length)} of {filteredDispatched.length}
                   </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button onClick={() => setDispPage(p => Math.max(0, p - 1))} disabled={dispPageSafe === 0} style={pagerBtn(dispPageSafe === 0)}>← Prev</button>
-                    <span style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'DM Mono' }}>Page {dispPageSafe + 1} / {dispPageCount}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'var(--font-mono)' }}>Page {dispPageSafe + 1} / {dispPageCount}</span>
                     <button onClick={() => setDispPage(p => Math.min(dispPageCount - 1, p + 1))} disabled={dispPageSafe >= dispPageCount - 1} style={pagerBtn(dispPageSafe >= dispPageCount - 1)}>Next →</button>
                   </div>
                 </div>
@@ -4868,7 +4868,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     { label: 'Avg delay (7d)', value: avgLate === null ? '—' : avgLate <= 0 ? 'on time' : `${avgLate.toFixed(1)}d late` },
                   ].map(s => (
                     <div key={s.label} style={{ display: 'flex', alignItems: 'baseline', gap: 7, padding: '7px 14px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 20 }}>
-                      <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.value}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{s.value}</span>
                       <span style={{ fontSize: 11, color: 'var(--text3)' }}>{s.label}</span>
                     </div>
                   ))}
@@ -4898,7 +4898,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           { label: 'Missed', value: missedToday.length, color: missedToday.length > 0 ? '#dc2626' : 'var(--text3)' },
                         ].map(s => (
                           <div key={s.label} style={{ textAlign: 'center' as const }}>
-                            <div style={{ fontSize: 32, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
+                            <div style={{ fontSize: 32, fontFamily: 'var(--font-mono)', fontWeight: 500, color: s.color }}>{s.value}</div>
                             <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>{s.label}</div>
                           </div>
                         ))}
@@ -4925,7 +4925,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           </button>
                         </div>
                         {missedToday.map((o, i) => (
-                          <div key={o.id} style={{ padding: '9px 20px', borderBottom: i < missedToday.length - 1 ? '1px solid var(--border)' : 'none', display: 'flex', gap: 12, alignItems: 'center', fontSize: 12, fontFamily: 'DM Mono' }}>
+                          <div key={o.id} style={{ padding: '9px 20px', borderBottom: i < missedToday.length - 1 ? '1px solid var(--border)' : 'none', display: 'flex', gap: 12, alignItems: 'center', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
                             <span style={{ color: 'var(--text)', fontWeight: 500, minWidth: 140 }}>{o.customer_name}</span>
                             <span style={{ color: 'var(--text2)' }}>{o.sku}</span>
                             <span style={{ color: 'var(--text3)', marginLeft: 'auto' }}>{o.tracking_number || 'no AWB'}</span>
@@ -4952,7 +4952,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     { label: 'Unfulfillable', value: unfulfillableCount, color: 'var(--critical)', bg: 'var(--critical-bg)' }
                   ].map(s => (
                     <div key={s.label} style={{ padding: 16, background: s.bg, border: '1px solid var(--border)', borderRadius: 8, textAlign: 'center' as const }}>
-                      <div style={{ fontSize: 24, fontFamily: 'DM Mono', fontWeight: 500, color: s.color }}>{s.value}</div>
+                      <div style={{ fontSize: 24, fontFamily: 'var(--font-mono)', fontWeight: 500, color: s.color }}>{s.value}</div>
                       <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>{s.label}</div>
                     </div>
                   ))}
@@ -4960,7 +4960,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 {/* Future scheduled orders info */}
                 {scheduledCount - dispatchTodayCount > 0 && (
                   <div style={{ ...card, padding: 16 }}>
-                    <div style={{ fontSize: 12, fontFamily: 'DM Mono', fontWeight: 500, color: 'var(--text2)', marginBottom: 10 }}>SCHEDULED FOR FUTURE DATES</div>
+                    <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--text2)', marginBottom: 10 }}>SCHEDULED FOR FUTURE DATES</div>
                     {Array.from(new Set(
                       orders.filter(o => o.plan_decision === 'scheduled' && o.scheduled_date && o.scheduled_date > today && !o.is_cancelled && !o.is_dispatched)
                         .map(o => o.scheduled_date!)
@@ -4969,7 +4969,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       return (
                         <div key={date} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                           <Calendar size={13} style={{ color: 'var(--hold)' }} />
-                          <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text)' }}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text)' }}>
                             {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
                           </span>
                           <span style={{ color: 'var(--text3)', fontSize: 12 }}>{count} orders</span>
@@ -4988,7 +4988,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 <div style={{ ...card, padding: 20, display: 'flex', flexDirection: 'column' as const, gap: 16, border: '1px solid var(--accent)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <ScanLine size={16} style={{ color: 'var(--accent)' }} />
-                    <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 600, color: 'var(--text)', letterSpacing: '0.05em' }}>SCAN-OUT VERIFICATION</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--text)', letterSpacing: '0.05em' }}>SCAN-OUT VERIFICATION</span>
                     {currentBatch(scanCourier).length > 0 && (
                       <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--dispatched)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <CheckCircle size={13} /> {currentBatch(scanCourier).length} in this batch
@@ -4996,7 +4996,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     )}
                   </div>
                   <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0, lineHeight: 1.5 }}>
-                    Pick the courier you&apos;re loading, scan the AWB on the box, then scan the item barcode. The item&apos;s barcode (Master SKU + piece number, e.g. <span style={{ fontFamily: 'DM Mono' }}>-1</span>) is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
+                    Pick the courier you&apos;re loading, scan the AWB on the box, then scan the item barcode. The item&apos;s barcode (Master SKU + piece number, e.g. <span style={{ fontFamily: 'var(--font-mono)' }}>-1</span>) is checked against the order&apos;s mapped SKU before it&apos;s marked dispatched — catching mis-picks at the loading point.
                   </p>
 
                   {/* Stock-gate status + owner toggle */}
@@ -5044,11 +5044,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ width: 9, height: 9, borderRadius: '50%', background: cc }} />
-                            <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: isSel ? cc : 'var(--text)' }}>{c}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: isSel ? cc : 'var(--text)' }}>{c}</span>
                             {isSel && <span style={{ marginLeft: 'auto', fontSize: 10, color: cc, fontWeight: 600 }}>● loading</span>}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                            <span style={{ fontFamily: 'DM Mono', fontSize: 22, fontWeight: 700, color: isSel ? cc : 'var(--text)' }}>{stats.dispatched}<span style={{ fontSize: 14, color: 'var(--text3)', fontWeight: 500 }}> / {stats.planned}</span></span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: isSel ? cc : 'var(--text)' }}>{stats.dispatched}<span style={{ fontSize: 14, color: 'var(--text3)', fontWeight: 500 }}> / {stats.planned}</span></span>
                             <span style={{ fontSize: 11, color: 'var(--text3)' }}>dispatched today</span>
                           </div>
                         </button>
@@ -5064,7 +5064,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   <>
                   {/* Step 1: AWB */}
                   <div>
-                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>1 · SCAN AWB <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({scanCourier})</span></label>
+                    <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>1 · SCAN AWB <span style={{ color: 'var(--text3)', fontWeight: 400 }}>({scanCourier})</span></label>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <input
                         ref={awbInputRef}
@@ -5074,7 +5074,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         placeholder="Scan or type AWB, press Enter…"
                         disabled={!!scanOrder}
                         autoFocus
-                        style={{ flex: 1, padding: '11px 14px', borderRadius: 7, border: `1px solid ${scanOrder ? 'var(--border)' : 'var(--accent)'}`, background: scanOrder ? 'var(--bg2)' : 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
+                        style={{ flex: 1, padding: '11px 14px', borderRadius: 7, border: `1px solid ${scanOrder ? 'var(--border)' : 'var(--accent)'}`, background: scanOrder ? 'var(--bg2)' : 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'var(--font-mono)', outline: 'none' }}
                       />
                       {(scanOrder || scanError) && (
                         <button onClick={resetScan} title="Clear and scan a new piece" style={{ flexShrink: 0, padding: '0 18px', borderRadius: 7, border: '1px solid var(--critical)', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
@@ -5093,7 +5093,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   {scanSuccess && !scanError && !stockPrompt && (
                     <div style={{ padding: '10px 14px', background: 'var(--dispatched-bg)', border: '1px solid #bbf7d0', borderRadius: 7, color: 'var(--dispatched)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ flexShrink: 0, fontWeight: 700 }}>✓</span>
-                      <span>Dispatched &amp; deducted — <span style={{ fontFamily: 'DM Mono' }}>{scanSuccess.sku}</span> now <b>{scanSuccess.remaining}</b> in stock.</span>
+                      <span>Dispatched &amp; deducted — <span style={{ fontFamily: 'var(--font-mono)' }}>{scanSuccess.sku}</span> now <b>{scanSuccess.remaining}</b> in stock.</span>
                     </div>
                   )}
 
@@ -5118,10 +5118,10 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 7, padding: '12px 14px', display: 'flex', flexDirection: 'column' as const, gap: 6 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{scanOrder.customer_name}</span>
-                          <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: scanOrder.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: scanOrder.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>{scanOrder.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
+                          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: scanOrder.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: scanOrder.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff', padding: '2px 7px', borderRadius: 4 }}>{scanOrder.courier === 'Bluedart' ? 'BD' : 'DL'}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)' }}>{scanOrder.order_id}</span>
+                          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{scanOrder.order_id}</span>
                           {(() => {
                             const d = displayDaysLeft(scanOrder)
                             if (d === null) return null
@@ -5130,7 +5130,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                             const bg = overdue ? 'var(--critical-bg)' : today ? 'var(--today-bg)' : 'var(--dispatched-bg)'
                             const label = overdue ? `${Math.abs(d)}d overdue` : today ? 'due today' : `${d}d left`
                             return (
-                              <span style={{ fontSize: 11, fontFamily: 'DM Mono', fontWeight: 700, color, background: bg, padding: '2px 8px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>
+                              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color, background: bg, padding: '2px 8px', borderRadius: 4, whiteSpace: 'nowrap' as const }}>
                                 {label}
                               </span>
                             )
@@ -5138,14 +5138,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
                           <span style={{ fontSize: 11, color: 'var(--text3)' }}>Expected barcode SKU:</span>
-                          <span style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: scanOrder.barcode_sku ? 'var(--accent)' : 'var(--critical)' }}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: scanOrder.barcode_sku ? 'var(--accent)' : 'var(--critical)' }}>
                             {scanOrder.barcode_sku ? `${scanOrder.barcode_sku}-N` : 'NOT MAPPED'}
                           </span>
                         </div>
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'DM Mono' }}>2 · SCAN ITEM BARCODE</label>
+                        <label style={{ display: 'block', fontSize: 11, color: 'var(--text2)', marginBottom: 6, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>2 · SCAN ITEM BARCODE</label>
                         <input
                           ref={itemInputRef}
                           value={scanItem}
@@ -5153,7 +5153,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           onKeyDown={e => { if (e.key === 'Enter') handleScanItem(scanItem) }}
                           placeholder="Scan the item barcode, press Enter…"
                           autoFocus
-                          style={{ width: '100%', padding: '11px 14px', borderRadius: 7, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'DM Mono', outline: 'none' }}
+                          style={{ width: '100%', padding: '11px 14px', borderRadius: 7, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 15, fontFamily: 'var(--font-mono)', outline: 'none' }}
                         />
                       </div>
                     </>
@@ -5166,7 +5166,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <AlertTriangle size={28} style={{ color: 'var(--critical)', flexShrink: 0 }} />
                         <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--critical)' }}>WRONG ITEM — not dispatched</div>
                       </div>
-                      <div style={{ display: 'flex', gap: 20, fontFamily: 'DM Mono', fontSize: 13, flexWrap: 'wrap' as const }}>
+                      <div style={{ display: 'flex', gap: 20, fontFamily: 'var(--font-mono)', fontSize: 13, flexWrap: 'wrap' as const }}>
                         <div><span style={{ color: 'var(--text3)' }}>Expected: </span><span style={{ color: 'var(--dispatched)', fontWeight: 700 }}>{scanResult.expected}</span></div>
                         <div><span style={{ color: 'var(--text3)' }}>Scanned: </span><span style={{ color: 'var(--critical)', fontWeight: 700 }}>{scanResult.scanned}</span></div>
                       </div>
@@ -5177,7 +5177,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   {/* Live batch list — scanned & not yet manifested for this courier */}
                   {currentBatch(scanCourier).length > 0 && (
                     <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' as const }}>
-                      <div style={{ padding: '8px 14px', background: 'var(--bg2)', fontSize: 11, fontWeight: 600, fontFamily: 'DM Mono', color: 'var(--text2)', letterSpacing: '0.04em', display: 'flex', justifyContent: 'space-between' }}>
+                      <div style={{ padding: '8px 14px', background: 'var(--bg2)', fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--text2)', letterSpacing: '0.04em', display: 'flex', justifyContent: 'space-between' }}>
                         <span>THIS BATCH ({currentBatch(scanCourier).length})</span>
                         <span style={{ color: 'var(--text3)' }}>{scanCourier}</span>
                       </div>
@@ -5185,8 +5185,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         {currentBatch(scanCourier).slice(0, 40).map((s, i) => (
                           <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 14px', borderTop: i === 0 ? 'none' : '1px solid var(--border)', fontSize: 12 }}>
                             <CheckCircle size={13} style={{ color: 'var(--dispatched)', flexShrink: 0 }} />
-                            <span style={{ fontFamily: 'DM Mono', color: 'var(--text2)' }}>{s.tracking_number}</span>
-                            <span style={{ fontFamily: 'DM Mono', color: 'var(--text3)', marginLeft: 'auto' }}>{s.barcode_sku || s.sku}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{s.tracking_number}</span>
+                            <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)', marginLeft: 'auto' }}>{s.barcode_sku || s.sku}</span>
                           </div>
                         ))}
                       </div>
@@ -5202,7 +5202,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <span style={{ fontSize: 13, color: 'var(--today)', fontWeight: 600 }}>
                           ⚠ {n} older un-manifested {scanCourier} piece{n !== 1 ? 's' : ''} from before today
                         </span>
-                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
                           {older.slice(0, 3).map(o => o.tracking_number).join(', ')}{n > 3 ? ` +${n - 3} more` : ''}
                         </span>
                         <button
@@ -5230,7 +5230,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     return (
                       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
                         <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-                          <strong style={{ color: cc, fontFamily: 'DM Mono' }}>{n}</strong> {scanCourier} piece{n !== 1 ? 's' : ''} in this batch
+                          <strong style={{ color: cc, fontFamily: 'var(--font-mono)' }}>{n}</strong> {scanCourier} piece{n !== 1 ? 's' : ''} in this batch
                         </div>
                         <button
                           onClick={() => generateManifest(scanCourier!)}
@@ -5255,19 +5255,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 {/* Fallback divider */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                  <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'DM Mono', letterSpacing: '0.05em' }}>OR USE PASTE FALLBACK</span>
+                  <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}>OR USE PASTE FALLBACK</span>
                   <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                 </div>
 
                 <div style={{ ...card, padding: 20, display: 'flex', flexDirection: 'column' as const, gap: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Truck size={14} style={{ color: 'var(--text2)' }} />
-                    <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 500, color: 'var(--text2)', letterSpacing: '0.05em' }}>SHYPASSIST EXPORT</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 500, color: 'var(--text2)', letterSpacing: '0.05em' }}>SHYPASSIST EXPORT</span>
                     <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)' }}>Paste SKU · QTY · AWB data</span>
                   </div>
                   <textarea value={shypassistText} onChange={e => { setShypassistText(e.target.value); setEodMatchResult(null) }}
                     placeholder={'SKU\tQTY\tAWB\nHT-DBM-EL-4x6\t1\t305328290\n...'}
-                    style={{ height: 200, width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', fontFamily: 'DM Mono', fontSize: 12, resize: 'vertical' as const, outline: 'none', lineHeight: 1.5, transition: 'border-color 0.15s' }}
+                    style={{ height: 200, width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: 12, resize: 'vertical' as const, outline: 'none', lineHeight: 1.5, transition: 'border-color 0.15s' }}
                     onFocus={e => e.target.style.borderColor = 'var(--accent)'}
                     onBlur={e => e.target.style.borderColor = 'var(--border)'}
                   />
@@ -5371,7 +5371,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                 <Printer size={16} style={{ color: 'var(--accent)' }} />
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Generate Dispatch</h3>
-                <span className="no-print" style={{ fontSize: 12, color: genError ? 'var(--critical)' : genDocs ? 'var(--text3)' : 'var(--dispatched)', fontFamily: 'DM Mono' }}>
+                <span className="no-print" style={{ fontSize: 12, color: genError ? 'var(--critical)' : genDocs ? 'var(--text3)' : 'var(--dispatched)', fontFamily: 'var(--font-mono)' }}>
                   {genDocs ? (genProgress || 'Working…') : genError ? 'Failed' : 'Done'}
                 </span>
                 <button className="no-print" disabled={genDocs} onClick={closeOverlay} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: 'none', background: genDocs ? 'var(--bg2)' : 'var(--accent)', color: genDocs ? 'var(--text3)' : '#fff', fontSize: 12, fontWeight: 700, cursor: genDocs ? 'not-allowed' : 'pointer', opacity: genDocs ? 0.6 : 1 }}>Close</button>
@@ -5383,7 +5383,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   <div style={{ height: 6, borderRadius: 3, background: 'var(--bg2)', overflow: 'hidden', marginBottom: 6 }}>
                     <div style={{ height: '100%', width: `${pct}%`, background: 'var(--dispatched)', transition: 'width 0.2s' }} />
                   </div>
-                  <div style={{ display: 'flex', gap: 14, fontSize: 12, fontFamily: 'DM Mono' }}>
+                  <div style={{ display: 'flex', gap: 14, fontSize: 12, fontFamily: 'var(--font-mono)' }}>
                     <span style={{ color: 'var(--dispatched)' }}>{okCount} generated</span>
                     <span style={{ color: failCount ? 'var(--critical)' : 'var(--text3)' }}>{failCount} failed</span>
                     <span style={{ color: 'var(--text3)' }}>{leftCount} left</span>
@@ -5403,9 +5403,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                   {genRows.map((r, i) => (
                     <div key={r.orderId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderTop: i === 0 ? 'none' : '1px solid var(--border)', background: r.status === 'failed' ? 'var(--critical-bg)' : 'transparent' }}>
                       {statusCell(r.status)}
-                      <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, padding: '2px 6px', borderRadius: 4, color: r.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: r.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff' }}>{r.courier === 'Bluedart' ? 'BD' : 'SR'}</span>
-                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.orderId}</span>
-                      <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{r.sku || '—'}</span>
+                      <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 6px', borderRadius: 4, color: r.courier === 'Bluedart' ? '#2563eb' : '#7c3aed', background: r.courier === 'Bluedart' ? '#eff6ff' : '#f5f3ff' }}>{r.courier === 'Bluedart' ? 'BD' : 'SR'}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{r.orderId}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text3)' }}>{r.sku || '—'}</span>
                       {r.status === 'failed' && r.error && <span style={{ fontSize: 11, color: 'var(--critical)', marginLeft: 'auto', textAlign: 'right' as const }}>{r.error}</span>}
                     </div>
                   ))}
@@ -5414,7 +5414,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
               {/* Summary line */}
               {!genDocs && genSummary && (
-                <div className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono', margin: '4px 0 14px' }}>
+                <div className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)', margin: '4px 0 14px' }}>
                   {genSummary.labels} labels · {genSummary.invoices} invoices{genSummary.failed ? ` · ${genSummary.failed} issue(s)` : ''} — PDFs downloaded.
                 </div>
               )}
@@ -5424,7 +5424,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                     <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Dispatch checklist</h4>
-                    <span className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{totalTicked} / {checklist.length} stuck</span>
+                    <span className="no-print" style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{totalTicked} / {checklist.length} stuck</span>
                     <button className="no-print" onClick={doPrint} style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Print</button>
                   </div>
                   <p className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text3)' }}>Tick each label as you stick it on its box. The number on the label matches the number here. (Ticks reset if you refresh.)</p>
@@ -5434,22 +5434,22 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     return (
                       <div key={courier} style={{ marginBottom: 18, breakInside: 'avoid' as const }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '8px 8px 0 0', borderBottom: 'none' }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '3px 9px', borderRadius: 20, background: courier === 'Bluedart' ? '#e8eef7' : '#eef3e8', color: courier === 'Bluedart' ? '#2b5a9e' : '#5a7a2b' }}>{courier.toUpperCase()}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', padding: '3px 9px', borderRadius: 20, background: courier === 'Bluedart' ? '#e8eef7' : '#eef3e8', color: courier === 'Bluedart' ? '#2b5a9e' : '#5a7a2b' }}>{courier.toUpperCase()}</span>
                           <span style={{ fontWeight: 600, fontSize: 13 }}>{rows.length} label{rows.length === 1 ? '' : 's'}</span>
-                          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'DM Mono' }}>{stuck} / {rows.length} stuck</span>
+                          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{stuck} / {rows.length} stuck</span>
                         </div>
                         <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px', overflow: 'hidden', tableLayout: 'fixed' as const }}>
-                          <thead><tr>{[['✓', 40], ['#', 48], ['SKU', 0], ['AWB', 0], ['Days left', 110]].map(([h, wdt]) => <th key={h as string} style={{ textAlign: 'left' as const, fontSize: 11, fontFamily: 'DM Mono', color: 'var(--text3)', fontWeight: 500, padding: '7px 12px', background: 'var(--surface)', width: (wdt as number) ? (wdt as number) : 'auto' }}>{h}</th>)}</tr></thead>
+                          <thead><tr>{[['✓', 40], ['#', 48], ['SKU', 0], ['AWB', 0], ['Days left', 110]].map(([h, wdt]) => <th key={h as string} style={{ textAlign: 'left' as const, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)', fontWeight: 500, padding: '7px 12px', background: 'var(--surface)', width: (wdt as number) ? (wdt as number) : 'auto' }}>{h}</th>)}</tr></thead>
                           <tbody>
                             {rows.map(r => {
                               const k = keyOf(r), on = !!checklistTicks[k], b = daysBadge(r.daysLeft)
                               return (
                                 <tr key={k} onClick={() => setChecklistTicks(p => ({ ...p, [k]: !p[k] }))} style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', opacity: on ? 0.5 : 1, breakInside: 'avoid' as const }}>
                                   <td style={{ padding: '8px 12px' }}><span style={{ width: 20, height: 20, borderRadius: 5, border: on ? 'none' : '2px solid var(--border2)', background: on ? 'var(--dispatched)' : 'transparent', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, boxSizing: 'border-box' as const }}>{on ? '✓' : ''}</span></td>
-                                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontWeight: 800, fontSize: 15 }}>{r.seq}</td>
-                                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.sku || '—'}</td>
-                                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)', overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.awb || '—'}</td>
-                                  <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'DM Mono', padding: '2px 8px', borderRadius: 5, background: b.bg, color: b.fg, whiteSpace: 'nowrap' as const }}>{b.txt}</span></td>
+                                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 15 }}>{r.seq}</td>
+                                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.sku || '—'}</td>
+                                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text3)', overflow: 'hidden' as const, textOverflow: 'ellipsis' as const }}>{r.awb || '—'}</td>
+                                  <td style={{ padding: '8px 12px' }}><span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', padding: '2px 8px', borderRadius: 5, background: b.bg, color: b.fg, whiteSpace: 'nowrap' as const }}>{b.txt}</span></td>
                                 </tr>
                               )
                             })}
@@ -5555,13 +5555,13 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       </td>
       <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
-          <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 20 ? order.order_id.slice(0, 20) + '…' : order.order_id}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 20 ? order.order_id.slice(0, 20) + '…' : order.order_id}</span>
           {order.plan_decision === 'undecided' && (() => {
             const ageDays = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 86400000)
             if (ageDays < 1) return null
             return (
               <span style={{
-                fontSize: 9, fontFamily: 'DM Mono', fontWeight: 600,
+                fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600,
                 color: ageDays >= 3 ? '#dc2626' : ageDays >= 2 ? '#d97706' : 'var(--text3)',
                 background: ageDays >= 3 ? '#fef2f2' : ageDays >= 2 ? '#fffbeb' : 'var(--bg2)',
                 padding: '1px 5px', borderRadius: 3, alignSelf: 'flex-start',
@@ -5608,10 +5608,10 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         </div>
       </td>
       <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}>
-        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text)' }}>{order.pincode}</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text)' }}>{order.pincode}</span>
         {order.city && <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 6 }}>{order.city}</span>}
       </td>
-      <td style={{ padding: '8px 12px' }}>{order.oda === 'ODA' && <span style={{ fontSize: 10, fontFamily: 'DM Mono', color: 'var(--today)', background: 'var(--today-bg)', padding: '1px 5px', borderRadius: 3, border: '1px solid #fed7aa' }}>ODA</span>}</td>
+      <td style={{ padding: '8px 12px' }}>{order.oda === 'ODA' && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--today)', background: 'var(--today-bg)', padding: '1px 5px', borderRadius: 3, border: '1px solid #fed7aa' }}>ODA</span>}</td>
       <td style={{ padding: '6px 12px' }}>
         {editingAwbId === order.id ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -5620,7 +5620,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
               value={editingAwbValue}
               onChange={e => onEditAwb(order.id, e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') onSaveAwb(order.id); if (e.key === 'Escape') onCancelAwb() }}
-              style={{ width: 130, padding: '3px 7px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, fontFamily: 'DM Mono', outline: 'none' }}
+              style={{ width: 130, padding: '3px 7px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, fontFamily: 'var(--font-mono)', outline: 'none' }}
             />
             <button onClick={() => onSaveAwb(order.id)} style={{ background: 'var(--dispatched)', border: 'none', borderRadius: 4, cursor: 'pointer', color: '#fff', fontSize: 10, padding: '3px 7px', fontWeight: 600 }}>✓</button>
             <button onClick={onCancelAwb} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '3px 6px' }}>✕</button>
@@ -5628,8 +5628,8 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             {order.tracking_number
-              ? <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0' }}>{order.tracking_number}</span>
-              : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
+              ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', padding: '2px 6px', borderRadius: 4, border: '1px solid #bbf7d0' }}>{order.tracking_number}</span>
+              : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>—</span>
             }
             <button
               onClick={() => onEditAwb(order.id, order.tracking_number || '')}
@@ -5652,7 +5652,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
               value={editingLrValue}
               onChange={e => onEditLr(order.id, e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') onSaveLr(order.id); if (e.key === 'Escape') onCancelLr() }}
-              style={{ width: 110, padding: '3px 7px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, fontFamily: 'DM Mono', outline: 'none' }}
+              style={{ width: 110, padding: '3px 7px', borderRadius: 5, border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--text)', fontSize: 11, fontFamily: 'var(--font-mono)', outline: 'none' }}
             />
             <button onClick={() => onSaveLr(order.id)} style={{ background: 'var(--dispatched)', border: 'none', borderRadius: 4, cursor: 'pointer', color: '#fff', fontSize: 10, padding: '3px 7px', fontWeight: 600 }}>✓</button>
             <button onClick={onCancelLr} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '3px 6px' }}>✕</button>
@@ -5663,9 +5663,9 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
               ? <span
                   onClick={() => { navigator.clipboard?.writeText(order.lr_number || ''); setLrCopied(true); setTimeout(() => setLrCopied(false), 1200) }}
                   title={lrCopied ? 'Copied' : 'Click to copy LR'}
-                  style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text2)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, cursor: 'pointer', border: lrCopied ? '1px solid var(--dispatched)' : '1px solid var(--border)' }}
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)', background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, cursor: 'pointer', border: lrCopied ? '1px solid var(--dispatched)' : '1px solid var(--border)' }}
                 >{lrCopied ? '✓ copied' : order.lr_number}</span>
-              : <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>—</span>
+              : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>—</span>
             }
             <button
               onClick={() => onEditLr(order.id, order.lr_number || '')}
@@ -5679,16 +5679,16 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
           </div>
         )}
       </td>
-      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
-      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
-      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 12, color: order.dispatch_by_date ? 'var(--today)' : 'var(--text3)' }}>{order.dispatch_by_date ? new Date(order.dispatch_by_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
-      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{daysLeftDisplay !== null ? daysLeftDisplay : '—'}</span></td>
+      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text3)' }}>{order.transit_days}d</span></td>
+      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text2)' }}>{order.promise_date ? new Date(order.promise_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
+      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' as const }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: order.dispatch_by_date ? 'var(--today)' : 'var(--text3)' }}>{order.dispatch_by_date ? new Date(order.dispatch_by_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}</span></td>
+      <td style={{ padding: '8px 12px', textAlign: 'center' as const }}><span style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: uc.color }}>{daysLeftDisplay !== null ? daysLeftDisplay : '—'}</span></td>
       <td style={{ padding: '6px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' as const }}>
           {/* Manual dispatch button */}
           <button onClick={() => onManualDispatch(order)} style={{
             padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-            fontFamily: 'DM Sans', fontWeight: 600,
+            fontFamily: 'var(--font-sans)', fontWeight: 600,
             background: 'var(--dispatched-bg)',
             border: '1px solid #bbf7d0',
             color: 'var(--dispatched)',
@@ -5709,7 +5709,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
                 border: `1px solid ${order.plan_decision === 'scheduled' ? '#bbf7d0' : 'var(--border)'}`,
                 background: order.plan_decision === 'scheduled' ? 'var(--dispatched-bg)' : 'var(--surface)',
                 color: order.plan_decision === 'scheduled' ? 'var(--dispatched)' : 'var(--text3)',
-                cursor: 'pointer', fontFamily: 'DM Mono',
+                cursor: 'pointer', fontFamily: 'var(--font-mono)',
                 width: 130,
               }}
             />
@@ -5724,7 +5724,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
           {/* Hold */}
           <button onClick={() => onDecision(order.id, 'hold')} style={{
             padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-            fontFamily: 'DM Sans', fontWeight: 500,
+            fontFamily: 'var(--font-sans)', fontWeight: 500,
             background: order.plan_decision === 'hold' ? 'var(--hold-bg)' : 'var(--surface)',
             border: `1px solid ${order.plan_decision === 'hold' ? '#bfdbfe' : 'var(--border)'}`,
             color: order.plan_decision === 'hold' ? 'var(--hold)' : 'var(--text3)',
@@ -5733,7 +5733,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
           {/* Unfulfillable */}
           <button onClick={() => onDecision(order.id, 'unfulfillable')} style={{
             padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
-            fontFamily: 'DM Sans', fontWeight: 500,
+            fontFamily: 'var(--font-sans)', fontWeight: 500,
             background: order.plan_decision === 'unfulfillable' ? 'var(--critical-bg)' : 'var(--surface)',
             border: `1px solid ${order.plan_decision === 'unfulfillable' ? '#fecaca' : 'var(--border)'}`,
             color: order.plan_decision === 'unfulfillable' ? 'var(--critical)' : 'var(--text3)',

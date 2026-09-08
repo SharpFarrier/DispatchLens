@@ -159,7 +159,7 @@ export default function BarcodesTab() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' as const }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Barcodes</h2>
-        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'DM Mono' }}>
+        <span style={{ fontSize: 13, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>
           {counts.all} {windowMode === '7d' ? 'in last 7 days' : 'total'}
         </span>
         {/* Window toggle: default 7-day view, or load everything */}
@@ -244,7 +244,7 @@ export default function BarcodesTab() {
             <tbody>
               {filtered.map(p => (
                 <tr key={p.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '8px 12px', fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap' }}>{p.barcode}</td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap' }}>{p.barcode}</td>
                   <td style={{ padding: '8px 12px', color: 'var(--text2)' }}>
                     <div style={{ fontWeight: 600 }}>{p.shape || '—'}{p.size ? ` · ${p.size}` : ''}</div>
                     <div style={{ fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>

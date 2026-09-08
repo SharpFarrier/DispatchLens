@@ -145,25 +145,25 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
 
   const COLS: Col[] = useMemo(() => [
     { key: 'order_date', label: 'Order Date', type: 'date', get: r => r.o.order_date || '', render: r => fmtDate(r.o.order_date) },
-    { key: 'dispatch_by', label: 'Dispatch By', type: 'date', get: r => r.o.dispatch_by_date || '', render: r => { const d = r.o.dispatch_by_date; if (!d) return <span style={{ color: 'var(--text3)' }}>—</span>; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span> } },
-    { key: 'callback_date', label: 'Callback', type: 'date', queues: ['callbacks'], get: r => r.o.callback_date || '', render: r => { const d = r.o.callback_date; if (!d) return '—'; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{overdue ? `${fmtDate(d)} · overdue` : due ? `${fmtDate(d)} · today` : fmtDate(d)}</span> } },
+    { key: 'dispatch_by', label: 'Dispatch By', type: 'date', get: r => r.o.dispatch_by_date || '', render: r => { const d = r.o.dispatch_by_date; if (!d) return <span style={{ color: 'var(--text3)' }}>—</span>; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span> } },
+    { key: 'callback_date', label: 'Callback', type: 'date', queues: ['callbacks'], get: r => r.o.callback_date || '', render: r => { const d = r.o.callback_date; if (!d) return '—'; const overdue = d < todayStr(); const due = d === todayStr(); return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: overdue ? 'var(--critical)' : due ? 'var(--today)' : 'var(--text2)' }}>{overdue ? `${fmtDate(d)} · overdue` : due ? `${fmtDate(d)} · today` : fmtDate(d)}</span> } },
     { key: 'order_id', label: 'Order', type: 'text', get: r => r.o.order_id },
-    { key: 'platform', label: 'Platform', type: 'category', get: r => platformOf(r.o.order_id), render: r => { const p = platformOf(r.o.order_id); const c = p === 'Amazon' ? { fg: '#b45309', bg: '#fef3c7' } : p === 'Flipkart' ? { fg: '#2563eb', bg: '#eff6ff' } : p === 'Website' ? { fg: '#7c3aed', bg: '#f5f3ff' } : { fg: 'var(--text3)', bg: 'var(--bg2)' }; return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: c.fg, background: c.bg, padding: '2px 7px', borderRadius: 4 }}>{p}</span> } },
-    { key: 'tracking', label: 'AWB', type: 'text', get: r => r.o.tracking_number || '', render: r => r.o.tracking_number ? <a href={r.o.courier === 'Bluedart' ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${r.o.tracking_number}` : `https://www.delhivery.com/track/package/${r.o.tracking_number}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'DM Mono', fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }} onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{r.o.tracking_number} <ExternalLink size={9} /></a> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
+    { key: 'platform', label: 'Platform', type: 'category', get: r => platformOf(r.o.order_id), render: r => { const p = platformOf(r.o.order_id); const c = p === 'Amazon' ? { fg: '#b45309', bg: '#fef3c7' } : p === 'Flipkart' ? { fg: '#2563eb', bg: '#eff6ff' } : p === 'Website' ? { fg: '#7c3aed', bg: '#f5f3ff' } : { fg: 'var(--text3)', bg: 'var(--bg2)' }; return <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: c.fg, background: c.bg, padding: '2px 7px', borderRadius: 4 }}>{p}</span> } },
+    { key: 'tracking', label: 'AWB', type: 'text', get: r => r.o.tracking_number || '', render: r => r.o.tracking_number ? <a href={r.o.courier === 'Bluedart' ? `https://www.bluedart.com/trackdartresultthirdparty?trackFor=0&trackNo=${r.o.tracking_number}` : `https://www.delhivery.com/track/package/${r.o.tracking_number}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }} onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}>{r.o.tracking_number} <ExternalLink size={9} /></a> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
     { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '' },
     { key: 'sku', label: 'SKU', type: 'category', get: r => r.o.sku || '(none)' },
-    { key: 'oda', label: 'ODA', type: 'category', get: r => r.o.oda === 'ODA' ? 'ODA' : '(no)', render: r => r.o.oda === 'ODA' ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', padding: '2px 7px', borderRadius: 4 }}>ODA</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
+    { key: 'oda', label: 'ODA', type: 'category', get: r => r.o.oda === 'ODA' ? 'ODA' : '(no)', render: r => r.o.oda === 'ODA' ? <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--today)', background: 'var(--today-bg)', padding: '2px 7px', borderRadius: 4 }}>ODA</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
     { key: 'contact', label: 'Contact', type: 'text', get: r => r.o.contact_number || '', render: r => r.o.contact_number ? <a href={`tel:${r.o.contact_number}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{r.o.contact_number}</a> : '—' },
-    { key: 'confirmation', label: 'Confirmation', type: 'category', queues: ['predispatch', 'callbacks'], get: r => confirmationBadge(r.o)?.label || '(pending)', render: r => { const b = confirmationBadge(r.o); return b ? <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: b.fg, background: b.bg, padding: '2px 7px', borderRadius: 4 }}>{b.label}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>pending</span> } },
-    { key: 'dispatch', label: 'Dispatch', type: 'category', get: r => dispatchStatus(r.o).label, render: r => { const s = dispatchStatus(r.o); return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: s.fg, background: s.bg, padding: '2px 7px', borderRadius: 4 }}>{s.label}</span> } },
+    { key: 'confirmation', label: 'Confirmation', type: 'category', queues: ['predispatch', 'callbacks'], get: r => confirmationBadge(r.o)?.label || '(pending)', render: r => { const b = confirmationBadge(r.o); return b ? <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: b.fg, background: b.bg, padding: '2px 7px', borderRadius: 4 }}>{b.label}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>pending</span> } },
+    { key: 'dispatch', label: 'Dispatch', type: 'category', get: r => dispatchStatus(r.o).label, render: r => { const s = dispatchStatus(r.o); return <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: s.fg, background: s.bg, padding: '2px 7px', borderRadius: 4 }}>{s.label}</span> } },
     { key: 'flags', label: 'Flags', type: 'category', queues: ['delay'], get: r => r.o.cancellation_requested ? 'Cancellation requested' : r.o.escalated ? 'Escalated' : '(none)', render: r => (<span style={{ display: 'inline-flex', gap: 4 }}>
-        {r.o.cancellation_requested && <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 7px', borderRadius: 4 }}>Cancel req</span>}
-        {r.o.escalated && <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: '#b45309', background: '#fff7ed', padding: '2px 7px', borderRadius: 4 }}>Escalated</span>}
+        {r.o.cancellation_requested && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '2px 7px', borderRadius: 4 }}>Cancel req</span>}
+        {r.o.escalated && <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#b45309', background: '#fff7ed', padding: '2px 7px', borderRadius: 4 }}>Escalated</span>}
         {!r.o.cancellation_requested && !r.o.escalated && <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>}
       </span>) },
     { key: 'promise', label: 'Promise', type: 'date', queues: ['delay'], get: r => r.o.promise_date || '', render: r => fmtDate(r.o.promise_date) },
     { key: 'dispatched', label: 'Dispatched', type: 'date', queues: ['delay'], get: r => r.o.dispatched_at || '', render: r => fmtDate(r.o.dispatched_at) },
-    { key: 'delivery', label: 'Delivery', type: 'number', queues: ['delay'], get: r => { const d = deliveryDaysLeft(r.o); return d === null ? 9999 : d }, render: r => { const dl = deliveryDaysLeft(r.o); if (dl === null) return '—'; const c = dl < 0 ? 'var(--critical)' : dl <= 1 ? 'var(--today)' : 'var(--dispatched)'; const t = dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'due today' : `${dl}d left`; return <span style={{ fontFamily: 'DM Mono', fontWeight: 700, color: c }}>{t}</span> } },
+    { key: 'delivery', label: 'Delivery', type: 'number', queues: ['delay'], get: r => { const d = deliveryDaysLeft(r.o); return d === null ? 9999 : d }, render: r => { const dl = deliveryDaysLeft(r.o); if (dl === null) return '—'; const c = dl < 0 ? 'var(--critical)' : dl <= 1 ? 'var(--today)' : 'var(--dispatched)'; const t = dl < 0 ? `${Math.abs(dl)}d overdue` : dl === 0 ? 'due today' : `${dl}d left`; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: c }}>{t}</span> } },
     { key: 'caller', label: 'Caller', type: 'category', get: r => r.o.assigned_caller || '(none)' },
     { key: 'last_disposition', label: 'Last disp.', type: 'category', get: r => r.o.last_disposition || '(none)', render: r => r.o.last_disposition ? <span style={{ fontSize: 11, color: 'var(--text2)' }}>{r.o.last_disposition}</span> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span> },
   ], [])
@@ -467,7 +467,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
           <QueueBtn q="callbacks" label="Callbacks" n={counts.cb} />
           <QueueBtn q="delay" label="Delay check" n={counts.del} />
         </div>
-        <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
         <button onClick={() => _xg.handleExport({ rowCount: rows.length, summary: anyFilter ? 'filtered' : undefined, getCsv: exportCsv, filename: `calllens-${queue}-${todayStr()}.csv` })} disabled={loading || !rows.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> {_xg.status === 'none' || _xg.status === 'owner' ? _xg.label + (anyFilter ? ' (filtered)' : '') : _xg.label}</button>
       </div>
@@ -476,7 +476,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
         {kpis.map(k => (
           <div key={k.label} style={{ background: k.bg, borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: k.fg, fontFamily: 'DM Mono' }}>{k.value}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: k.fg, fontFamily: 'var(--font-mono)' }}>{k.value}</div>
             <div style={{ fontSize: 12, color: 'var(--text3)' }}>{k.label}</div>
           </div>
         ))}
@@ -504,13 +504,13 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                 {activeCols.map(col => (
                   <th key={col.key} style={{ padding: '8px 10px', textAlign: 'left' as const, background: 'var(--bg2)', whiteSpace: 'nowrap' as const, position: 'relative' as const, userSelect: 'none' as const }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span onClick={() => toggleSort(col.key)} style={{ cursor: 'pointer', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: sortKey === col.key ? 'var(--accent)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <span onClick={() => toggleSort(col.key)} style={{ cursor: 'pointer', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: sortKey === col.key ? 'var(--accent)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                         {col.label}{sortKey === col.key && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
                       </span>
                       <button onClick={() => setOpenFilter(openFilter === col.key ? null : col.key)} title="Filter" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 1, display: 'inline-flex', color: hasFilter(col.key) ? 'var(--accent)' : 'var(--text3)', opacity: hasFilter(col.key) ? 1 : 0.45 }}><Filter size={11} /></button>
                     </div>
                     {openFilter === col.key && (
-                      <div ref={popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'DM Sans' }}>
+                      <div ref={popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'var(--font-sans)' }}>
                         {col.type === 'category' ? (() => {
                           const all = catOptions[col.key] || []
                           const q = (catSearch[col.key] || '').toLowerCase()
@@ -567,7 +567,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                                             {treeNodeOpen(mKey) && days.map(d => {
                                               const on = (dateFilters[col.key] || []).includes(d)
                                               return (
-                                                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'DM Mono' }}>
+                                                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 17, padding: '2px 0', fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}>
                                                   <input type="checkbox" checked={on} onChange={() => toggleDays(col.key, [d], !on)} />{dayNum(d)}
                                                 </label>
                                               )
@@ -588,7 +588,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                     )}
                   </th>
                 ))}
-                {['WA', 'Disposition', ''].map((h, i) => <th key={i} style={{ padding: '8px 10px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>)}
+                {['WA', 'Disposition', ''].map((h, i) => <th key={i} style={{ padding: '8px 10px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -612,7 +612,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                     <tr style={{ borderBottom: open ? 'none' : '1px solid var(--border)', background: sel ? 'var(--accent-bg)' : locked ? 'var(--bg2)' : (i % 2 === 0 ? 'transparent' : 'var(--bg2)'), opacity: locked ? 0.6 : 1 }}>
                       <td style={{ padding: '8px 10px' }}><input type="checkbox" checked={sel} onChange={() => toggleRow(o.order_id)} /></td>
                       {activeCols.map(col => (
-                        <td key={col.key} style={{ padding: '8px 10px', fontFamily: col.key === 'customer' ? 'DM Sans' : 'DM Mono', fontSize: 11, whiteSpace: 'nowrap' as const, color: 'var(--text)', maxWidth: col.key === 'customer' ? 150 : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <td key={col.key} style={{ padding: '8px 10px', fontFamily: col.key === 'customer' ? 'var(--font-sans)' : 'var(--font-mono)', fontSize: 11, whiteSpace: 'nowrap' as const, color: 'var(--text)', maxWidth: col.key === 'customer' ? 150 : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {col.key === 'caller' ? (
                             <select value={o.assigned_caller || ''} onChange={e => setCaller(o, e.target.value)} style={{ fontSize: 11, padding: '3px 6px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer' }}>
                               <option value="">—</option>{CALLERS.map(c => <option key={c} value={c}>{c}</option>)}
@@ -685,7 +685,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                                 {logs[o.order_id].map(l => (
                                   <div key={l.id} style={{ fontSize: 12, color: 'var(--text2)', display: 'flex', alignItems: 'baseline', gap: 8 }}>
                                     <span style={{ display: 'inline-flex', alignItems: 'center', color: l.channel === 'whatsapp' ? '#16a34a' : 'var(--accent)' }}>{l.channel === 'whatsapp' ? <MessageCircle size={12} /> : <Phone size={12} />}</span>
-                                    <span style={{ fontFamily: 'DM Mono', fontSize: 11, color: 'var(--text3)' }}>{fmtTime(l.created_at)}</span>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)' }}>{fmtTime(l.created_at)}</span>
                                     <span style={{ fontWeight: 600 }}>{l.disposition}</span>
                                     {l.note && <span style={{ color: 'var(--text3)' }}>· {l.note}</span>}
                                     {l.caller && <span style={{ color: 'var(--text3)', fontSize: 11 }}>· {l.caller}</span>}

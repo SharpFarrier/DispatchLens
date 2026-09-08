@@ -108,14 +108,14 @@ export default function AllOrdersTab() {
     { key: 'order_date', label: 'Order Date', type: 'date', get: r => r.o.order_date || '', render: r => fmtDate(r.o.order_date) },
     { key: 'dispatch_by', label: 'Dispatch By', type: 'date', get: r => r.o.dispatch_by_date || '', render: r => fmtDate(r.o.dispatch_by_date) },
     { key: 'order_id', label: 'Order ID', type: 'text', get: r => r.o.order_id, render: r => <span style={{ color: 'var(--text)' }}>{r.o.order_id}</span> },
-    { key: 'platform', label: 'Platform', type: 'category', get: r => r.platform, render: r => { const p = PLATFORM_STYLE[r.platform]; return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: p.fg, background: p.bg, border: `1px solid ${p.bd}`, padding: '2px 7px', borderRadius: 4 }}>{r.platform}</span> } },
-    { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '', render: r => <span style={{ fontFamily: 'DM Sans' }}>{r.o.customer_name}</span> },
+    { key: 'platform', label: 'Platform', type: 'category', get: r => r.platform, render: r => { const p = PLATFORM_STYLE[r.platform]; return <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: p.fg, background: p.bg, border: `1px solid ${p.bd}`, padding: '2px 7px', borderRadius: 4 }}>{r.platform}</span> } },
+    { key: 'customer', label: 'Customer', type: 'text', get: r => r.o.customer_name || '', render: r => <span style={{ fontFamily: 'var(--font-sans)' }}>{r.o.customer_name}</span> },
     { key: 'sku', label: 'SKU', type: 'text', get: r => r.o.sku || '' },
     { key: 'barcode_sku', label: 'Barcode SKU', type: 'text', get: r => r.o.barcode_sku || '', render: r => <span style={{ color: 'var(--text3)' }}>{r.o.barcode_sku || '—'}</span> },
     { key: 'courier', label: 'Courier', type: 'category', get: r => r.o.courier || '', render: r => <span style={{ fontWeight: 500, color: r.o.courier === 'Bluedart' ? '#2563eb' : '#7c3aed' }}>{r.o.courier === 'Bluedart' ? 'BD' : 'DL'}</span> },
     { key: 'awb', label: 'AWB', type: 'text', get: r => r.o.tracking_number || '', render: r => <span style={{ color: 'var(--text2)' }}>{r.o.tracking_number || '—'}</span> },
     { key: 'lr', label: 'LR', type: 'text', get: r => r.o.lr_number || '', render: r => <span style={{ color: 'var(--text3)' }}>{r.o.lr_number || '—'}</span> },
-    { key: 'status', label: 'Status', type: 'category', get: r => r.status, render: r => { const s = STATUS_STYLE[r.status]; return <span style={{ fontSize: 10, fontFamily: 'DM Mono', fontWeight: 600, color: s.fg, background: s.bg, padding: '2px 7px', borderRadius: 4 }}>{r.status}</span> } },
+    { key: 'status', label: 'Status', type: 'category', get: r => r.status, render: r => { const s = STATUS_STYLE[r.status]; return <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, color: s.fg, background: s.bg, padding: '2px 7px', borderRadius: 4 }}>{r.status}</span> } },
     { key: 'pincode', label: 'Pincode · City', type: 'text', get: r => `${r.o.pincode || ''} ${r.o.city || ''}`.trim(), render: r => <span>{r.o.pincode}{r.o.city ? ` · ${r.o.city}` : ''}</span> },
     { key: 'promise', label: 'Promise', type: 'date', get: r => r.o.promise_date || '', render: r => <span style={{ color: 'var(--text2)' }}>{fmtDate(r.o.promise_date)}</span> },
     { key: 'dispatched', label: 'Dispatched', type: 'date', get: r => r.o.dispatched_at || '', render: r => <span style={{ color: 'var(--text2)' }}>{fmtDate(r.o.dispatched_at)}</span> },
@@ -188,14 +188,14 @@ export default function AllOrdersTab() {
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>All Orders</h1>
-        <span style={{ fontFamily: 'DM Mono', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} of ${orders.length}`}</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} of ${orders.length}`}</span>
 
         {/* Date window (on Order Date) */}
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', padding: 3, borderRadius: 7, alignItems: 'center' }}>
           <Calendar size={13} style={{ color: 'var(--text3)', margin: '0 4px' }} />
           {(['7d', '30d', 'custom'] as const).map(w => (
             <button key={w} onClick={() => setWin(w)}
-              style={{ padding: '5px 11px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'DM Mono',
+              style={{ padding: '5px 11px', borderRadius: 5, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)',
                 background: win === w ? 'var(--surface)' : 'transparent', color: win === w ? 'var(--accent)' : 'var(--text3)',
                 boxShadow: win === w ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>
               {w === '7d' ? '7 days' : w === '30d' ? '30 days' : 'Custom'}
@@ -205,10 +205,10 @@ export default function AllOrdersTab() {
         {win === 'custom' && (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono' }} />
+              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
             <span style={{ color: 'var(--text3)', fontSize: 12 }}>→</span>
             <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono' }} />
+              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
           </div>
         )}
 
@@ -235,7 +235,7 @@ export default function AllOrdersTab() {
                 {COLS.map(col => (
                   <th key={col.key} style={{ padding: '8px 10px', textAlign: col.align || 'left', background: 'var(--bg2)', whiteSpace: 'nowrap' as const, position: 'relative' as const, userSelect: 'none' as const }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: col.align === 'right' ? 'flex-end' : 'flex-start' }}>
-                      <span onClick={() => toggleSort(col.key)} style={{ cursor: 'pointer', fontSize: 11, fontFamily: 'DM Mono', fontWeight: 600, color: sortKey === col.key ? 'var(--accent)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <span onClick={() => toggleSort(col.key)} style={{ cursor: 'pointer', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: sortKey === col.key ? 'var(--accent)' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                         {col.label}
                         {sortKey === col.key && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
                       </span>
@@ -245,7 +245,7 @@ export default function AllOrdersTab() {
                       </button>
                     </div>
                     {openFilter === col.key && (
-                      <div ref={popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'DM Sans' }}>
+                      <div ref={popRef} style={{ position: 'absolute' as const, top: '100%', left: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 7, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', padding: 10, zIndex: 50, minWidth: 170, textAlign: 'left' as const, fontFamily: 'var(--font-sans)' }}>
                         {col.type === 'category' ? (
                           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 3, maxHeight: 220, overflowY: 'auto' as const }}>
                             {(catOptions[col.key] || []).map(opt => {
@@ -281,7 +281,7 @@ export default function AllOrdersTab() {
               ) : rows.map((r, i) => (
                 <tr key={r.o.id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                   {COLS.map(col => (
-                    <td key={col.key} style={{ padding: '8px 10px', fontFamily: col.key === 'customer' ? 'DM Sans' : 'DM Mono', fontSize: 11, textAlign: col.align || 'left', whiteSpace: 'nowrap' as const, color: 'var(--text)' }}>
+                    <td key={col.key} style={{ padding: '8px 10px', fontFamily: col.key === 'customer' ? 'var(--font-sans)' : 'var(--font-mono)', fontSize: 11, textAlign: col.align || 'left', whiteSpace: 'nowrap' as const, color: 'var(--text)' }}>
                       {col.render ? col.render(r) : String(col.get(r))}
                     </td>
                   ))}
