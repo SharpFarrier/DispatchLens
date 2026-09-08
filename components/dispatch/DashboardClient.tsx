@@ -3,6 +3,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
+import Badge, { tierVariant } from './Badge'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
@@ -5516,7 +5517,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         </button>
       </td>
       <td style={{ padding: '8px 12px' }}>
-        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: 'DM Mono', fontWeight: 500, letterSpacing: '0.05em', color: uc.color, background: uc.bg, border: `1px solid ${uc.border}` }}>{liveUrgencyTier || '—'}</span>
+        {liveUrgencyTier ? <Badge variant={tierVariant(liveUrgencyTier)}>{liveUrgencyTier}</Badge> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>}
       </td>
       <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
