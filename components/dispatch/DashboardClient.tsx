@@ -2395,7 +2395,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'wh:picking', label: 'Picking', section: 'warehouse', show: effectiveAccess.can_wh_picking },
     { key: 'wh:inventory', label: 'Inventory', section: 'warehouse', show: effectiveAccess.can_wh_inventory },
     { key: 'wh:barcodes', label: 'Barcodes', section: 'warehouse', show: effectiveAccess.can_wh_barcodes },
-    { key: 'wh:packing', label: 'Packing', section: 'warehouse', show: access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
+    { key: 'wh:packing', label: 'Packing', section: 'warehouse', show: effectiveAccess.can_wh_pack_generate || effectiveAccess.can_wh_pack_scan || effectiveAccess.can_wh_pack_stockin || effectiveAccess.can_wh_pack_pick || effectiveAccess.can_wh_pack_columns || effectiveAccess.can_wh_pack_fba || effectiveAccess.can_wh_pack_inventory || effectiveAccess.can_wh_pack_rto || effectiveAccess.can_wh_pack_treatment || effectiveAccess.can_wh_pack_units || effectiveAccess.can_wh_pack_lifecycle },
     { key: 'skumap', label: 'SKU Map', section: 'settings', show: effectiveAccess.can_users },
     { key: 'users', label: 'Users', section: 'settings', show: effectiveAccess.can_users },
   ]

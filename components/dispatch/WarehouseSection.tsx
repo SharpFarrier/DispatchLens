@@ -35,14 +35,14 @@ const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof
 const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; perm: keyof UserAccess }[] = [
   { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} />, perm: 'can_wh_pack_generate' },
   { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} />, perm: 'can_wh_pack_scan' },
-  { key: 'colstockin', label: 'Stock-in (cols)', icon: <MapPin size={14} />, perm: 'can_wh_pack_scan' },
-  { key: 'colpick',   label: 'Pick',          icon: <ListChecks size={14} />, perm: 'can_wh_pack_scan' },
-  { key: 'columns',   label: 'Columns',       icon: <Grid3x3 size={14} />, perm: 'can_wh_pack_scan' },
-  { key: 'fba',       label: 'FBA',           icon: <Boxes size={14} />, perm: 'can_wh_pack_scan' },
+  { key: 'colstockin', label: 'Stock-in (cols)', icon: <MapPin size={14} />, perm: 'can_wh_pack_stockin' },
+  { key: 'colpick',   label: 'Pick',          icon: <ListChecks size={14} />, perm: 'can_wh_pack_pick' },
+  { key: 'columns',   label: 'Columns',       icon: <Grid3x3 size={14} />, perm: 'can_wh_pack_columns' },
+  { key: 'fba',       label: 'FBA',           icon: <Boxes size={14} />, perm: 'can_wh_pack_fba' },
   { key: 'inventory', label: 'Inventory',     icon: <Package size={14} />, perm: 'can_wh_pack_inventory' },
-  { key: 'lifecycle', label: 'Lifecycle',     icon: <Activity size={14} />, perm: 'can_wh_pack_units' },
+  { key: 'lifecycle', label: 'Lifecycle',     icon: <Activity size={14} />, perm: 'can_wh_pack_lifecycle' },
   { key: 'rto',       label: 'RTO',           icon: <RotateCcw size={14} />, perm: 'can_wh_pack_rto' },
-  { key: 'treatment', label: 'RTO Treatment', icon: <RotateCcw size={14} />, perm: 'can_wh_pack_rto' },
+  { key: 'treatment', label: 'RTO Treatment', icon: <RotateCcw size={14} />, perm: 'can_wh_pack_treatment' },
   { key: 'units',     label: 'Units',         icon: <FileSearch size={14} />, perm: 'can_wh_pack_units' },
 ]
 

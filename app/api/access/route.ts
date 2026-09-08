@@ -66,14 +66,14 @@ export async function PATCH(request: Request) {
   const body = await request.json()
   const { email, status, can_import, can_plan, can_review, can_picklist, can_eod, can_dispatched, can_returns, can_allorders, can_calllens, can_users, can_recon, can_otdr,
     can_wh_stock, can_wh_coating, can_wh_picking, can_wh_inventory, can_wh_barcodes,
-    can_wh_pack_generate, can_wh_pack_scan, can_wh_pack_inventory, can_wh_pack_rto, can_wh_pack_units, can_wh_manage_columns } = body
+    can_wh_pack_generate, can_wh_pack_scan, can_wh_pack_inventory, can_wh_pack_rto, can_wh_pack_units, can_wh_pack_stockin, can_wh_pack_pick, can_wh_pack_columns, can_wh_pack_fba, can_wh_pack_treatment, can_wh_pack_lifecycle, can_wh_manage_columns } = body
 
   // can_warehouse is a derived roll-up: true if ANY warehouse sub-permission is on.
   // Kept in sync here so a gate checking the top-level flag never locks out a user
   // who legitimately has granular warehouse access.
   const can_warehouse = !!(
     can_wh_stock || can_wh_coating || can_wh_picking || can_wh_inventory || can_wh_barcodes ||
-    can_wh_pack_generate || can_wh_pack_scan || can_wh_pack_inventory || can_wh_pack_rto || can_wh_pack_units || can_wh_manage_columns
+    can_wh_pack_generate || can_wh_pack_scan || can_wh_pack_inventory || can_wh_pack_rto || can_wh_pack_units || can_wh_pack_stockin || can_wh_pack_pick || can_wh_pack_columns || can_wh_pack_fba || can_wh_pack_treatment || can_wh_pack_lifecycle || can_wh_manage_columns
   )
 
   const { data, error } = await adminClient
@@ -103,6 +103,12 @@ export async function PATCH(request: Request) {
       can_wh_pack_inventory: can_wh_pack_inventory ?? false,
       can_wh_pack_rto: can_wh_pack_rto ?? false,
       can_wh_pack_units: can_wh_pack_units ?? false,
+      can_wh_pack_stockin: can_wh_pack_stockin ?? false,
+      can_wh_pack_pick: can_wh_pack_pick ?? false,
+      can_wh_pack_columns: can_wh_pack_columns ?? false,
+      can_wh_pack_fba: can_wh_pack_fba ?? false,
+      can_wh_pack_treatment: can_wh_pack_treatment ?? false,
+      can_wh_pack_lifecycle: can_wh_pack_lifecycle ?? false,
       can_wh_manage_columns: can_wh_manage_columns ?? false,
       reviewed_at: new Date().toISOString(),
       reviewed_by: user.id,

@@ -32,6 +32,12 @@ export interface UserAccess {
   can_wh_pack_inventory: boolean
   can_wh_pack_rto: boolean
   can_wh_pack_units: boolean
+  can_wh_pack_stockin: boolean
+  can_wh_pack_pick: boolean
+  can_wh_pack_columns: boolean
+  can_wh_pack_fba: boolean
+  can_wh_pack_treatment: boolean
+  can_wh_pack_lifecycle: boolean
   can_wh_manage_columns?: boolean
   requested_at: string
   reviewed_at: string | null
