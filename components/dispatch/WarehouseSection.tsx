@@ -57,12 +57,16 @@ function tabBtn(active: boolean): React.CSSProperties {
   }
 }
 
-export default function WarehouseSection({ userId, access, isOwner = false, userEmail }: { userId: string; access: UserAccess; isOwner?: boolean; userEmail?: string }) {
+export default function WarehouseSection({ userId, access, isOwner = false, userEmail, topTab: topTabProp, onTopTabChange }: { userId: string; access: UserAccess; isOwner?: boolean; userEmail?: string; topTab?: TopTab; onTopTabChange?: (t: TopTab) => void }) {
   // Only show sub-tabs the user is permitted to see.
   const packingTabs = PACKING_TABS.filter(t => access[t.perm])
   const topTabs = TOP_TABS.filter(t => t.perm === 'packing' ? packingTabs.length > 0 : access[t.perm as keyof UserAccess])
 
-  const [topTab, setTopTab] = useState<TopTab>(topTabs[0]?.key ?? 'stock')
+  const [internalTopTab, setInternalTopTab] = useState<TopTab>(topTabs[0]?.key ?? 'stock')
+  const controlledTop = onTopTabChange !== undefined
+  const rawTop = controlledTop ? topTabProp : internalTopTab
+  const topTab: TopTab = (rawTop && topTabs.some(t => t.key === rawTop)) ? rawTop : (topTabs[0]?.key ?? 'stock')
+  const setTopTab = (k: TopTab) => { if (controlledTop) onTopTabChange!(k); else setInternalTopTab(k) }
   const [packingTab, setPackingTab] = useState<PackingTab>(packingTabs[0]?.key ?? 'generate')
 
   if (topTabs.length === 0) {
@@ -71,14 +75,16 @@ export default function WarehouseSection({ userId, access, isOwner = false, user
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Top-level tabs (only permitted ones) */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
-        {topTabs.map(({ key, label, icon }) => (
-          <button key={key} onClick={() => setTopTab(key)} style={tabBtn(topTab === key)}>
-            {icon}{label}
-          </button>
-        ))}
-      </div>
+      {/* Top-level tabs — shown only when NOT driven by the sidebar */}
+      {!controlledTop && (
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
+          {topTabs.map(({ key, label, icon }) => (
+            <button key={key} onClick={() => setTopTab(key)} style={tabBtn(topTab === key)}>
+              {icon}{label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {topTab === 'stock' && <StockTab userId={userId} />}
       {topTab === 'coating' && <CoatingTab userId={userId} />}

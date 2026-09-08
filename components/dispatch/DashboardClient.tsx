@@ -131,6 +131,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const awbInputRef = useRef<HTMLInputElement>(null)
   const itemInputRef = useRef<HTMLInputElement>(null)
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
+  const [warehouseTab, setWarehouseTab] = useState<'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'>('stock')
   const xgDispatched = useExportGate('dispatched', 'Dispatched export')
   const xgDemand = useExportGate('demand', 'Upcoming-demand export')
   const xgPlan = useExportGate('plan', 'Dispatch-plan export')
@@ -2389,7 +2390,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'otdr', label: 'OTDR', section: 'orders', show: effectiveAccess.can_otdr },
     { key: 'handling', label: 'Handling Time', section: 'orders', show: true },
     { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', count: 0, section: 'orders', show: true },
-    { key: 'warehouse', label: 'Warehouse', section: 'warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
+    { key: 'wh:stock', label: 'Stock', section: 'warehouse', show: effectiveAccess.can_wh_stock },
+    { key: 'wh:coating', label: 'Coating', section: 'warehouse', show: effectiveAccess.can_wh_coating },
+    { key: 'wh:picking', label: 'Picking', section: 'warehouse', show: effectiveAccess.can_wh_picking },
+    { key: 'wh:inventory', label: 'Inventory', section: 'warehouse', show: effectiveAccess.can_wh_inventory },
+    { key: 'wh:barcodes', label: 'Barcodes', section: 'warehouse', show: effectiveAccess.can_wh_barcodes },
+    { key: 'wh:packing', label: 'Packing', section: 'warehouse', show: access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
     { key: 'skumap', label: 'SKU Map', section: 'settings', show: effectiveAccess.can_users },
     { key: 'users', label: 'Users', section: 'settings', show: effectiveAccess.can_users },
   ]
@@ -2739,7 +2745,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           @page { size: A4; margin: 12mm; }
         }
       `}</style>
-      <Sidebar items={navItems} tab={tab} setTab={(k) => setTab(k as Tab)} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />
+      <Sidebar items={navItems} tab={tab === 'warehouse' ? `wh:${warehouseTab}` : tab} setTab={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />
       <div className="dl-content-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, minHeight: '100vh' }}>
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
@@ -5293,7 +5299,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {/* ════ WAREHOUSE ════ */}
         {tab === 'warehouse' && (
-          <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} userEmail={user.email || undefined} />
+          <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} userEmail={user.email || undefined} topTab={warehouseTab} onTopTabChange={setWarehouseTab} />
         )}
 
         {tab === 'recon' && effectiveAccess.can_recon && (
