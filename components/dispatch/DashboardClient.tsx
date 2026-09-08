@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import Badge, { tierVariant } from './Badge'
+import DrumDatePicker from './DrumDatePicker'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
@@ -3765,12 +3766,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 {/* Target date + save */}
                                 <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <input type="date"
-                                      value={inputDate}
-                                      min={new Date().toISOString().split('T')[0]}
-                                      onChange={e => setTargetDates(prev => ({ ...prev, [order.id]: e.target.value }))}
-                                      style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono', cursor: 'pointer' }}
-                                    />
+                                    <DrumDatePicker value={inputDate} min={new Date().toISOString().split('T')[0]} onChange={v => setTargetDates(prev => ({ ...prev, [order.id]: v }))} placeholder="Set date" />
                                     {(targetDates[order.id] && targetDates[order.id] !== savedDate) && (
                                       <button onClick={() => saveTargetDate(order.id)} disabled={savingReview === order.id} style={{ padding: '5px 10px', borderRadius: 6, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                                         {savingReview === order.id ? '…' : 'Save'}
@@ -3846,10 +3842,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                                 <td style={{ padding: '10px 16px', textAlign: 'center' as const }}><span style={{ fontFamily: 'DM Mono', fontSize: 14, fontWeight: 600, color: uc.color }}>{displayDaysLeft(order) ?? '—'}</span></td>
                                 <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' as const }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <input type="date" value={inputDate} min={new Date().toISOString().split('T')[0]}
-                                      onChange={e => setTargetDates(prev => ({ ...prev, [order.id]: e.target.value }))}
-                                      style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'DM Mono' }}
-                                    />
+                                    <DrumDatePicker value={inputDate} min={new Date().toISOString().split('T')[0]} onChange={v => setTargetDates(prev => ({ ...prev, [order.id]: v }))} placeholder="Set date" />
                                     {(targetDates[order.id] && targetDates[order.id] !== savedDate) && (
                                       <button onClick={() => saveTargetDate(order.id)} disabled={savingReview === order.id} style={{ padding: '5px 10px', borderRadius: 6, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                                         {savingReview === order.id ? '…' : 'Save'}
