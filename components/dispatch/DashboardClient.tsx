@@ -139,7 +139,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_manage_columns: true }
+    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
     : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
