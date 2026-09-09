@@ -1,5 +1,5 @@
 'use client'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import dynamic from 'next/dynamic'
@@ -155,7 +155,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
   const [warehouseTab, setWarehouseTab] = useState<'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'>('stock')
   const pathname = usePathname()
-  const router = useRouter()
   const stateNavReady = useRef(false)
   // URL -> state: on mount, back/forward, and deep links.
   useEffect(() => {
@@ -168,7 +167,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   useEffect(() => {
     if (!stateNavReady.current) { stateNavReady.current = true; return }
     const p = stateToPath(tab, warehouseTab)
-    if (p !== pathname) { if (pathname === '/') router.replace(p); else router.push(p) }
+    // Update the URL via the History API — NOT router.push (which re-runs the route's server
+    // component and refetches initialOrders, causing a visible double-load). pushState only
+    // changes the URL bar; back/forward (popstate) still drive usePathname -> the URL->state
+    // effect, so bookmarks and history keep working, with no reload.
+    if (p !== pathname && typeof window !== 'undefined') {
+      if (pathname === '/') window.history.replaceState(window.history.state, '', p)
+      else window.history.pushState(window.history.state, '', p)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, warehouseTab])
   const xgDispatched = useExportGate('dispatched', 'Dispatched export')
