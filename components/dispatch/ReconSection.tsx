@@ -19,6 +19,27 @@ type Tab = 'inbox' | 'orders' | 'charges' | 'ratecard' | 'prices' | 'discounts'
 interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string; total_settled?: number | null; order_count?: number | null; deposit_date?: string | null; period_start?: string | null; period_end?: string | null }
 type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
 
+function RebuildChargesButton({ supabase }: { supabase: ReturnType<typeof createClient> }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const run = async () => {
+    if (busy) return
+    setBusy(true); setMsg('Starting…')
+    try { const n = await rebuildSettlementCharges(supabase, m => setMsg(m)); setMsg(`Done — ${n} orders' charges rebuilt.`) }
+    catch (e) { setMsg('Error: ' + (e as Error).message) }
+    finally { setBusy(false) }
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {msg && <span style={{ fontSize: 12, color: busy ? 'var(--text3)' : (msg.startsWith('Error') ? 'var(--critical)' : 'var(--dispatched)') }}>{msg}</span>}
+      <button onClick={run} disabled={busy} title="Recompute the precomputed per-order charges table (for the fast, filterable merged view)"
+        style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: busy ? 'var(--bg2)' : 'var(--surface)', color: 'var(--text2)', cursor: busy ? 'default' : 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
+        <RefreshCw size={13} /> {busy ? 'Rebuilding…' : 'Rebuild charges'}
+      </button>
+    </div>
+  )
+}
+
 export default function ReconSection() {
   const supabase = createClient()
   const [tab, setTab] = useState<Tab>('inbox')
@@ -183,6 +204,7 @@ export default function ReconSection() {
         <button onClick={() => loadInbox()} style={{ marginLeft: 'auto', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
           <RefreshCw size={13} /> Refresh
         </button>
+        <RebuildChargesButton supabase={supabase} />
       </div>
 
       {msg && (
@@ -456,6 +478,52 @@ export interface ChargeAgg {
   detail: { label: string; amount: number }[]
 }
 type SettleLine = { amount: number | null; transaction_type: string | null; amount_description: string | null; raw: Record<string, unknown> | null }
+function platformOfOid(oid: string): string { const t = (oid || '').trim(); if (/^\d{3}-\d{7}-\d{7}$/.test(t)) return 'Amazon'; if (t.startsWith('OD')) return 'Flipkart'; if (/^\d{4,6}$/.test(t)) return 'Website'; return 'Other' }
+
+// Rebuild the precomputed settlement_charges table using the EXACT same aggregateCharges logic
+// the live view uses, so the stored numbers match. Heavy one-time/occasional job (loads all
+// orders + settlements, aggregates per order, upserts). onProgress(done,total,phase).
+async function rebuildSettlementCharges(supabase: ReturnType<typeof createClient>, onProgress: (msg: string) => void): Promise<number> {
+  onProgress('Loading orders…')
+  const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; order_date: string | null }>((from, to) =>
+    supabase.from('dispatch_orders').select('order_id, sku, barcode_sku, order_date').eq('is_dispatched', true).eq('is_cancelled', false).range(from, to))
+  const meta: Record<string, { sku: string | null; order_date: string | null }> = {}
+  for (const o of orders) { const k = (o.order_id || '').trim(); if (k && !meta[k]) meta[k] = { sku: o.barcode_sku || o.sku, order_date: o.order_date } }
+  const oids = Object.keys(meta)
+  onProgress(`Loading settlements for ${oids.length} orders…`)
+  const byOrder: Record<string, { lines: SettleLine[]; payDate: string | null }> = {}
+  const CH = 300
+  for (let i = 0; i < oids.length; i += CH) {
+    const slice = oids.slice(i, i + CH)
+    const rows = await fetchAllRows<{ order_id: string | null; amount: number | null; transaction_type: string | null; amount_description: string | null; settlement_date: string | null; raw: Record<string, unknown> | null }>((from, to) =>
+      supabase.from('settlements').select('order_id, amount, transaction_type, amount_description, settlement_date, raw').in('order_id', slice).range(from, to))
+    for (const r of rows) {
+      const k = (r.order_id || '').trim(); if (!k) continue
+      if (!byOrder[k]) byOrder[k] = { lines: [], payDate: null }
+      byOrder[k].lines.push({ amount: r.amount, transaction_type: r.transaction_type, amount_description: r.amount_description, raw: r.raw })
+      const pd = byOrder[k].payDate
+      if (r.settlement_date && (!pd || r.settlement_date > pd)) byOrder[k].payDate = r.settlement_date
+    }
+    onProgress(`Settlements ${Math.min(i + CH, oids.length)}/${oids.length}…`)
+  }
+  const chargeRows = Object.keys(byOrder).map(oid => {
+    const platform = platformOfOid(oid)
+    const a = aggregateCharges(platform, byOrder[oid].lines)
+    const m = meta[oid] || { sku: null, order_date: null }
+    return { order_id: oid, sku: m.sku, platform, order_date: m.order_date, payment_date: byOrder[oid].payDate,
+      sale: a.sale, commission: a.commission, commission_pct: a.commissionPct, closing: a.closing, shipping: a.shipping,
+      fba: a.fba, product_tax: a.productTax, tcs: a.tcs, tds: a.tds, gst_on_fees: a.gstOnFees, net: a.net, other: a.other,
+      reverse_residual: a.reverseResidual, returned: a.returned, updated_at: new Date().toISOString() }
+  })
+  onProgress(`Saving ${chargeRows.length} charge rows…`)
+  for (let i = 0; i < chargeRows.length; i += 500) {
+    const { error } = await supabase.from('settlement_charges').upsert(chargeRows.slice(i, i + 500), { onConflict: 'order_id' })
+    if (error) throw new Error('Save failed: ' + error.message)
+    onProgress(`Saved ${Math.min(i + 500, chargeRows.length)}/${chargeRows.length}…`)
+  }
+  return chargeRows.length
+}
+
 function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
   const b = { sale: 0, commission: 0, closing: 0, shipping: 0, fba: 0, productTax: 0, tcs: 0, tds: 0, gstOnFees: 0, net: 0, other: 0 }
   let reverseResidual = 0, returned = false
