@@ -766,7 +766,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         if (qty <= 0) continue
         const { data: pieces } = await supabase.from('packed_units').select('id, barcode, column_code').eq('sku', sku).eq('status', 'picked').limit(qty)
         for (const p of (pieces || [])) {
-          await supabase.from('packed_units').update({ status: 'stocked', picked_at: null }).eq('id', p.id).eq('status', 'picked')
+          await supabase.from('packed_units').update({ status: 'stocked', picked_at: null, picked_courier: null }).eq('id', p.id).eq('status', 'picked')
           await supabase.from('stock_movements').insert({ barcode: p.barcode, column_code: p.column_code ?? null, direction: 'in', sku, bypassed: false, by_email: user.email || null })
         }
       }

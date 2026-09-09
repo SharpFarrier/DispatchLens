@@ -51,15 +51,24 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
     // dispatched flips to 'dispatched', so status='picked' == picked-and-not-yet-dispatched.
     // Counting these (not just today's) means a piece picked yesterday but not dispatched still
     // satisfies today's demand -> no double-pick. (Fix 1.)
-    const pk = await fetchAllRows<{ sku: string | null }>((from, to) =>
-      supabase.from('packed_units').select('sku').eq('status', 'picked').range(from, to))
-    const pkc: Record<string, number> = {}
-    for (const r of pk) { const k = (r.sku || '').trim(); if (k) pkc[k] = (pkc[k] || 0) + 1 }
-    // Attribute the picked count to couriers by demand (Delhivery first), since pieces aren't
-    // courier-tagged. Excess over total demand (over-picked leftovers) stays unattributed.
+    const pk = await fetchAllRows<{ sku: string | null; picked_courier: string | null }>((from, to) =>
+      supabase.from('packed_units').select('sku, picked_courier').eq('status', 'picked').range(from, to))
+    // Attribute each picked piece to the courier it was ACTUALLY picked for (stored at pick time
+    // — the picker physically placed it in that courier's section). No re-guessing. Pieces picked
+    // before picked_courier existed (null) are treated as backlog and demand-filled once.
     const pbc: Record<Courier, Record<string, number>> = { Delhivery: {}, Bluedart: {} }
-    for (const k of Object.keys(pkc)) {
-      let remaining = pkc[k]
+    const nullByS: Record<string, number> = {}
+    for (const r of pk) {
+      const k = (r.sku || '').trim(); if (!k) continue
+      if (r.picked_courier === 'Delhivery' || r.picked_courier === 'Bluedart') {
+        pbc[r.picked_courier][k] = (pbc[r.picked_courier][k] || 0) + 1
+      } else {
+        nullByS[k] = (nullByS[k] || 0) + 1   // legacy null-courier picks
+      }
+    }
+    // Legacy backlog: fill remaining demand (Delhivery first) — one-time until they dispatch/clear.
+    for (const k of Object.keys(nullByS)) {
+      let remaining = nullByS[k]
       for (const c of ['Delhivery', 'Bluedart'] as Courier[]) {
         const need = Math.max(0, (dem[c][k] || 0) - (pbc[c][k] || 0))
         const take = Math.min(remaining, need)
@@ -73,6 +82,8 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
     const nm: Record<string, string> = {}
     for (const m of maps) if (m.product_name) nm[m.master_sku] = m.product_name
 
+    const pkc: Record<string, number> = {}
+    for (const r of pk) { const kk = (r.sku || '').trim(); if (kk) pkc[kk] = (pkc[kk] || 0) + 1 }
     setDemand(dem); setPickedToday(pkc); setPickedByCourier(pbc); setNames(nm); setLoading(false)
   }, [supabase])
   useEffect(() => { void loadPicklist() }, [loadPicklist])
@@ -94,7 +105,7 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
 
   const commitPick = useCallback(async (c: Courier, unitId: string, barcode: string, sku: string | null, column_code: string | null) => {
     const now = new Date().toISOString()
-    const { error } = await supabase.from('packed_units').update({ status: 'picked', picked_at: now, column_code: null }).eq('id', unitId).eq('status', 'stocked')
+    const { error } = await supabase.from('packed_units').update({ status: 'picked', picked_at: now, column_code: null, picked_courier: c }).eq('id', unitId).eq('status', 'stocked')
     if (error) { flash('error', 'Pick failed: ' + error.message); return }
     await supabase.from('stock_movements').insert({ barcode, column_code, direction: 'pick', sku, bypassed: false, by_email: userEmail || null })
     const k = (sku || '').trim()
@@ -138,7 +149,7 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
   }
 
   async function undoPick(item: PickedItem) {
-    const { error } = await supabase.from('packed_units').update({ status: 'stocked', picked_at: null, column_code: item.column_code }).eq('id', item.unitId).eq('status', 'picked')
+    const { error } = await supabase.from('packed_units').update({ status: 'stocked', picked_at: null, column_code: item.column_code, picked_courier: null }).eq('id', item.unitId).eq('status', 'picked')
     if (error) { flash('error', 'Undo failed: ' + error.message); return }
     const k = (item.sku || '').trim()
     if (k && courier) { setPickedByCourier(p => ({ ...p, [courier]: { ...p[courier], [k]: Math.max(0, (p[courier][k] || 0) - 1) } })); setPickedToday(p => ({ ...p, [k]: Math.max(0, (p[k] || 0) - 1) })) }
