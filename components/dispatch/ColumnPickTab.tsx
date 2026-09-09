@@ -109,10 +109,14 @@ export default function ColumnPickTab({ userEmail }: { userEmail?: string }) {
     if (error) { flash('error', 'Pick failed: ' + error.message); return }
     await supabase.from('stock_movements').insert({ barcode, column_code, direction: 'pick', sku, bypassed: false, by_email: userEmail || null })
     const k = (sku || '').trim()
+    // Progress for this SKU on the selected courier, AFTER this pick, for the confirmation pill.
+    const newGot = k ? (pickedByCourier[c][k] || 0) + 1 : 1
+    const need = k ? (demand[c][k] || 0) : 0
+    const remaining = Math.max(0, need - newGot)
     if (k) { setPickedByCourier(p => ({ ...p, [c]: { ...p[c], [k]: (p[c][k] || 0) + 1 } })); setPickedToday(p => ({ ...p, [k]: (p[k] || 0) + 1 })) }
     setPicked(prev => [{ barcode, unitId, sku, column_code }, ...prev])
-    flash('success', `Picked ${barcode}${column_code ? ` · from ${column_code}` : ''}`)
-  }, [supabase, userEmail])
+    flash('success', `Picked ${barcode}${k ? ` · ${newGot}/${need} · ${remaining === 0 ? '\u2713 done' : `${remaining} left`}` : ''}`)
+  }, [supabase, userEmail, demand, pickedByCourier])
 
   const processScan = useCallback(async (raw: string) => {
     const value = (raw || '').trim()
