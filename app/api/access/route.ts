@@ -64,7 +64,7 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json()
-  const { email, status, can_import, can_plan, can_review, can_picklist, can_eod, can_eod_reconcile, can_dispatched, can_returns, can_allorders, can_calllens, can_users, can_recon, can_otdr,
+  const { email, status, can_import, can_plan, can_review, can_picklist, can_eod, can_eod_reconcile, can_dispatched, can_returns, can_allorders, can_calllens, can_users, can_handling, can_reports, can_recon, can_otdr,
     can_wh_stock, can_wh_coating, can_wh_picking, can_wh_inventory, can_wh_barcodes,
     can_wh_pack_generate, can_wh_pack_scan, can_wh_pack_inventory, can_wh_pack_rto, can_wh_pack_units, can_wh_pack_stockin, can_wh_pack_pick, can_wh_pack_columns, can_wh_pack_fba, can_wh_pack_treatment, can_wh_pack_lifecycle, can_wh_manage_columns } = body
 
@@ -92,6 +92,8 @@ export async function PATCH(request: Request) {
       can_allorders: can_allorders ?? false,
       can_calllens: can_calllens ?? false,
       can_users: can_users ?? false,
+      can_handling: can_handling ?? false,
+      can_reports: can_reports ?? false,
       can_recon: can_recon ?? false,
       can_otdr: can_otdr ?? false,
       can_wh_stock: can_wh_stock ?? false,

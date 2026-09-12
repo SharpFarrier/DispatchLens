@@ -18,6 +18,8 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
   { key: 'can_recon',    label: 'Recon',    desc: 'Settlement reconciliation & payments' },
   { key: 'can_otdr',     label: 'OTDR',     desc: 'Delivery performance / OTDR forecast' },
   { key: 'can_users',    label: 'Users',    desc: 'Manage user access (admin only)' },
+  { key: 'can_handling', label: 'Handling Time', desc: 'Handling-time tracker' },
+  { key: 'can_reports', label: 'Reports', desc: 'Export reports / approvals' },
 ]
 
 const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [

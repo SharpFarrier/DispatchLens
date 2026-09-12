@@ -184,7 +184,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
+    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
     : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
@@ -2467,8 +2467,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'calllens', label: 'CallLens', section: 'orders', show: effectiveAccess.can_calllens },
     { key: 'recon', label: 'Recon', section: 'orders', show: effectiveAccess.can_recon },
     { key: 'otdr', label: 'OTDR', section: 'orders', show: effectiveAccess.can_otdr },
-    { key: 'handling', label: 'Handling Time', section: 'orders', show: true },
-    { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', count: 0, section: 'orders', show: true },
+    { key: 'handling', label: 'Handling Time', section: 'orders', show: effectiveAccess.can_handling },
+    { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', count: 0, section: 'orders', show: effectiveAccess.can_reports },
     { key: 'wh:stock', label: 'Stock', section: 'warehouse', show: effectiveAccess.can_wh_stock },
     { key: 'wh:coating', label: 'Coating', section: 'warehouse', show: effectiveAccess.can_wh_coating },
     { key: 'wh:picking', label: 'Picking', section: 'warehouse', show: effectiveAccess.can_wh_picking },
@@ -2869,11 +2869,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'allorders', label: 'All Orders', show: effectiveAccess.can_allorders },
             { key: 'calllens', label: 'CallLens', show: effectiveAccess.can_calllens },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
-            { key: 'handling', label: 'Handling Time', show: true },
+            { key: 'handling', label: 'Handling Time', show: effectiveAccess.can_handling },
             { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'recon', label: 'Recon', show: effectiveAccess.can_recon },
             { key: 'otdr', label: 'OTDR', show: effectiveAccess.can_otdr },
-            { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', show: true },
+            { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', show: effectiveAccess.can_reports },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -5413,7 +5413,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {tab === 'skumap' && effectiveAccess.can_users && (
           <SkuMapTab />
         )}
-        {tab === 'handling' && (
+        {tab === 'handling' && effectiveAccess.can_handling && (
           <HandlingTimeTab userEmail={user.email || ''} />
         )}
 
@@ -5429,7 +5429,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {tab === 'otdr' && effectiveAccess.can_otdr && (
           <OtdrTab />
         )}
-        {tab === 'reports' && (
+        {tab === 'reports' && effectiveAccess.can_reports && (
           <ReportsTab userEmail={user.email || ''} isOwner={isOwner} onPendingChange={setPendingReports} />
         )}
 
