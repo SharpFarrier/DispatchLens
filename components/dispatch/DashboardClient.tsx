@@ -3038,7 +3038,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       <main style={{ flex: 1, padding: '28px 32px', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
 
         {/* ════ IMPORT ════ */}
-        {tab === 'import' && (
+        {tab === 'import' && effectiveAccess.can_import && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Import Orders</h1>
@@ -3168,7 +3168,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ PLAN ════ */}
-        {tab === 'plan' && (
+        {tab === 'plan' && effectiveAccess.can_plan && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
             {/* Flagged SKUs — sticky-unfulfillable. New imports of these auto-go unfulfillable
                 and they drop out of the picklist. Mark fulfillable to release. */}
@@ -3795,7 +3795,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ REVIEW ════ */}
-        {tab === 'review' && (
+        {tab === 'review' && effectiveAccess.can_review && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Review — Unfulfillable Orders</h1>
@@ -3984,7 +3984,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ PICKLIST ════ */}
-        {tab === 'picklist' && (
+        {tab === 'picklist' && effectiveAccess.can_picklist && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' as const }}>
               <h1 style={{ fontSize: 18, fontWeight: 600 }}>Picklist</h1>
@@ -4924,7 +4924,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           <CallLensTab currentUserEmail={user.email || ''} />
         )}
 
-        {tab === 'eod' && (
+        {tab === 'eod' && effectiveAccess.can_eod && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 24, maxWidth: 700 }}>
             <h1 style={{ fontSize: 18, fontWeight: 600 }}>End of Day — {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</h1>
 
@@ -5418,7 +5418,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ WAREHOUSE ════ */}
-        {tab === 'warehouse' && (
+        {tab === 'warehouse' && (effectiveAccess.can_wh_stock || effectiveAccess.can_wh_coating || effectiveAccess.can_wh_picking || effectiveAccess.can_wh_inventory || effectiveAccess.can_wh_barcodes || effectiveAccess.can_wh_pack_generate || effectiveAccess.can_wh_pack_scan || effectiveAccess.can_wh_pack_stockin || effectiveAccess.can_wh_pack_pick || effectiveAccess.can_wh_pack_columns || effectiveAccess.can_wh_pack_fba || effectiveAccess.can_wh_pack_inventory || effectiveAccess.can_wh_pack_rto || effectiveAccess.can_wh_pack_treatment || effectiveAccess.can_wh_pack_units || effectiveAccess.can_wh_pack_lifecycle) && (
           <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} userEmail={user.email || undefined} topTab={warehouseTab} onTopTabChange={setWarehouseTab} />
         )}
 
@@ -5434,7 +5434,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ USERS ════ */}
-        {tab === 'users' && (
+        {tab === 'users' && effectiveAccess.can_users && (
           <UsersTab ownerEmail={user.email!} />
         )}
       </main>
