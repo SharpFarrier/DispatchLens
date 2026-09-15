@@ -324,6 +324,8 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
 
   const logDisposition = async (o: DBOrder, disp: string, note: string, channel = 'call') => {
     await supabase.from('call_logs').insert({ order_id: o.order_id, queue, channel, disposition: disp, note: note || null, caller: o.assigned_caller || null, created_by_email: currentUserEmail })
+    // Also record it on the order's history timeline so calls show in Order History.
+    void logOrderEvent(o.order_id, 'call', `Call · ${disp}${channel !== 'call' ? ` (${channel})` : ''}`, note || null)
   }
 
   // Commit a disposition (after any confirm/note gating already satisfied).
