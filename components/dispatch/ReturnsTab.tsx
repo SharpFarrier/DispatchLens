@@ -95,7 +95,7 @@ interface Props {
 }
 
 // ── Shared sort/filter machinery for the Returns tables (main list + daily review) ──
-interface RetCol { key: string; label: string; type: 'text' | 'category' | 'date' | 'number'; get: (r: ReturnRow) => string | number }
+interface RetCol<T = ReturnRow> { key: string; label: string; type: 'text' | 'category' | 'date' | 'number'; get: (r: T) => string | number }
 
 function isRtoRow(r: ReturnRow) { return r.return_type === 'rto' || r.source === 'rto_auto' || r.source === 'rto' }
 
@@ -120,7 +120,7 @@ function returnCols(canSeeAmount: boolean): RetCol[] {
 const retToDay = (v: string | number): string => { const s = String(v || ''); return s ? s.slice(0, 10) : '' }
 
 // Hook: holds sort + filter state and returns the filtered+sorted rows + header helpers.
-function useReturnFilters(rows: ReturnRow[], cols: RetCol[]) {
+function useReturnFilters<T = ReturnRow>(rows: T[], cols: RetCol<T>[]) {
   const [sortKey, setSortKey] = useState<string>('added')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [textFilters, setTextFilters] = useState<Record<string, string>>({})
@@ -178,7 +178,7 @@ function useReturnFilters(rows: ReturnRow[], cols: RetCol[]) {
 type RetFilterCtx = ReturnType<typeof useReturnFilters>
 
 // A filterable + sortable <th> for the Returns tables.
-function RetHeaderCell({ col, ctx }: { col: RetCol; ctx: RetFilterCtx }) {
+function RetHeaderCell({ col, ctx }: { col: RetCol<any>; ctx: RetFilterCtx }) {
   const monthName = (mo: string) => ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parseInt(mo, 10)] || mo
   const dayNum = (day: string) => parseInt(day.slice(8, 10), 10)
   const toggleDays = (colKey: string, days: string[], on: boolean) => ctx.setDateFilters(prev => { const cur = new Set(prev[colKey] || []); if (on) days.forEach(d => cur.add(d)); else days.forEach(d => cur.delete(d)); return { ...prev, [colKey]: Array.from(cur) } })
@@ -964,7 +964,6 @@ function CancelledReview({ canSeeAmount, onOpenOrder }: { canSeeAmount: boolean;
   const [win, setWin] = useState<'7d' | '30d' | 'custom'>('7d')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [amtEdits, setAmtEdits] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
@@ -1002,13 +1001,21 @@ function CancelledReview({ canSeeAmount, onOpenOrder }: { canSeeAmount: boolean;
     return true
   }), [orders, range])
 
-  const days = useMemo(() => {
-    const g: Record<string, DBOrder[]> = {}
-    for (const o of inWindow) { const k = dayKey(cancelDate(o)); (g[k] ||= []).push(o) }
-    return Object.keys(g).sort((a, b) => b.localeCompare(a)).map(k => ({ key: k, orders: g[k] }))
-  }, [inWindow])
-
   const totalPending = useMemo(() => inWindow.reduce((s, o) => { const r = retByOrder[o.order_id]; return (r && r.refund_status === 'refunded') ? s : s + orderAmount(o) }, 0), [inWindow, retByOrder])
+  // Filterable columns for the Cancelled table (same framework as the Returns/Daily tables).
+  const cancelledCols = useMemo<RetCol<DBOrder>[]>(() => {
+    const c: RetCol<DBOrder>[] = [
+      { key: 'order_id', label: 'Order', type: 'text', get: o => o.order_id || '' },
+      { key: 'customer', label: 'Customer', type: 'text', get: o => o.customer_name || '' },
+      { key: 'platform', label: 'Platform', type: 'category', get: o => platformOf(o.order_id) },
+      { key: 'sku', label: 'SKU', type: 'text', get: o => o.sku || '' },
+      { key: 'refund', label: 'Refund', type: 'category', get: o => retByOrder[o.order_id]?.refund_status === 'refunded' ? 'Refunded' : 'Pending' },
+      { key: 'cancelled', label: 'Cancelled', type: 'date', get: o => cancelDate(o) },
+    ]
+    if (canSeeAmount) c.push({ key: 'amount', label: 'Amount', type: 'number', get: o => orderAmount(o) })
+    return c
+  }, [retByOrder, canSeeAmount])
+  const flt = useReturnFilters(inWindow, cancelledCols)
 
   const markRefunded = async (o: DBOrder) => {
     setSavingId(o.id)
@@ -1067,54 +1074,47 @@ function CancelledReview({ canSeeAmount, onOpenOrder }: { canSeeAmount: boolean;
 
       {loading ? (
         <div style={{ ...card, padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading cancelled orders…</div>
-      ) : days.length === 0 ? (
-        <div style={{ ...card, padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>No cancelled orders in this window.</div>
-      ) : days.map(({ key, orders: dayOrders }) => {
-        const isOpen = collapsed[key] !== true
-        const dayPending = dayOrders.reduce((s, o) => { const r = retByOrder[o.order_id]; return (r && r.refund_status === 'refunded') ? s : s + orderAmount(o) }, 0)
-        const allRefunded = dayOrders.every(o => retByOrder[o.order_id]?.refund_status === 'refunded')
-        return (
-          <div key={key} style={{ ...card, overflow: 'hidden' }}>
-            <button onClick={() => setCollapsed(prev => ({ ...prev, [key]: prev[key] !== true }))}
-              style={{ width: '100%', textAlign: 'left' as const, padding: '10px 16px', background: 'var(--bg2)', border: 'none', borderBottom: isOpen ? '1px solid var(--border)' : 'none', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-              {isOpen ? <ChevronDown size={16} style={{ color: 'var(--text3)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text3)' }} />}
-              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{fmtDay(key)}</span>
-              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{dayOrders.length} cancelled</span>
-              <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 13, color: allRefunded ? 'var(--dispatched)' : 'var(--today)' }}>
-                {allRefunded ? 'all refunded' : canSeeAmount ? `\u20b9${dayPending.toLocaleString('en-IN')} pending` : `${dayOrders.filter(o => retByOrder[o.order_id]?.refund_status !== 'refunded').length} pending`}
-              </span>
-            </button>
-            {isOpen && dayOrders.map((o, i) => {
-              const r = retByOrder[o.order_id]
-              const refunded = r?.refund_status === 'refunded'
-              const amtVal = amtEdits[o.order_id] ?? String(orderAmount(o))
-              return (
-                <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--border)', background: refunded ? 'var(--dispatched-bg)' : 'transparent' }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 13, color: 'var(--text)' }}>{o.customer_name || '—'}</div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 2, flexWrap: 'wrap' as const }}>
-                      <span onClick={() => openOrder(o.order_id)} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '\u2026' : o.order_id}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>{platformOf(o.order_id)}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{o.sku}</span>
-                    </div>
-                  </div>
-                  {canSeeAmount && (refunded
-                    ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--dispatched)', width: 92, textAlign: 'right' as const }}>\u20b9{(r?.refund_amount ?? orderAmount(o)).toLocaleString('en-IN')}</span>
-                    : <input value={amtVal} onChange={e => setAmtEdits(prev => ({ ...prev, [o.order_id]: e.target.value }))}
-                        style={{ width: 92, textAlign: 'right' as const, padding: '7px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-mono)' }} />)}
-                  {refunded ? (
-                    <button onClick={() => undoRefund(o)} disabled={savingId === o.id}
-                      style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{savingId === o.id ? '…' : 'Undo'}</button>
-                  ) : (
-                    <button onClick={() => markRefunded(o)} disabled={savingId === o.id}
-                      style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><CheckCircle size={14} /> {savingId === o.id ? 'Saving…' : 'Mark refunded'}</button>
-                  )}
-                </div>
-              )
-            })}
+      ) : (
+        <div style={{ ...card, overflow: 'hidden' as const }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{flt.anyFilter ? `${flt.filtered.length} of ${inWindow.length}` : `${inWindow.length}`} cancelled</span>
+            {flt.anyFilter && <button onClick={flt.clearAll} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}><X size={12} /> Clear filters</button>}
           </div>
-        )
-      })}
+          <div style={{ overflowX: 'auto' as const }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
+              <thead><tr>
+                {cancelledCols.map(c => <RetHeaderCell key={c.key} col={c} ctx={flt} />)}
+                <th style={{ padding: '9px 12px', background: 'var(--bg2)' }} />
+              </tr></thead>
+              <tbody>
+                {flt.filtered.length === 0 ? (
+                  <tr><td colSpan={cancelledCols.length + 1} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No cancelled orders match.</td></tr>
+                ) : flt.filtered.map((o, i) => {
+                  const r = retByOrder[o.order_id]
+                  const refunded = r?.refund_status === 'refunded'
+                  const amtVal = amtEdits[o.order_id] ?? String(orderAmount(o))
+                  return (
+                    <tr key={o.id} style={{ borderTop: '1px solid var(--border)', background: refunded ? 'var(--dispatched-bg)' : (i % 2 ? 'var(--bg2)' : 'transparent') }}>
+                      <td style={{ padding: '9px 12px' }}><span onClick={() => openOrder(o.order_id)} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}>{o.order_id.length > 20 ? o.order_id.slice(0, 20) + '\u2026' : o.order_id}</span></td>
+                      <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)' }}>{o.customer_name || '\u2014'}</td>
+                      <td style={{ padding: '9px 12px', fontSize: 11, color: 'var(--text3)' }}>{platformOf(o.order_id)}</td>
+                      <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{o.sku}</td>
+                      <td style={{ padding: '9px 12px', fontSize: 12 }}>{refunded ? <span style={{ color: 'var(--dispatched)', fontWeight: 600 }}>Refunded</span> : <span style={{ color: 'var(--today)' }}>Pending</span>}</td>
+                      <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>{fmtDay(dayKey(cancelDate(o)))}</td>
+                      {canSeeAmount && <td style={{ padding: '9px 12px', textAlign: 'right' as const }}>{refunded
+                        ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--dispatched)' }}>\u20b9{(r?.refund_amount ?? orderAmount(o)).toLocaleString('en-IN')}</span>
+                        : <input value={amtVal} onChange={e => setAmtEdits(prev => ({ ...prev, [o.order_id]: e.target.value }))} style={{ width: 88, textAlign: 'right' as const, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--font-mono)' }} />}</td>}
+                      <td style={{ padding: '9px 12px', textAlign: 'right' as const, whiteSpace: 'nowrap' as const }}>{refunded
+                        ? <button onClick={() => undoRefund(o)} disabled={savingId === o.id} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{savingId === o.id ? '\u2026' : 'Undo'}</button>
+                        : <button onClick={() => markRefunded(o)} disabled={savingId === o.id} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' as const }}><CheckCircle size={14} /> {savingId === o.id ? 'Saving\u2026' : 'Mark refunded'}</button>}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
