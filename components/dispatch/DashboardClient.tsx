@@ -153,6 +153,32 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const awbInputRef = useRef<HTMLInputElement>(null)
   const itemInputRef = useRef<HTMLInputElement>(null)
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
+  // Copy-block (deterrence): stop BULK copy (whole tables / many rows) while allowing single
+  // values (an order ID, AWB, SKU, name). Owner exempt. Heuristic: block if the selection spans
+  // more than one table row, or the copied text is long. Bypassable via devtools by design.
+  useEffect(() => {
+    if (isOwner) return
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed) return
+      const text = sel.toString()
+      // count how many distinct table rows the selection touches
+      let rowsTouched = 0
+      try {
+        const range = sel.getRangeAt(0)
+        const frag = range.cloneContents()
+        rowsTouched = frag.querySelectorAll('tr').length
+        // a selection within a single row clones 0 <tr>; across rows clones >=1
+      } catch { rowsTouched = 0 }
+      const bulk = rowsTouched > 1 || text.length > 80 || (text.match(/\n/g) || []).length >= 1
+      if (bulk) {
+        e.preventDefault()
+        e.clipboardData?.setData('text/plain', '')
+      }
+    }
+    document.addEventListener('copy', onCopy)
+    return () => document.removeEventListener('copy', onCopy)
+  }, [isOwner])
   const [warehouseTab, setWarehouseTab] = useState<'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'>('stock')
   const pathname = usePathname()
   const stateNavReady = useRef(false)
