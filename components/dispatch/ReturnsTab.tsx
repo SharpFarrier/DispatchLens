@@ -6,7 +6,7 @@ import { fetchAllRows } from './fetchAll'
 import { fetchTracking } from '@/lib/tracking'
 import { DBOrder } from '@/types'
 import { logOrderEvent } from '@/lib/orderEvents'
-import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, ChevronDown, Download, ArrowUp, ArrowDown, Filter, ExternalLink } from 'lucide-react'
+import { RotateCcw, Search, X, CheckCircle, Clock, AlertTriangle, Package, IndianRupee, RefreshCw, Pencil, ChevronRight, ChevronDown, Download, ArrowUp, ArrowDown, Filter, ExternalLink, Camera, Image as ImageIcon } from 'lucide-react'
 
 // Reasons shared by both RTO and customer returns (physical-condition reasons).
 const SHARED_REASONS = [
@@ -74,6 +74,7 @@ export interface ReturnRow {
   reverse_tracking_last_update: string | null
   reverse_tracking_synced_at: string | null
   warehouse_received: boolean
+  pod_path: string | null
   warehouse_received_at: string | null
   received_sku: string | null
   sku_mismatch: boolean
@@ -251,6 +252,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [mergeWarn, setMergeWarn] = useState<{ existingId: string; refunded: boolean } | null>(null)
+  const [podFile, setPodFile] = useState<File | null>(null)
 
   const findOrder = async () => {
     const q = awb.trim()
@@ -267,10 +269,15 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
   // existing return is already REFUNDED, warn and require explicit confirmation first.
   const confirmLink = async (force = false) => {
     if (!found) return
+    if (!podFile) { setError('Add the POD photo first'); return }
     setBusy(true); setError(null)
     const orderedSku = (found.barcode_sku || found.sku || '') as string
     const mismatch = !!(row.received_sku && orderedSku && row.received_sku !== orderedSku)
     const now = new Date().toISOString()
+    // Upload the required Proof-of-Delivery photo before completing the receive.
+    const podPath = `${found.order_id.replace(/[^a-zA-Z0-9]/g, '_')}-${Date.now()}.jpg`
+    const { error: podErr } = await supabase.storage.from('return-pod').upload(podPath, podFile, { upsert: false, contentType: podFile.type || 'image/jpeg' })
+    if (podErr) { setError('POD upload failed — try again'); setBusy(false); return }
 
     const { data: existing } = await supabase.from('returns')
       .select('id, refund_status').eq('order_id', found.order_id).neq('id', row.id).limit(1).maybeSingle()
@@ -294,6 +301,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
         warehouse_received_at: snapshot.warehouse_received_at ?? undefined,
         barcode: snapshot.barcode,
         sku_mismatch: mismatch,
+        pod_path: podPath,
         updated_at: now,
       }).eq('id', existing.id).select().maybeSingle()
       if (!merged || updErr) { setError('Merge failed after removing the duplicate — reload and check the return'); setBusy(false); return }
@@ -309,6 +317,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
       barcode: found.scanned_barcode || row.barcode || null,
       return_type: row.return_type || 'customer',
       sku_mismatch: mismatch,
+      pod_path: podPath,
       updated_at: now,
     }).eq('id', row.id).select().maybeSingle()
     if (data) {
@@ -343,7 +352,11 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--critical)', marginTop: 4 }}>received {row.received_sku} \u2260 ordered {found.barcode_sku || found.sku} — will be flagged, refund held</div>
             )}
           </div>
-          <button onClick={() => confirmLink()} disabled={busy}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 7, border: `1.5px dashed ${podFile ? 'var(--dispatched)' : 'var(--border2)'}`, background: podFile ? 'var(--dispatched-bg)' : 'var(--surface)', color: podFile ? 'var(--dispatched)' : 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+            <Camera size={13} /> {podFile ? 'POD attached ✓' : 'POD photo *'}
+            <input type="file" accept="image/*" capture="environment" onChange={e => setPodFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
+          </label>
+          <button onClick={() => confirmLink()} disabled={busy || !podFile}
             style={{ background: 'var(--accent)', border: 'none', borderRadius: 7, color: '#fff', cursor: busy ? 'default' : 'pointer', padding: '7px 14px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
             <CheckCircle size={13} /> Confirm link
           </button>
@@ -875,8 +888,9 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
                   </td>
                   <td style={{ padding: '9px 12px' }}>
                     {r.warehouse_received ? (
-                      <span style={{ fontSize: 11, color: 'var(--dispatched)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <CheckCircle size={12} /> Received
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 11, color: 'var(--dispatched)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle size={12} /> Received</span>
+                        {r.pod_path && <button onClick={async () => { const { data } = await supabase.storage.from('return-pod').createSignedUrl(r.pod_path as string, 300); if (data?.signedUrl) window.open(data.signedUrl, '_blank') }} style={{ fontSize: 11, color: 'var(--accent)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 7px', background: 'var(--surface)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><ImageIcon size={11} /> POD</button>}
                       </span>
                     ) : (
                       <span style={{ fontSize: 11, color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
