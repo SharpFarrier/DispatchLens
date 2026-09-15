@@ -4494,6 +4494,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                       {([
                         { label: 'DISPATCHED_DATE_SPECIAL', col: 'dispatched_at' },
                         { label: 'Order ID', col: 'order_id' },
+                        { label: 'Platform', col: null },
                         { label: 'Customer', col: 'customer_name' },
                         { label: 'SKU', col: 'sku' },
                         { label: 'Dispatched Barcode', col: 'scanned_barcode' },
@@ -4771,7 +4772,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                     {dispWindowLoading ? (
                       <>{[0, 1, 2, 3, 4, 5].map(i => (
                         <tr key={`sk${i}`} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td colSpan={11} style={{ padding: '13px 12px' }}>
+                          <td colSpan={12} style={{ padding: '13px 12px' }}>
                             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                               <div style={{ height: 11, width: 90, background: 'var(--bg2)', borderRadius: 4 }} />
                               <div style={{ height: 11, width: 150, background: 'var(--bg2)', borderRadius: 4 }} />
@@ -4783,7 +4784,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         </tr>
                       ))}</>
                     ) : filteredDispatched.length === 0 ? (
-                      <tr><td colSpan={11} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders in this window</td></tr>
+                      <tr><td colSpan={12} style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)' }}>No dispatched orders in this window</td></tr>
                     ) : pagedDispatched.map((order, i) => {
                       const cc = order.courier === 'Bluedart' ? '#2563eb' : '#7c3aed'
                       const dispDate = order.dispatched_at ? new Date(order.dispatched_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
@@ -4791,6 +4792,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                         <tr key={order.id} style={{ borderBottom: i < pagedDispatched.length - 1 ? '1px solid var(--border)' : 'none', background: i % 2 === 0 ? 'transparent' : 'var(--bg2)' }}>
                           <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--dispatched)', whiteSpace: 'nowrap' as const }}>{dispDate}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)' }}>{order.order_id.length > 18 ? order.order_id.slice(0, 18) + '…' : order.order_id}</td>
+                          <td style={{ padding: '9px 12px', fontSize: 11, whiteSpace: 'nowrap' as const }}>{(() => { const oid = order.order_id || ''; const p = /^\d{3}-\d{7}-\d{7}$/.test(oid) ? 'Amazon' : oid.startsWith('OD') ? 'Flipkart' : /^\d{3,8}$/.test(oid) ? 'Website' : null; return p ? <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--ink-2)', background: 'var(--panel-2)', border: '1px solid var(--line)', borderRadius: 5, padding: '1px 7px' }}>{p}</span> : <span style={{ color: 'var(--text3)' }}>—</span> })()}</td>
                           <td style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{order.customer_name}{order.rescheduled_from_hold && <span title="Rescheduled out of hold — cleared to dispatch" style={{ marginLeft: 6, fontSize: 9, fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#7c3aed', background: '#f5f3ff', padding: '1px 5px', borderRadius: 4 }}>↻ resched</span>}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text)' }}>{order.sku}</td>
                           <td style={{ padding: '9px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, color: order.scanned_barcode ? 'var(--text2)' : 'var(--text3)' }}>{order.scanned_barcode || '—'}</td>
