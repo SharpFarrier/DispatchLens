@@ -553,7 +553,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         (o.taxable_value != null && existing.taxable_value == null) ||
         (o.ship_address && !existing.ship_address) ||
         (o.assigned_caller && !existing.assigned_caller)
-      return trackingChanged || invoiceAppeared
+      return trackingChanged || invoiceAppeared || (o.is_replacement && !existing.is_replacement)
     })
 
     // Apply tracking number updates to existing orders
@@ -576,13 +576,19 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           cgst: o.cgst ?? existing.cgst ?? null,
           ship_address: o.ship_address ?? existing.ship_address ?? null,
           assigned_caller: o.assigned_caller ?? existing.assigned_caller ?? null,
+          // Replacement: same order_id, new AWB, Status=Replacement -> re-enter the dispatch
+          // flow (un-dispatch, back to undecided) so it's picked/scanned/dispatched again
+          // (stock consumed at dispatch, like any order) and shows a Replacement marker.
+          ...(o.is_replacement ? { is_replacement: true, is_dispatched: false, plan_decision: 'undecided' as const, scanned_barcode: null, dispatched_at: null } : {}),
           updated_at: new Date().toISOString(),
         }).eq('id', existing.id)
-        logEvent(o.order_id, 'note', `Tracking number updated via re-import: ${o.tracking_number}`)
+        if (o.is_replacement) logEvent(o.order_id, 'note', `Replacement received · new AWB ${o.tracking_number}`)
+        else logEvent(o.order_id, 'note', `Tracking number updated via re-import: ${o.tracking_number}`)
       }))
       setOrders(prev => prev.map(o => {
         const updated = updatedOrders.find(u => u.order_id === o.order_id)
-        return updated ? { ...o, tracking_number: updated.tracking_number } : o
+        if (!updated) return o
+        return { ...o, tracking_number: updated.tracking_number, ...(updated.is_replacement ? { is_replacement: true, is_dispatched: false, plan_decision: 'undecided' } : {}) }
       }))
     }
 
@@ -5699,6 +5705,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
         </button>
       </td>
       <td style={{ padding: '8px 12px' }}>
+        {order.is_replacement && !order.is_dispatched && <Badge variant="today">Replacement</Badge>}
         {liveUrgencyTier ? <Badge variant={tierVariant(liveUrgencyTier)}>{liveUrgencyTier}</Badge> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>}
       </td>
       <td style={{ padding: '8px 12px' }}>

@@ -71,6 +71,10 @@ function isDispatchedStatus(status: string): boolean {
   return status.toLowerCase().trim() === 'dispatched'
 }
 
+function isReplacementStatus(status: string): boolean {
+  return status.toLowerCase().trim() === 'replacement'
+}
+
 // Detect header row and map columns
 function mapHeaders(headers: string[]): Record<string, number> {
   const map: Record<string, number> = {}
@@ -196,6 +200,7 @@ export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
       days_left: daysLeft,
       urgency: computeUrgency(daysLeft),
       is_cancelled: isCancelledStatus(rawStatus) || isCancelledStatus(skuRaw),
+      is_replacement: isReplacementStatus(rawStatus),
       is_dispatched: isDispatchedStatus(rawStatus),
       is_priority: false,
       // ── Invoice + contact tail ──

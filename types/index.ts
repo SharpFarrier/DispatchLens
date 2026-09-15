@@ -81,6 +81,7 @@ export interface ParsedOrder {
   urgency: UrgencyTier | null
   is_cancelled: boolean
   is_dispatched: boolean
+  is_replacement: boolean
   is_priority: boolean
   // ── Invoice + contact tail (new import columns; both goals: comms + QuickShip) ──
   contact_number: string | null
@@ -129,6 +130,7 @@ export interface DBOrder {
   urgency: UrgencyTier | null
   is_cancelled: boolean
   is_dispatched: boolean
+  is_replacement: boolean
   is_priority: boolean
   plan_decision: PlanDecision
   scheduled_date: string | null
