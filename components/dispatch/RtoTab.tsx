@@ -31,6 +31,7 @@ interface Pending {
 export default function RtoTab() {
   const supabase = createClient()
   const [podFile, setPodFile] = useState<File | null>(null)
+  const [receiveNote, setReceiveNote] = useState('')
   const [scanned, setScanned] = useState<ScannedItem[]>([])
   const [cameraOn, setCameraOn] = useState(false)
   const [lastResult, setLastResult] = useState<{ type: ResultType; msg: string } | null>(null)
@@ -166,7 +167,7 @@ export default function RtoTab() {
       // Existing return → mark received.
       if (pending.returnId) {
         await supabase.from('returns')
-          .update({ warehouse_received: true, warehouse_received_at: now, pod_path: podPath, updated_at: now })
+          .update({ warehouse_received: true, warehouse_received_at: now, pod_path: podPath, receive_note: receiveNote.trim() || null, updated_at: now })
           .eq('id', pending.returnId)
       } else if (pending.autoCreate) {
         // Auto-create a received return (reason pending) so it hits the Returns tab.
@@ -184,6 +185,7 @@ export default function RtoTab() {
           warehouse_received: true,
           warehouse_received_at: now,
           pod_path: podPath,
+          receive_note: receiveNote.trim() || null,
           updated_at: now,
         }, { onConflict: 'order_id' }).select('id').maybeSingle()
         returnId = created?.id ?? undefined
@@ -204,9 +206,9 @@ export default function RtoTab() {
       }
 
       setScanned(prev => [{ barcode: pending.barcode, prevStatus, unitId, returnId, orderId: pending.orderId ?? undefined }, ...prev])
-      if (pending.orderId) void logOrderEvent(pending.orderId, 'return', 'RTO piece received at intake', `barcode ${pending.barcode}`)
+      if (pending.orderId) void logOrderEvent(pending.orderId, 'return', 'RTO piece received at intake', receiveNote.trim() ? `barcode ${pending.barcode} · note: ${receiveNote.trim()}` : `barcode ${pending.barcode}`)
       flash('success', `Received: ${pending.barcode}${pending.orderId ? ` · order ${pending.orderId}` : ''}`)
-      setPending(null); setPodFile(null)
+      setPending(null); setPodFile(null); setReceiveNote('')
     } catch (e) {
       flash('error', 'Receive error: ' + (e as Error).message)
     } finally {
@@ -231,12 +233,12 @@ export default function RtoTab() {
       const { data: created } = await supabase.from('returns').insert({
         order_id: null, source: 'manual', return_type: 'customer', reason: 'Pending review',
         received_sku: selSku, reverse_tracking_id: pending.barcode,
-        warehouse_received: true, warehouse_received_at: now,
+        warehouse_received: true, warehouse_received_at: now, receive_note: receiveNote.trim() || null,
         created_by: auth?.user?.id ?? null, created_by_email: auth?.user?.email ?? null, updated_at: now,
       }).select('id').maybeSingle()
       setScanned(prev => [{ barcode: pending.barcode, prevStatus: 'return', unitId: `ret:${created?.id || pending.barcode}`, returnId: created?.id ?? undefined }, ...prev])
       flash('success', `Received: ${selSku} · reverse ${pending.barcode} — awaiting order mapping`)
-      setPending(null); setRxMode(null); setSelSku(null); setSkuQuery(''); setPodFile(null)
+      setPending(null); setRxMode(null); setSelSku(null); setSkuQuery(''); setPodFile(null); setReceiveNote('')
     } catch (e) {
       flash('error', 'Receive error: ' + (e as Error).message)
     } finally { setCommitting(false) }
@@ -400,6 +402,8 @@ export default function RtoTab() {
 
             {!rejecting ? (
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <textarea value={receiveNote} onChange={e => setReceiveNote(e.target.value)} placeholder="Notes (optional) — anything about this returned piece" rows={2}
+                  style={{ width: '100%', boxSizing: 'border-box' as const, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, resize: 'vertical' as const, fontFamily: 'inherit', marginBottom: 10 }} />
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 7, border: `1.5px dashed ${podFile ? 'var(--dispatched)' : 'var(--border)'}`, background: podFile ? 'var(--dispatched-bg)' : 'var(--surface)', color: podFile ? 'var(--dispatched)' : 'var(--text2)', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
                   <Camera size={14} /> {podFile ? 'POD ✓' : 'POD photo *'}
                   <input type="file" accept="image/*" capture="environment" onChange={e => setPodFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
