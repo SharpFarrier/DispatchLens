@@ -30,6 +30,7 @@ interface Pending {
 
 export default function RtoTab() {
   const supabase = createClient()
+  const [podFile, setPodFile] = useState<File | null>(null)
   const [scanned, setScanned] = useState<ScannedItem[]>([])
   const [cameraOn, setCameraOn] = useState(false)
   const [lastResult, setLastResult] = useState<{ type: ResultType; msg: string } | null>(null)
@@ -150,9 +151,14 @@ export default function RtoTab() {
   // ── PHASE 2a: commit RECEIVE. Runs the writes staged in `pending`. ──
   async function confirmReceive() {
     if (!pending || committing) return
+    if (!podFile) { flash('warn', 'Add the POD photo before receiving'); return }
     setCommitting(true)
     try {
       const now = new Date().toISOString()
+      // Required Proof-of-Delivery photo — upload before the receive completes.
+      const podPath = `${(pending.orderId || pending.barcode).replace(/[^a-zA-Z0-9]/g, '_')}-${Date.now()}.jpg`
+      const { error: podErr } = await supabase.storage.from('return-pod').upload(podPath, podFile, { upsert: false, contentType: podFile.type || 'image/jpeg' })
+      if (podErr) { flash('error', 'POD upload failed — try again'); setCommitting(false); return }
       let returnId = pending.returnId ?? undefined
       let prevStatus = 'return'
       let unitId = pending.returnId ? `ret:${pending.returnId}` : `scan:${pending.barcode}`
@@ -160,7 +166,7 @@ export default function RtoTab() {
       // Existing return → mark received.
       if (pending.returnId) {
         await supabase.from('returns')
-          .update({ warehouse_received: true, warehouse_received_at: now, updated_at: now })
+          .update({ warehouse_received: true, warehouse_received_at: now, pod_path: podPath, updated_at: now })
           .eq('id', pending.returnId)
       } else if (pending.autoCreate) {
         // Auto-create a received return (reason pending) so it hits the Returns tab.
@@ -177,6 +183,7 @@ export default function RtoTab() {
           reverse_tracking_id: null,
           warehouse_received: true,
           warehouse_received_at: now,
+          pod_path: podPath,
           updated_at: now,
         }, { onConflict: 'order_id' }).select('id').maybeSingle()
         returnId = created?.id ?? undefined
@@ -199,7 +206,7 @@ export default function RtoTab() {
       setScanned(prev => [{ barcode: pending.barcode, prevStatus, unitId, returnId, orderId: pending.orderId ?? undefined }, ...prev])
       if (pending.orderId) void logOrderEvent(pending.orderId, 'return', 'RTO piece received at intake', `barcode ${pending.barcode}`)
       flash('success', `Received: ${pending.barcode}${pending.orderId ? ` · order ${pending.orderId}` : ''}`)
-      setPending(null)
+      setPending(null); setPodFile(null)
     } catch (e) {
       flash('error', 'Receive error: ' + (e as Error).message)
     } finally {
@@ -210,6 +217,7 @@ export default function RtoTab() {
   // Receive an UNMATCHED scan as a new unmapped return (order linked later via forward AWB).
   async function confirmUnmatchedReceive() {
     if (!pending || !selSku || committing) return
+    if (!podFile) { flash('warn', 'Add the POD photo before receiving'); return }
     setCommitting(true)
     try {
       const now = new Date().toISOString()
@@ -228,7 +236,7 @@ export default function RtoTab() {
       }).select('id').maybeSingle()
       setScanned(prev => [{ barcode: pending.barcode, prevStatus: 'return', unitId: `ret:${created?.id || pending.barcode}`, returnId: created?.id ?? undefined }, ...prev])
       flash('success', `Received: ${selSku} · reverse ${pending.barcode} — awaiting order mapping`)
-      setPending(null); setRxMode(null); setSelSku(null); setSkuQuery('')
+      setPending(null); setRxMode(null); setSelSku(null); setSkuQuery(''); setPodFile(null)
     } catch (e) {
       flash('error', 'Receive error: ' + (e as Error).message)
     } finally { setCommitting(false) }
@@ -392,8 +400,12 @@ export default function RtoTab() {
 
             {!rejecting ? (
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <button onClick={confirmReceive} disabled={committing}
-                  style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: committing ? 'var(--bg2)' : 'var(--dispatched)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: committing ? 'wait' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 7, border: `1.5px dashed ${podFile ? 'var(--dispatched)' : 'var(--border)'}`, background: podFile ? 'var(--dispatched-bg)' : 'var(--surface)', color: podFile ? 'var(--dispatched)' : 'var(--text2)', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+                  <Camera size={14} /> {podFile ? 'POD ✓' : 'POD photo *'}
+                  <input type="file" accept="image/*" capture="environment" onChange={e => setPodFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
+                </label>
+                <button onClick={confirmReceive} disabled={committing || !podFile}
+                  style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: (committing || !podFile) ? 'var(--bg2)' : 'var(--dispatched)', color: (committing || !podFile) ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 700, cursor: (committing || !podFile) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   <CheckCircle size={15} /> {committing ? 'Saving…' : 'Mark received'}
                 </button>
                 <button onClick={() => setRejecting(true)} disabled={committing}
@@ -475,7 +487,11 @@ export default function RtoTab() {
                   </div>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginTop: 2 }}>
-                  <button onClick={confirmUnmatchedReceive} disabled={committing || !selSku}
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 12px', borderRadius: 6, border: `1.5px dashed ${podFile ? 'var(--dispatched)' : 'var(--border)'}`, background: podFile ? 'var(--dispatched-bg)' : 'var(--surface)', color: podFile ? 'var(--dispatched)' : 'var(--text2)', fontSize: 12, fontWeight: 700, cursor: 'pointer', marginRight: 8, whiteSpace: 'nowrap' as const }}>
+                    <Camera size={14} /> {podFile ? 'POD ✓' : 'POD *'}
+                    <input type="file" accept="image/*" capture="environment" onChange={e => setPodFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
+                  </label>
+                  <button onClick={confirmUnmatchedReceive} disabled={committing || !selSku || !podFile}
                     style={{ width: '100%', padding: '14px', borderRadius: 12, border: 'none', background: (committing || !selSku) ? 'var(--bg2)' : 'var(--dispatched)', color: (committing || !selSku) ? 'var(--text3)' : '#fff', fontSize: 16, fontWeight: 700, cursor: (committing || !selSku) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                     <CheckCircle size={18} /> {committing ? 'Saving…' : selSku ? `Confirm · ${selSku}` : 'Select a product'}
                   </button>

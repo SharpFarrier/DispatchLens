@@ -269,7 +269,6 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
   // existing return is already REFUNDED, warn and require explicit confirmation first.
   const confirmLink = async (force = false) => {
     if (!found) return
-    if (!podFile) { setError('Add the POD photo first'); return }
     setBusy(true); setError(null)
     const orderedSku = (found.barcode_sku || found.sku || '') as string
     const mismatch = !!(row.received_sku && orderedSku && row.received_sku !== orderedSku)
@@ -353,10 +352,10 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
             )}
           </div>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 7, border: `1.5px dashed ${podFile ? 'var(--dispatched)' : 'var(--border2)'}`, background: podFile ? 'var(--dispatched-bg)' : 'var(--surface)', color: podFile ? 'var(--dispatched)' : 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
-            <Camera size={13} /> {podFile ? 'POD attached ✓' : 'POD photo *'}
+            <Camera size={13} /> {podFile ? 'POD attached ✓' : 'POD photo (optional)'}
             <input type="file" accept="image/*" capture="environment" onChange={e => setPodFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
           </label>
-          <button onClick={() => confirmLink()} disabled={busy || !podFile}
+          <button onClick={() => confirmLink()} disabled={busy}
             style={{ background: 'var(--accent)', border: 'none', borderRadius: 7, color: '#fff', cursor: busy ? 'default' : 'pointer', padding: '7px 14px', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
             <CheckCircle size={13} /> Confirm link
           </button>
