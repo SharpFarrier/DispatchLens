@@ -273,10 +273,13 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
     const orderedSku = (found.barcode_sku || found.sku || '') as string
     const mismatch = !!(row.received_sku && orderedSku && row.received_sku !== orderedSku)
     const now = new Date().toISOString()
-    // Upload the required Proof-of-Delivery photo before completing the receive.
-    const podPath = `${found.order_id.replace(/[^a-zA-Z0-9]/g, '_')}-${Date.now()}.jpg`
-    const { error: podErr } = await supabase.storage.from('return-pod').upload(podPath, podFile, { upsert: false, contentType: podFile.type || 'image/jpeg' })
-    if (podErr) { setError('POD upload failed — try again'); setBusy(false); return }
+    // POD is captured (required) at RTO intake; here it's optional. Upload only if one is attached.
+    let podPath: string | null = null
+    if (podFile) {
+      podPath = `${found.order_id.replace(/[^a-zA-Z0-9]/g, '_')}-${Date.now()}.jpg`
+      const { error: podErr } = await supabase.storage.from('return-pod').upload(podPath, podFile, { upsert: false, contentType: podFile.type || 'image/jpeg' })
+      if (podErr) { setError('POD upload failed — try again'); setBusy(false); return }
+    }
 
     const { data: existing } = await supabase.from('returns')
       .select('id, refund_status').eq('order_id', found.order_id).neq('id', row.id).limit(1).maybeSingle()
@@ -300,7 +303,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
         warehouse_received_at: snapshot.warehouse_received_at ?? undefined,
         barcode: snapshot.barcode,
         sku_mismatch: mismatch,
-        pod_path: podPath,
+        ...(podPath ? { pod_path: podPath } : {}),
         updated_at: now,
       }).eq('id', existing.id).select().maybeSingle()
       if (!merged || updErr) { setError('Merge failed after removing the duplicate — reload and check the return'); setBusy(false); return }
@@ -316,7 +319,7 @@ function UnmappedRow({ row, supabase, onLinked }: { row: ReturnRow; supabase: Re
       barcode: found.scanned_barcode || row.barcode || null,
       return_type: row.return_type || 'customer',
       sku_mismatch: mismatch,
-      pod_path: podPath,
+      ...(podPath ? { pod_path: podPath } : {}),
       updated_at: now,
     }).eq('id', row.id).select().maybeSingle()
     if (data) {
