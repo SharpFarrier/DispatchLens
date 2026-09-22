@@ -44,10 +44,15 @@ function PackSchedulePanel() {
       demand[k] = (demand[k] || 0) + 1
     }
     // Available stock per SKU (stocked pieces).
-    const stocked = await fetchAllRows<{ sku: string | null }>((from, to) =>
-      supabase.from('packed_units').select('sku').eq('status', 'stocked').range(from, to))
+    // Available = pieces already MADE and not yet shipped ('stocked' OR 'picked'). A picked piece
+    // is staged for dispatch (not dispatched) — it exists, so it must NOT be re-made.
+    // Counted on the DATABASE via an aggregate RPC: packed_units is huge, and fetching every row
+    // to count client-side under-counted at scale (stock read as 0). One grouped query instead.
+    const { data: availData } = await supabase.rpc('pack_available_counts')
     const stock: Record<string, number> = {}
-    for (const r of stocked) { const k = (r.sku || '').trim(); if (k) stock[k] = (stock[k] || 0) + 1 }
+    for (const r of (availData || []) as { sku: string; available: number }[]) {
+      const k = (r.sku || '').trim(); if (k) stock[k] = Number(r.available) || 0
+    }
     // Product names.
     const maps = await fetchAllRows<{ master_sku: string; product_name: string | null }>((from, to) =>
       supabase.from('dispatch_sku_map').select('master_sku, product_name').range(from, to))
@@ -78,7 +83,7 @@ function PackSchedulePanel() {
         <div style={{ overflowX: 'auto' as const }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
             <thead><tr>
-              {['SKU', 'Needed', 'In stock', 'To pack'].map((h, i) => (
+              {['SKU', 'Needed', 'Available', 'To pack'].map((h, i) => (
                 <th key={h} style={{ padding: '8px 14px', textAlign: i === 0 ? 'left' as const : 'center' as const, background: 'var(--bg2)', color: 'var(--text3)', fontSize: 11, textTransform: 'uppercase' as const, letterSpacing: '0.06em', fontWeight: 600 }}>{h}</th>
               ))}
             </tr></thead>
