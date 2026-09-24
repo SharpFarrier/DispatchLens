@@ -555,6 +555,7 @@ function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
 }
 
 interface ChargeRow {
+  qty: number
   order_id: string; sku: string | null; platform: string; order_date: string | null
   payment_date: string | null; agg: ChargeAgg | null
 }
@@ -697,6 +698,10 @@ function ChargesView() {
     // ONE row per unique order_id. Multi-piece orders span several dispatch_orders rows with
     // the same order_id; without deduping we'd render the order 2-5 times (duplicate rows AND
     // duplicate React keys, which makes rows stick on filter changes).
+    // Pieces per order = how many dispatch_orders rows share the order_id (multi-piece orders
+    // span several rows). This is the "Qty" the charges cover.
+    const qtyByOid: Record<string, number> = {}
+    for (const o of (orders || [])) { const k = (o.order_id || '').trim(); if (k) qtyByOid[k] = (qtyByOid[k] || 0) + 1 }
     const seenOids = new Set<string>()
     const out: ChargeRow[] = []
     for (const o of (orders || [])) {
@@ -705,7 +710,7 @@ function ChargesView() {
       if (seenOids.has(oid)) continue
       seenOids.add(oid)
       const plat = platformOf(oid); const lines = byOrder[oid]
-      out.push({ order_id: o.order_id, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null })
+      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null })
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
@@ -717,6 +722,7 @@ function ChargesView() {
   const pctSub = (fee: number | null | undefined, sale: number | null | undefined) => (fee && sale) ? <span style={{ display: 'block', fontSize: 10, color: 'var(--text3)' }}>{(Math.abs(fee) / sale * 100).toFixed(1)}%</span> : null
 
   const COLS: ChgCol[] = useMemo(() => [
+    { key: 'qty', label: 'Qty', type: 'number', align: 'right', get: r => r.qty, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.qty}</span> },
     { key: 'sale', label: 'Sale', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.sale)}</span> },
     { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.commission)}</span> },
     { key: 'commissionPct', label: 'Comm %', type: 'number', align: 'right', get: r => r.agg?.commissionPct ?? -1, render: r => r.agg?.commissionPct != null ? <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)' }}>{r.agg.commissionPct.toFixed(1)}%</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
