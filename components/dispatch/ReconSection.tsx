@@ -755,6 +755,19 @@ function ChargesView() {
     return out
   }, [baseFiltered, pctFilter, sortKey, sortDir, COLS])
 
+  const _cxg = useExportGate('recon', 'Recon charges export')
+  const exportChargesCsv = () => {
+    const esc = (v: string | number | null | undefined) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t }
+    const headers = ['Order ID', 'SKU', 'Platform', 'Order Date', 'Payment Date', ...COLS.map(c => c.label)]
+    const lines = [headers.join(',')]
+    for (const r of filtered) {
+      const cells: (string | number)[] = [r.order_id, r.sku || '', r.platform, r.order_date || '', r.payment_date || '',
+        ...COLS.map(c => { const v = c.get(r); return (c.key === 'commissionPct' && (v as number) < 0) ? '' : v })]
+      lines.push(cells.map(esc).join(','))
+    }
+    return lines.join('\n')
+  }
+
   useEffect(() => { setPage(0) }, [platformF, retF, text, pctFilter])
   const togglePct = (bk: string) => setPctFilter(prev => prev.includes(bk) ? prev.filter(x => x !== bk) : [...prev, bk])
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -828,6 +841,9 @@ function ChargesView() {
           )}
         </div>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{filtered.length} orders</span>
+        <button onClick={() => _cxg.handleExport({ rowCount: filtered.length, summary: (pctFilter.length ? 'filtered' : undefined), getCsv: exportChargesCsv, filename: `recon-charges-${new Date().toISOString().slice(0, 10)}.csv` })} disabled={loading || !filtered.length || _cxg.disabled} title="Export the charges rows (all in view)" style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: filtered.length ? 'var(--text2)' : 'var(--text3)', cursor: filtered.length ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <Download size={13} /> {_cxg.label}
+        </button>
       </div>
 
       {loading ? (
@@ -853,7 +869,7 @@ function ChargesView() {
                       <td style={{ padding: '9px 10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {expanded === r.order_id ? <ChevronDown size={13} style={{ color: 'var(--text3)' }} /> : <ChevronRight size={13} style={{ color: 'var(--text3)' }} />}
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{r.order_id.length > 18 ? r.order_id.slice(0, 18) + '…' : r.order_id}</span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, whiteSpace: 'nowrap' as const }}>{r.order_id}</span>
                           {r.agg?.returned && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--today)', border: '1px solid #fed7aa', borderRadius: 4, padding: '0 4px' }}>returned</span>}
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 19, fontFamily: 'var(--font-mono)' }}>{r.platform} · {r.sku || '—'}</div>
