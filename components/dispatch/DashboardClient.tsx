@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import Badge, { tierVariant } from './Badge'
 import DrumDatePicker from './DrumDatePicker'
 import Sidebar, { type NavItem } from './Sidebar'
+import DelaysTab from './DelaysTab'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
@@ -210,7 +211,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
+    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_delays: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
     : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
@@ -2501,6 +2502,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'otdr', label: 'OTDR', section: 'orders', show: effectiveAccess.can_otdr },
     { key: 'handling', label: 'Handling Time', section: 'orders', show: effectiveAccess.can_handling },
     { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', count: 0, section: 'orders', show: effectiveAccess.can_reports },
+    { key: 'delays', label: 'Delays', section: 'orders', show: effectiveAccess.can_delays },
     { key: 'wh:stock', label: 'Stock', section: 'warehouse', show: effectiveAccess.can_wh_stock },
     { key: 'wh:coating', label: 'Coating', section: 'warehouse', show: effectiveAccess.can_wh_coating },
     { key: 'wh:picking', label: 'Picking', section: 'warehouse', show: effectiveAccess.can_wh_picking },
@@ -2906,6 +2908,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'recon', label: 'Recon', show: effectiveAccess.can_recon },
             { key: 'otdr', label: 'OTDR', show: effectiveAccess.can_otdr },
             { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', show: effectiveAccess.can_reports },
+            { key: 'delays', label: 'Delays', show: effectiveAccess.can_delays },
             { key: 'users', label: 'Users', show: effectiveAccess.can_users },
           ] as { key: Tab; label: string; show: boolean }[]).filter(t => t.show).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)} style={{
@@ -5462,6 +5465,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
         {tab === 'otdr' && effectiveAccess.can_otdr && (
           <OtdrTab />
+        )}
+        {tab === 'delays' && effectiveAccess.can_delays && (
+          <DelaysTab orders={orders} userEmail={user.email || undefined} onOrderUpdate={(oid, patch) => setOrders(prev => prev.map(o => o.order_id === oid ? { ...o, ...patch } as typeof o : o))} />
         )}
         {tab === 'reports' && effectiveAccess.can_reports && (
           <ReportsTab userEmail={user.email || ''} isOwner={isOwner} onPendingChange={setPendingReports} />

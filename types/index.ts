@@ -22,6 +22,7 @@ export interface UserAccess {
   can_users: boolean
   can_handling: boolean
   can_reports: boolean
+  can_delays: boolean
   can_recon: boolean
   can_otdr: boolean
   can_warehouse: boolean

@@ -20,6 +20,7 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
   { key: 'can_users',    label: 'Users',    desc: 'Manage user access (admin only)' },
   { key: 'can_handling', label: 'Handling Time', desc: 'Handling-time tracker' },
   { key: 'can_reports', label: 'Reports', desc: 'Export reports / approvals' },
+  { key: 'can_delays', label: 'Delays', desc: 'Delayed-order escalation tracker' },
 ]
 
 const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
