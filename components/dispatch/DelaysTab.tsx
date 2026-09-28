@@ -63,7 +63,7 @@ export default function DelaysTab({ orders, userEmail, onOrderUpdate }: {
   }, [supabase])
   useEffect(() => { void load() }, [load])
 
-  // Delayed = dispatched, not delivered/rto, aging >= threshold. Delivered (was delayed, now
+  // Delayed = dispatched, not delivered, not RTO, aging >= threshold. Delivered (was delayed, now
   // delivered) shown greyed + collapsed when toggled on.
   const { active, delivered } = useMemo(() => {
     const act: DelayRow[] = []; const del: DelayRow[] = []
@@ -74,6 +74,7 @@ export default function DelaysTab({ orders, userEmail, onOrderUpdate }: {
       const d = delayMap[o.order_id]
       const row: DelayRow = { o, aging, reminders: d?.reminders ?? 0, lastBump: d?.lastBump ?? null }
       const everEscalated = !!d
+      if (st === 'rto' || st === 'returned') continue   // RTO orders are coming back — not a delivery delay to escalate
       if (st === 'delivered') { if (everEscalated) del.push(row); continue }
       if (aging >= threshold) act.push(row)
     }
