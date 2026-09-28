@@ -401,21 +401,25 @@ export default function RtoTab() {
             </div>
 
             {!rejecting ? (
-              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8, marginTop: 4 }}>
+                {/* Note on its own full-width line */}
                 <textarea value={receiveNote} onChange={e => setReceiveNote(e.target.value)} placeholder="Notes (optional) — anything about this returned piece" rows={2}
-                  style={{ width: '100%', boxSizing: 'border-box' as const, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, resize: 'vertical' as const, fontFamily: 'inherit', marginBottom: 10 }} />
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 7, border: `1.5px dashed ${podFile ? 'var(--dispatched)' : 'var(--border)'}`, background: podFile ? 'var(--dispatched-bg)' : 'var(--surface)', color: podFile ? 'var(--dispatched)' : 'var(--text2)', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
-                  <Camera size={14} /> {podFile ? 'POD ✓' : 'POD photo *'}
-                  <input type="file" accept="image/*" capture="environment" onChange={e => setPodFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
-                </label>
-                <button onClick={confirmReceive} disabled={committing || !podFile}
-                  style={{ flex: 1, padding: '10px', borderRadius: 7, border: 'none', background: (committing || !podFile) ? 'var(--bg2)' : 'var(--dispatched)', color: (committing || !podFile) ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 700, cursor: (committing || !podFile) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  <CheckCircle size={15} /> {committing ? 'Saving…' : 'Mark received'}
-                </button>
-                <button onClick={() => setRejecting(true)} disabled={committing}
-                  style={{ flex: 1, padding: '10px', borderRadius: 7, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  <XCircle size={15} /> Reject RTO
-                </button>
+                  style={{ width: '100%', boxSizing: 'border-box' as const, padding: '9px 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, resize: 'vertical' as const, fontFamily: 'inherit' }} />
+                {/* POD + actions wrap onto multiple lines on a phone instead of crushing */}
+                <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: 8 }}>
+                  <label style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 12px', borderRadius: 7, border: `1.5px dashed ${podFile ? 'var(--dispatched)' : 'var(--border)'}`, background: podFile ? 'var(--dispatched-bg)' : 'var(--surface)', color: podFile ? 'var(--dispatched)' : 'var(--text2)', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' as const }}>
+                    <Camera size={14} /> {podFile ? 'POD attached ✓' : 'POD photo *'}
+                    <input type="file" accept="image/*" capture="environment" onChange={e => setPodFile(e.target.files?.[0] || null)} style={{ display: 'none' }} />
+                  </label>
+                  <button onClick={confirmReceive} disabled={committing || !podFile}
+                    style={{ flex: '2 1 140px', padding: '11px 10px', borderRadius: 7, border: 'none', background: (committing || !podFile) ? 'var(--bg2)' : 'var(--dispatched)', color: (committing || !podFile) ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 700, cursor: (committing || !podFile) ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <CheckCircle size={15} /> {committing ? 'Saving…' : 'Mark received'}
+                  </button>
+                  <button onClick={() => setRejecting(true)} disabled={committing}
+                    style={{ flex: '1 1 110px', padding: '11px 10px', borderRadius: 7, border: '1px solid #fecaca', background: 'var(--critical-bg)', color: 'var(--critical)', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <XCircle size={15} /> Reject RTO
+                  </button>
+                </div>
                 <button onClick={cancelPending} disabled={committing}
                   style={{ padding: '10px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   Cancel
