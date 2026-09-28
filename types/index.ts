@@ -136,6 +136,8 @@ export interface DBOrder {
   scheduled_date: string | null
   dispatched_at: string | null
   delivered_at: string | null
+  delivery_source?: string | null
+  manual_delivered_at?: string | null
   suspected_lost: boolean
   suspected_lost_at: string | null
   lost_at: string | null

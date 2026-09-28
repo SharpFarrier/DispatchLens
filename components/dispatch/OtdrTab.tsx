@@ -38,15 +38,17 @@ export default function OtdrTab() {
       const pageSize = 1000
       for (let from = 0; ; from += pageSize) {
         const { data, error } = await supabase.from('dispatch_orders')
-          .select('order_id, promise_date, delivered_at, tracking_status')
+          .select('order_id, promise_date, delivered_at, tracking_status, delivery_source')
           .eq('is_dispatched', true)
           .eq('is_cancelled', false)
           .not('promise_date', 'is', null)
           .neq('tracking_status', 'rto')
           .range(from, from + pageSize - 1)
         if (error) throw error
-        const rows = (data || []) as { order_id: string; promise_date: string; delivered_at: string | null; tracking_status: string | null }[]
-        for (const r of rows) {
+        const rows = (data || []) as { order_id: string; promise_date: string; delivered_at: string | null; tracking_status: string | null; delivery_source: string | null }[]
+        // Exclude manual deliveries — courier tracking is the source of truth for OTDR.
+        const cleanRows = rows.filter(r => r.delivery_source !== 'manual')
+        for (const r of cleanRows) {
           if (detectPlatform(r.order_id) !== 'Amazon') continue
           const promise = String(r.promise_date).slice(0, 10)
           if (!/^\d{4}-\d{2}-\d{2}$/.test(promise)) continue

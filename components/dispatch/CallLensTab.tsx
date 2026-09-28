@@ -1,11 +1,12 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import WheelDatePicker from './WheelDatePicker'
 import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
 import { DBOrder } from '@/types'
 import { logOrderEvent } from '@/lib/orderEvents'
-import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download, ExternalLink } from 'lucide-react'
+import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download, ExternalLink, CheckCircle } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -69,6 +70,9 @@ function platformOf(oid: string): string {
 export default function CallLensTab({ currentUserEmail }: { currentUserEmail: string }) {
   const _xg = useExportGate('calllens', 'CallLens export')
   const supabase = createClient()
+  const [markDeliver, setMarkDeliver] = useState<DBOrder | null>(null)
+  const [markDate, setMarkDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
+  const [markSaving, setMarkSaving] = useState(false)
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [queue, setQueue] = useState<Queue>('predispatch')
@@ -322,6 +326,21 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const setDraft = (id: string, patch: Partial<{ disp: string; note: string; callbackDate: string }>) =>
     setDispDraft(prev => ({ ...prev, [id]: { ...draftFor(id), ...patch } }))
 
+  const confirmMarkDelivered = async () => {
+    if (!markDeliver) return
+    setMarkSaving(true)
+    try {
+      const o = markDeliver
+      await supabase.from('dispatch_orders').update({
+        tracking_status: 'delivered', delivered_at: markDate,
+        manual_delivered_at: new Date().toISOString(), delivery_source: 'manual',
+      }).eq('order_id', o.order_id)
+      void logOrderEvent(o.order_id, 'note', `Manually marked delivered on ${markDate} (courier tracking override, excluded from OTDR)`, null)
+      setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, tracking_status: 'delivered', delivered_at: markDate, delivery_source: 'manual' } as DBOrder : x))
+      setMarkDeliver(null); setMarkDate(new Date().toISOString().slice(0, 10))
+    } finally { setMarkSaving(false) }
+  }
+
   const logDisposition = async (o: DBOrder, disp: string, note: string, channel = 'call') => {
     await supabase.from('call_logs').insert({ order_id: o.order_id, queue, channel, disposition: disp, note: note || null, caller: o.assigned_caller || null, created_by_email: currentUserEmail })
     // Also record it on the order's history timeline so calls show in Order History.
@@ -460,7 +479,24 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     </button>
   )
 
+  const deliverModal = markDeliver ? (
+    <div onClick={() => !markSaving && setMarkDeliver(null)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', padding: 20, width: 320, maxWidth: '100%' }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Mark delivered</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text2)', marginBottom: 14 }}>Order <span style={{ fontFamily: 'var(--font-mono)' }}>{markDeliver.order_id}</span> — pick the delivery date.</div>
+        <WheelDatePicker value={markDate} onChange={setMarkDate} />
+        <div style={{ fontSize: 12.5, color: 'var(--text2)', margin: '14px 0 12px' }}>Mark this order delivered on <b>{new Date(markDate + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</b>? This overrides courier tracking.</div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={() => setMarkDeliver(null)} disabled={markSaving} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={confirmMarkDelivered} disabled={markSaving} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--dispatched)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{markSaving ? 'Saving…' : 'Confirm delivered'}</button>
+        </div>
+      </div>
+    </div>
+  ) : null
+
   return (
+    <>
+    {deliverModal}
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>CallLens</h1>
@@ -624,6 +660,8 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                       ))}
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' as const }}>
                         <button onClick={() => toggleWhatsapp(o)} title="Toggle WhatsApp sent" style={{ background: 'none', border: 'none', cursor: 'pointer', color: o.whatsapp_sent ? '#16a34a' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600 }}><MessageCircle size={13} /> {o.whatsapp_sent ? 'sent' : '—'}</button>
+                        {queue === 'delay' && o.delivery_source === 'manual' && <span title="Manually marked delivered" style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>manual</span>}
+                        {queue === 'delay' && o.tracking_status !== 'delivered' && <button onClick={() => { setMarkDate(new Date().toISOString().slice(0, 10)); setMarkDeliver(o) }} title="Mark delivered (courier didn't update)" style={{ background: 'none', border: '1px solid var(--dispatched)', borderRadius: 5, padding: '2px 7px', color: 'var(--dispatched)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><CheckCircle size={11} /> Mark delivered</button>}
                       </td>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' as const, minWidth: 260 }}>
                         {locked ? (
@@ -705,5 +743,6 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
         </div>
       </div>
     </div>
+    </>
   )
 }
