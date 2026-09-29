@@ -70,6 +70,33 @@ function platformOf(oid: string): string {
 export default function CallLensTab({ currentUserEmail }: { currentUserEmail: string }) {
   const _xg = useExportGate('calllens', 'CallLens export')
   const supabase = createClient()
+  // WhatsApp confirmation status per phone (last 10 digits) — furthest status reached.
+  const [waByPhone, setWaByPhone] = useState<Record<string, { status: string; at: string | null }>>({})
+  useEffect(() => {
+    const rank: Record<string, number> = { failed: 0, sent: 1, delivered: 2, read: 3 }
+    void (async () => {
+      const { data } = await supabase.from('wa_messages').select('phone10, status, sent_at').order('sent_at', { ascending: false })
+      const m: Record<string, { status: string; at: string | null }> = {}
+      for (const r of (data || []) as { phone10: string; status: string; sent_at: string | null }[]) {
+        if (!r.phone10) continue
+        const cur = m[r.phone10]
+        if (!cur || (rank[r.status] ?? -1) > (rank[cur.status] ?? -1)) m[r.phone10] = { status: r.status, at: r.sent_at }
+      }
+      setWaByPhone(m)
+    })()
+  }, [supabase])
+  const waChip = (contact: string | null | undefined) => {
+    const p10 = (contact || '').replace(/\D/g, '').slice(-10)
+    const wa = p10 ? waByPhone[p10] : undefined
+    const ago = (iso: string | null) => { if (!iso) return ''; const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000); if (s < 3600) return `${Math.floor(s / 60)}m`; if (s < 86400) return `${Math.floor(s / 3600)}h`; return `${Math.floor(s / 86400)}d` }
+    let label: string, fg: string, bg: string, bd = 'transparent'
+    if (!wa) { label = 'No WhatsApp'; fg = 'var(--text3)'; bg = 'var(--bg2)'; bd = 'var(--border)' }
+    else if (wa.status === 'read') { label = `WhatsApp read · ${ago(wa.at)}`; fg = 'var(--dispatched)'; bg = 'var(--dispatched-bg)' }
+    else if (wa.status === 'delivered') { label = `WhatsApp delivered · ${ago(wa.at)}`; fg = 'var(--today)'; bg = 'var(--today-bg)' }
+    else if (wa.status === 'failed') { label = 'WhatsApp failed'; fg = 'var(--critical)'; bg = 'var(--critical-bg)' }
+    else { label = 'WhatsApp sent'; fg = 'var(--text2)'; bg = 'var(--bg2)'; bd = 'var(--border)' }
+    return <span title="Latest WhatsApp message to this customer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, color: fg, background: bg, border: `1px solid ${bd}`, padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap' as const }}><MessageCircle size={11} /> {label}</span>
+  }
   const [markDeliver, setMarkDeliver] = useState<DBOrder | null>(null)
   const [markDate, setMarkDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
   const [markSaving, setMarkSaving] = useState(false)
@@ -659,7 +686,8 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                         </td>
                       ))}
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' as const }}>
-                        <button onClick={() => toggleWhatsapp(o)} title="Toggle WhatsApp sent" style={{ background: 'none', border: 'none', cursor: 'pointer', color: o.whatsapp_sent ? '#16a34a' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600 }}><MessageCircle size={13} /> {o.whatsapp_sent ? 'sent' : '—'}</button>
+                        {waChip(o.contact_number)}
+                        <button onClick={() => toggleWhatsapp(o)} title="Toggle WhatsApp sent (manual)" style={{ background: 'none', border: 'none', cursor: 'pointer', color: o.whatsapp_sent ? '#16a34a' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600 }}><MessageCircle size={13} /> {o.whatsapp_sent ? 'sent' : '—'}</button>
                         {queue === 'delay' && o.delivery_source === 'manual' && <span title="Manually marked delivered" style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>manual</span>}
                         {queue === 'delay' && o.tracking_status !== 'delivered' && <button onClick={() => { setMarkDate(new Date().toISOString().slice(0, 10)); setMarkDeliver(o) }} title="Mark delivered (courier didn't update)" style={{ background: 'none', border: '1px solid var(--dispatched)', borderRadius: 5, padding: '2px 7px', color: 'var(--dispatched)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><CheckCircle size={11} /> Mark delivered</button>}
                       </td>
