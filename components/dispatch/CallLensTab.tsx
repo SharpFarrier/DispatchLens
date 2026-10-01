@@ -6,7 +6,7 @@ import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
 import { DBOrder } from '@/types'
 import { logOrderEvent } from '@/lib/orderEvents'
-import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download, ExternalLink, CheckCircle } from 'lucide-react'
+import { Phone, MessageCircle, ChevronDown, ChevronRight, Check, ArrowUp, ArrowDown, Filter, X, Users, Lock, Unlock, AlertTriangle, RotateCcw, Download, ExternalLink, CheckCircle, Truck, XCircle } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -54,7 +54,7 @@ function fmtDate(d: string | null | undefined) { return d ? new Date(d).toLocale
 const fmtTime = (d: string) => new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 const todayStr = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString().slice(0, 10) }
 
-type Queue = 'predispatch' | 'callbacks' | 'delay'
+type Queue = 'predispatch' | 'callbacks' | 'delay' | 'returncalls'
 interface Row { o: DBOrder }
 interface Col { key: string; label: string; type: 'text' | 'category' | 'date' | 'number'; get: (r: Row) => string | number; render?: (r: Row) => React.ReactNode; queues?: Queue[] }
 
@@ -103,6 +103,18 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [queue, setQueue] = useState<Queue>('predispatch')
+  const [coordReturns, setCoordReturns] = useState<Record<string, string>>({})   // order_id -> return id (coordinating)
+  const [coordMarkedAt, setCoordMarkedAt] = useState<Record<string, string>>({}) // order_id -> created_at
+  const [revDraft, setRevDraft] = useState<Record<string, string>>({})
+  const [coordBusy, setCoordBusy] = useState<string | null>(null)
+
+  const loadCoord = useCallback(async () => {
+    const { data } = await supabase.from('returns').select('order_id, id, created_at').eq('coord_state', 'coordinating')
+    const m: Record<string, string> = {}; const t: Record<string, string> = {}
+    for (const r of (data || []) as { order_id: string; id: string; created_at: string }[]) { if (r.order_id) { m[r.order_id] = r.id; t[r.order_id] = r.created_at } }
+    setCoordReturns(m); setCoordMarkedAt(t)
+  }, [supabase])
+  useEffect(() => { void loadCoord() }, [loadCoord])
   const [callsToday, setCallsToday] = useState<number | null>(null)
   const [logs, setLogs] = useState<Record<string, CallLog[]>>({})
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -157,15 +169,17 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const inDelay = useCallback((o: DBOrder) => o.is_dispatched && !notInTransit.has((o.tracking_status || '').toLowerCase()), [notInTransit])
 
   const base: Row[] = useMemo(() => {
-    const pred = queue === 'predispatch' ? inPreDispatch : queue === 'callbacks' ? inCallbacks : inDelay
+    const inReturnCalls = (o: DBOrder) => !!coordReturns[o.order_id]
+    const pred = queue === 'predispatch' ? inPreDispatch : queue === 'callbacks' ? inCallbacks : queue === 'returncalls' ? inReturnCalls : inDelay
     return orders.filter(pred).map(o => ({ o }))
-  }, [orders, queue, inPreDispatch, inCallbacks, inDelay])
+  }, [orders, queue, inPreDispatch, inCallbacks, inDelay, coordReturns])
 
   const counts = useMemo(() => ({
     pre: orders.filter(inPreDispatch).length,
     cb: orders.filter(inCallbacks).length,
     del: orders.filter(inDelay).length,
-  }), [orders, inPreDispatch, inCallbacks, inDelay])
+    rc: Object.keys(coordReturns).length,
+  }), [orders, inPreDispatch, inCallbacks, inDelay, coordReturns])
 
   // "locked" = an order that's been actioned into a terminal-for-this-queue confirmation state.
   const isLocked = useCallback((o: DBOrder): boolean => {
@@ -447,6 +461,34 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     } finally { setSaving(null) }
   }
 
+  // Return calls: confirm pickup — save reverse AWB, move the return to picked_up (-> Returns tab).
+  const confirmPickup = async (o: DBOrder) => {
+    const rid = coordReturns[o.order_id]; const rev = (revDraft[o.order_id] || '').trim()
+    if (!rid) return
+    if (!rev) { return }
+    setCoordBusy(o.order_id)
+    try {
+      const now = new Date().toISOString()
+      await supabase.from('returns').update({ reverse_tracking_id: rev, coord_state: 'picked_up', updated_at: now }).eq('id', rid)
+      void logOrderEvent(o.order_id, 'note', `Return pickup confirmed · reverse AWB ${rev}`, null)
+      setCoordReturns(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+      setRevDraft(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+    } finally { setCoordBusy(null) }
+  }
+  // Return calls: customer cancelled the return — close it, log to history, revert the order.
+  const cancelReturn = async (o: DBOrder) => {
+    const rid = coordReturns[o.order_id]; if (!rid) return
+    setCoordBusy(o.order_id)
+    try {
+      const now = new Date().toISOString()
+      await supabase.from('returns').update({ coord_state: 'cancelled', updated_at: now }).eq('id', rid)
+      await supabase.from('dispatch_orders').update({ tracking_status: 'delivered', last_disposition: 'Return cancelled', last_disposition_at: now, updated_at: now }).eq('order_id', o.order_id)
+      void logOrderEvent(o.order_id, 'note', 'Return cancelled by customer — closed, no refund', null)
+      setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, tracking_status: 'delivered' } as DBOrder : x))
+      setCoordReturns(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+    } finally { setCoordBusy(null) }
+  }
+
   // Logistics: mark a cancellation-requested order as a return (confirm-gated).
   const markAsReturn = async (o: DBOrder) => {
     setSaving(o.order_id)
@@ -455,11 +497,12 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
       const { data: { user } } = await supabase.auth.getUser()
       await supabase.from('returns').upsert({
         order_id: o.order_id, source: 'rto', return_type: 'rto',
-        reason: 'Customer cancellation (in-transit)',
+        reason: 'Customer return request',
         barcode: o.scanned_barcode || null,
-        reverse_tracking_id: o.tracking_number || null,
+        reverse_tracking_id: null,
         reverse_courier: o.courier || null,
-        notes: 'Created from CallLens delay cancellation request',
+        coord_state: 'coordinating',
+        notes: 'Marked as return — awaiting pickup coordination (Return calls)',
         created_by: user?.id ?? null, created_by_email: user?.email ?? null,
         updated_at: now,
       }, { onConflict: 'order_id' })
@@ -531,6 +574,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
           <QueueBtn q="predispatch" label="Pre-dispatch confirm" n={counts.pre} />
           <QueueBtn q="callbacks" label="Callbacks" n={counts.cb} />
           <QueueBtn q="delay" label="Delay check" n={counts.del} />
+          <QueueBtn q="returncalls" label="Return calls" n={counts.rc} />
         </div>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
@@ -690,6 +734,17 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                         <button onClick={() => toggleWhatsapp(o)} title="Toggle WhatsApp sent (manual)" style={{ background: 'none', border: 'none', cursor: 'pointer', color: o.whatsapp_sent ? '#16a34a' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600 }}><MessageCircle size={13} /> {o.whatsapp_sent ? 'sent' : '—'}</button>
                         {queue === 'delay' && o.delivery_source === 'manual' && <span title="Manually marked delivered" style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>manual</span>}
                         {queue === 'delay' && o.tracking_status !== 'delivered' && <button onClick={() => { setMarkDate(new Date().toISOString().slice(0, 10)); setMarkDeliver(o) }} title="Mark delivered (courier didn't update)" style={{ background: 'none', border: '1px solid var(--dispatched)', borderRadius: 5, padding: '2px 7px', color: 'var(--dispatched)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><CheckCircle size={11} /> Mark delivered</button>}
+                        {queue === 'returncalls' && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const }}>
+                            {o.contact_number && <a href={`tel:${o.contact_number}`} title="Call customer" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent)', textDecoration: 'none', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 7px', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Phone size={11} /> {o.contact_number}</a>}
+                            <input value={revDraft[o.order_id] || ''} onChange={e => setRevDraft(prev => ({ ...prev, [o.order_id]: e.target.value }))} placeholder="Reverse tracking ID"
+                              style={{ width: 150, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'var(--font-mono)', outline: 'none' }} />
+                            <button onClick={() => void confirmPickup(o)} disabled={coordBusy === o.order_id || !(revDraft[o.order_id] || '').trim()} title="Confirm pickup → moves to Returns for refund"
+                              style={{ background: 'none', border: '1px solid var(--dispatched)', borderRadius: 5, padding: '3px 8px', color: (revDraft[o.order_id] || '').trim() ? 'var(--dispatched)' : 'var(--text3)', fontSize: 11, fontWeight: 600, cursor: (revDraft[o.order_id] || '').trim() ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Truck size={11} /> Picked up</button>
+                            <button onClick={() => void cancelReturn(o)} disabled={coordBusy === o.order_id} title="Customer cancelled the return"
+                              style={{ background: 'none', border: '1px solid #fecaca', borderRadius: 5, padding: '3px 8px', color: 'var(--critical)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><XCircle size={11} /> Cancel return</button>
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' as const, minWidth: 260 }}>
                         {locked ? (
