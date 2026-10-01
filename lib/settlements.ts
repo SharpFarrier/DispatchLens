@@ -231,25 +231,36 @@ export function parseCashfreeText(text: string): ParsedFile {
   const rows: SettlementRow[] = []
   const dedupSet = new Set<string>()
   for (const r of raw) {
-    const cfId = (r['Cashfree Order ID'] || r['Reference Id'] || '').trim()
+    // Cashfree's export: "Order Id" is the website order-id; dedup on "Reference Id" (the unique
+    // payment reference) falling back to "Bank Reference No." then order-id+time.
+    const refId = (r['Reference Id'] || r['Cashfree Order ID'] || r['Bank Reference No.'] || '').trim()
     const orderId = (r['Order Id'] || '').trim() || null
-    const key = cfId || `${orderId}-${r['Transaction Time'] || ''}`
+    const key = refId || `${orderId}-${r['Transaction Time'] || ''}`
     if (!key) continue
-    const success = (r['Transaction Status'] || '').toUpperCase() === 'SUCCESS' || r['Captured'] === '1'
-    const amt = parseFloat(r['Transaction Amount'] || r['Order Amount']) || 0
-    const refunded = (r['Refunded'] || '').toUpperCase() === 'TRUE'
+    const success = (r['Transaction Status'] || '').toUpperCase() === 'SUCCESS'
+    const refunded = (r['Refunded'] || '').toUpperCase() === 'YES' || (r['Refunded'] || '').toUpperCase() === 'TRUE'
+    // Real Cashfree columns: Amount (gross), Service Charge + ST/GST (gateway cost), Settlement Amount (net received).
+    const gross = parseFloat(r['Amount'] || r['Order Amount'] || r['Transaction Amount']) || 0
+    const serviceCharge = parseFloat(r['Service Charge']) || 0
+    const gst = parseFloat(r['ST/GST']) || 0
+    const settlementAmt = parseFloat(r['Settlement Amount']) || 0
+    const gatewayFee = serviceCharge + gst
+    // Net received = Settlement Amount (gross - service charge - GST). Fall back to the computation
+    // if the Settlement Amount column is blank on a given row.
+    const net = settlementAmt || (gross - gatewayFee)
     dedupSet.add(key)
     rows.push({
       platform: 'website',
       order_id: orderId,
       order_item_code: null,
       sku: null,
-      amount: success ? (refunded ? 0 : amt) : 0,
+      // Advance/prepaid online payment. Only SUCCESS and non-refunded carry the settled amount.
+      amount: success ? (refunded ? 0 : net) : 0,
       transaction_type: 'advance',
       amount_description: 'cashfree',
       dedup_key: key,
       settlement_date: (r['Transaction Time'] || '').trim() || null,
-      raw: r,
+      raw: { ...r, _gross: gross, _gateway_fee: gatewayFee, _service_charge: serviceCharge, _gst: gst, _settlement: settlementAmt },
     })
   }
   return { platform: 'website', rows, dedupIds: [...dedupSet] }
