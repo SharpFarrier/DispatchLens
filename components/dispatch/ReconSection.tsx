@@ -549,6 +549,30 @@ function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
       if (!fwd) { reverseResidual += FKCOL.net(raw); continue }
       for (const k of Object.keys(FKCOL) as (keyof typeof b)[]) b[k] += FKCOL[k](raw)
     }
+  } else if (platform === 'Website') {
+    // D2C: online prepaid via Razorpay / Cashfree. sale = gross the customer paid; commission =
+    // payment-gateway fee; gstOnFees = GST on that fee; net = amount actually settled to us.
+    // (Logistics cost comes later from the monthly courier bills, not the payment file.)
+    for (const l of lines) {
+      const raw = (l.raw || {}) as Record<string, unknown>
+      const num = (v: unknown) => { const n = parseFloat(String(v ?? '')); return isNaN(n) ? 0 : n }
+      let gross = 0, fee = 0, gst = 0, net = 0
+      if ((l.amount_description || '') === 'cashfree') {
+        gross = num(raw['_gross']); fee = num(raw['_service_charge']); gst = num(raw['_gst'])
+        net = num(raw['_settlement']) || (gross - fee - gst)
+      } else {
+        // razorpay: raw has amount/fee/tax; the stored line `amount` is already net (captured only)
+        gross = num(raw['amount']); fee = num(raw['fee']); gst = num(raw['tax'])
+        net = (l.amount || 0) || (gross - fee - gst)
+      }
+      // A failed/zero line (l.amount === 0) contributed nothing — skip so it doesn't inflate sale.
+      if ((l.amount || 0) === 0 && net === 0) { detail.push({ label: `${l.amount_description || 'gateway'} · not settled`, amount: 0 }); continue }
+      b.sale += gross
+      b.commission += fee
+      b.gstOnFees += gst
+      b.net += net
+      detail.push({ label: `${l.amount_description || 'gateway'} · settled`, amount: net })
+    }
   }
   const commissionPct = b.sale ? Math.abs(b.commission) / b.sale * 100 : null
   return { ...b, reverseResidual, returned, commissionPct, detail }
