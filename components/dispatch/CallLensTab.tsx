@@ -76,7 +76,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [waByPhone, setWaByPhone] = useState<Record<string, WaState>>({})
   const [hideConfirmed, setHideConfirmed] = useState(false)
   const [chatPhone, setChatPhone] = useState<{ phone: string; name: string } | null>(null)
-  const [chatMsgs, setChatMsgs] = useState<{ direction: string; text: string; status: string; at: string | null }[]>([])
+  const [chatMsgs, setChatMsgs] = useState<{ direction: string; text: string; status: string; sent_at: string | null }[]>([])
   const [chatLoading, setChatLoading] = useState(false)
 
   const classifyInbound = (t: string): 'confirm' | 'changes' | 'other' => {
@@ -118,7 +118,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     const p10 = (contact || '').replace(/\D/g, '').slice(-10); if (!p10) return
     setChatPhone({ phone: contact || '', name }); setChatLoading(true); setChatMsgs([])
     const { data } = await supabase.from('wa_messages').select('direction, text, status, sent_at').eq('phone10', p10).order('sent_at', { ascending: true })
-    setChatMsgs((data || []) as { direction: string; text: string; status: string; at: string | null }[])
+    setChatMsgs((data || []) as { direction: string; text: string; status: string; sent_at: string | null }[])
     setChatLoading(false)
   }
 
@@ -620,7 +620,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                 return (
                   <div key={i} style={{ alignSelf: inbound ? 'flex-start' : 'flex-end', maxWidth: '82%', background: inbound ? 'var(--surface)' : 'var(--dispatched-bg)', border: inbound ? '1px solid var(--border)' : 'none', borderRadius: inbound ? '12px 12px 12px 2px' : '12px 12px 2px 12px', padding: '7px 10px', fontSize: 12 }}>
                     {inbound ? (msg.text || '—') : (msg.text ? `Sent: ${msg.text}` : 'Template message')}
-                    <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 3 }}>{inbound ? 'Customer' : 'You'}{msg.status && !inbound ? ` \u00b7 ${msg.status}` : ''}{msg.at ? ` \u00b7 ${new Date(msg.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</div>
+                    <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 3 }}>{inbound ? 'Customer' : 'You'}{msg.status && !inbound ? ` \u00b7 ${msg.status}` : ''}{msg.sent_at ? ` \u00b7 ${new Date(msg.sent_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</div>
                   </div>
                 )
               })}
