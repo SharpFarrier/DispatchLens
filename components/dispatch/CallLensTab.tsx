@@ -214,7 +214,8 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
 
   const load = useCallback(async () => {
     setLoading(true)
-    const base = () => supabase.from('dispatch_orders').select(CL_COLS)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const base = (): any => supabase.from('dispatch_orders').select(CL_COLS)
     let rows: DBOrder[] = []
     if (queue === 'returncalls') {
       const ids = Object.keys(coordReturns)
