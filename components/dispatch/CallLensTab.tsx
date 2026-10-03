@@ -195,14 +195,48 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
   }, [openFilter])
 
+  // Columns the CallLens table + actions actually use (not select('*') of 59 fields).
+  const CL_COLS = 'id, order_id, sku, customer_name, contact_number, courier, tracking_number, tracking_status, assigned_caller, confirmation_status, last_disposition, callback_date, cancellation_requested, escalated, is_dispatched, is_cancelled, dispatched_at, order_date, promise_date, dispatch_by_date, scheduled_date, plan_decision, scanned_barcode, oda, delivery_source, whatsapp_sent'
+
+  // Load ONLY the active queue's slice, server-side — not all ~12k orders.
+  const [counts, setCounts] = useState({ pre: 0, cb: 0, del: 0, rc: 0 })
+  const refreshCounts = useCallback(async () => {
+    const co = (q: ReturnType<typeof supabase.from>) => q
+    const [pre, cb, del] = await Promise.all([
+      supabase.from('dispatch_orders').select('id', { count: 'exact', head: true }).eq('is_dispatched', false).eq('is_cancelled', false).is('callback_date', null),
+      supabase.from('dispatch_orders').select('id', { count: 'exact', head: true }).eq('is_dispatched', false).eq('is_cancelled', false).not('callback_date', 'is', null),
+      supabase.from('dispatch_orders').select('id', { count: 'exact', head: true }).eq('is_dispatched', true).eq('is_cancelled', false).not('tracking_status', 'in', '(delivered,rto,returned,cancelled,lost)'),
+    ])
+    void co
+    setCounts({ pre: pre.count ?? 0, cb: cb.count ?? 0, del: del.count ?? 0, rc: Object.keys(coordReturns).length })
+  }, [supabase, coordReturns])
+  useEffect(() => { void refreshCounts() }, [refreshCounts])
+
   const load = useCallback(async () => {
     setLoading(true)
-    const rows = await fetchAllRows<DBOrder>((from, to) =>
-      supabase.from('dispatch_orders').select('*')
+    const base = () => supabase.from('dispatch_orders').select(CL_COLS)
+    let rows: DBOrder[] = []
+    if (queue === 'returncalls') {
+      const ids = Object.keys(coordReturns)
+      if (ids.length) {
+        rows = await fetchAllRows<DBOrder>((from, to) => base().in('order_id', ids).order('order_date', { ascending: false }).range(from, to))
+      }
+    } else if (queue === 'delay') {
+      // dispatched + still in transit (exclude delivered/rto — the ~11.8k that aren't delays)
+      rows = await fetchAllRows<DBOrder>((from, to) => base()
+        .eq('is_dispatched', true).eq('is_cancelled', false)
+        .not('tracking_status', 'in', '(delivered,rto,returned,cancelled,lost)')
         .order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to))
+    } else {
+      // predispatch + callbacks: not dispatched, not cancelled (a few hundred rows)
+      rows = await fetchAllRows<DBOrder>((from, to) => base()
+        .eq('is_dispatched', false).eq('is_cancelled', false)
+        .order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to))
+    }
     setOrders(rows); setLoading(false)
-  }, [supabase])
-  useEffect(() => { load() }, [load])
+    void refreshCounts()
+  }, [supabase, queue, coordReturns, refreshCounts])
+  useEffect(() => { void load() }, [load])
   useEffect(() => { setSelected(new Set()); setOpenFilter(null); setConfirmingFor(null); setUnlockingFor(null); setReturningFor(null) }, [queue])
 
   const notInTransit = useMemo(() => new Set(['delivered', 'rto', 'returned', 'return to origin', 'rto delivered', 'rto initiated', 'cancelled', 'lost']), [])
@@ -220,12 +254,6 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     return list.map(o => ({ o }))
   }, [orders, queue, inPreDispatch, inCallbacks, inDelay, coordReturns, hideConfirmed, waByPhone])
 
-  const counts = useMemo(() => ({
-    pre: orders.filter(inPreDispatch).length,
-    cb: orders.filter(inCallbacks).length,
-    del: orders.filter(inDelay).length,
-    rc: Object.keys(coordReturns).length,
-  }), [orders, inPreDispatch, inCallbacks, inDelay, coordReturns])
 
   // "locked" = an order that's been actioned into a terminal-for-this-queue confirmation state.
   const isLocked = useCallback((o: DBOrder): boolean => {
