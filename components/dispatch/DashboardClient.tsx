@@ -580,7 +580,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           // Replacement: same order_id, new AWB, Status=Replacement -> re-enter the dispatch
           // flow (un-dispatch, back to undecided) so it's picked/scanned/dispatched again
           // (stock consumed at dispatch, like any order) and shows a Replacement marker.
-          ...(o.is_replacement ? { is_replacement: true, is_dispatched: false, plan_decision: 'undecided' as const, scanned_barcode: null, dispatched_at: null } : {}),
+          // Replacement: reset the dispatch window to a FRESH one so it isn't shown as overdue
+          // (the original dates would make Days Left hugely negative). order_date/dispatch_by = today,
+          // promise = today + transit + 3-day buffer.
+          ...(o.is_replacement ? (() => {
+            const todayISO = new Date().toISOString().slice(0, 10)
+            const transit = existing.transit_days ?? o.transit_days ?? 3
+            const promiseISO = new Date(Date.now() + (transit + 3) * 86400000).toISOString().slice(0, 10)
+            return { is_replacement: true, is_dispatched: false, plan_decision: 'undecided' as const, scanned_barcode: null, dispatched_at: null,
+              order_date: todayISO, dispatch_by_date: todayISO, promise_date: promiseISO }
+          })() : {}),
           updated_at: new Date().toISOString(),
         }).eq('id', existing.id)
         if (o.is_replacement) logEvent(o.order_id, 'note', `Replacement received · new AWB ${o.tracking_number}`)
