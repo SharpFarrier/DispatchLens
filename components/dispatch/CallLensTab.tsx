@@ -86,33 +86,37 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     return 'other'
   }
 
-  useEffect(() => {
+  const loadWaStates = useCallback(async () => {
     const outRank: Record<string, number> = { failed: 0, sent: 1, delivered: 2, read: 3 }
-    void (async () => {
-      const { data } = await supabase.from('wa_messages').select('phone10, status, direction, text, sent_at').order('sent_at', { ascending: true })
-      const rows = (data || []) as { phone10: string; status: string; direction: string | null; text: string | null; sent_at: string | null }[]
-      const byPhone: Record<string, { out: number; outAt: string | null; inbound: { text: string; at: string | null }[] }> = {}
-      for (const r of rows) {
-        if (!r.phone10) continue
-        const e = (byPhone[r.phone10] ||= { out: -1, outAt: null, inbound: [] })
-        if (r.direction === 'in') e.inbound.push({ text: r.text || '', at: r.sent_at })
-        else { const rk = outRank[r.status] ?? -1; if (rk >= e.out) { e.out = rk; e.outAt = r.sent_at } }
+    const { data } = await supabase.from('wa_messages').select('phone10, status, direction, text, sent_at').order('sent_at', { ascending: true })
+    const rows = (data || []) as { phone10: string; status: string; direction: string | null; text: string | null; sent_at: string | null }[]
+    const byPhone: Record<string, { out: number; outAt: string | null; inbound: { text: string; at: string | null }[] }> = {}
+    for (const r of rows) {
+      if (!r.phone10) continue
+      const e = (byPhone[r.phone10] ||= { out: -1, outAt: null, inbound: [] })
+      if (r.direction === 'in') e.inbound.push({ text: r.text || '', at: r.sent_at })
+      else { const rk = outRank[r.status] ?? -1; if (rk >= e.out) { e.out = rk; e.outAt = r.sent_at } }
+    }
+    const m: Record<string, WaState> = {}
+    for (const [p10, e] of Object.entries(byPhone)) {
+      let state = 'none', at = e.outAt
+      if (e.out === 1) state = 'sent'; else if (e.out === 2) state = 'delivered'; else if (e.out === 3) state = 'read'; else if (e.out === 0) state = 'failed'
+      if (e.inbound.length) {
+        const latest = [...e.inbound].reverse().find(x => classifyInbound(x.text) !== 'other')
+        if (latest) { const c = classifyInbound(latest.text); state = c === 'confirm' ? 'confirmed' : 'changes'; at = latest.at }
+        else { state = 'replied'; at = e.inbound[e.inbound.length - 1].at }
       }
-      const m: Record<string, WaState> = {}
-      for (const [p10, e] of Object.entries(byPhone)) {
-        let state = 'none', at = e.outAt
-        if (e.out === 1) state = 'sent'; else if (e.out === 2) state = 'delivered'; else if (e.out === 3) state = 'read'; else if (e.out === 0) state = 'failed'
-        if (e.inbound.length) {
-          // latest meaningful inbound (confirm/changes) wins; else 'replied'
-          const latest = [...e.inbound].reverse().find(x => classifyInbound(x.text) !== 'other')
-          if (latest) { const c = classifyInbound(latest.text); state = c === 'confirm' ? 'confirmed' : 'changes'; at = latest.at }
-          else { state = 'replied'; at = e.inbound[e.inbound.length - 1].at }
-        }
-        m[p10] = { state, at, replyCount: e.inbound.length }
-      }
-      setWaByPhone(m)
-    })()
+      m[p10] = { state, at, replyCount: e.inbound.length }
+    }
+    setWaByPhone(m)
   }, [supabase])
+
+  // Load on mount + refresh every 60s so new replies/statuses appear without a page reload.
+  useEffect(() => {
+    void loadWaStates()
+    const id = setInterval(() => { void loadWaStates() }, 60000)
+    return () => clearInterval(id)
+  }, [loadWaStates])
 
   const openChat = async (contact: string | null | undefined, name: string) => {
     const p10 = (contact || '').replace(/\D/g, '').slice(-10); if (!p10) return
