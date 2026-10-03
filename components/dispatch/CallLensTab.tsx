@@ -220,19 +220,19 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     if (queue === 'returncalls') {
       const ids = Object.keys(coordReturns)
       if (ids.length) {
-        rows = await fetchAllRows<DBOrder>((from, to) => base().in('order_id', ids).order('order_date', { ascending: false }).range(from, to))
+        rows = await fetchAllRows<DBOrder>((from, to) => base().in('order_id', ids).order('order_date', { ascending: false }).range(from, to) as any)
       }
     } else if (queue === 'delay') {
       // dispatched + still in transit (exclude delivered/rto — the ~11.8k that aren't delays)
       rows = await fetchAllRows<DBOrder>((from, to) => base()
         .eq('is_dispatched', true).eq('is_cancelled', false)
         .not('tracking_status', 'in', '(delivered,rto,returned,cancelled,lost)')
-        .order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to))
+        .order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to) as any)
     } else {
       // predispatch + callbacks: not dispatched, not cancelled (a few hundred rows)
       rows = await fetchAllRows<DBOrder>((from, to) => base()
         .eq('is_dispatched', false).eq('is_cancelled', false)
-        .order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to))
+        .order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to) as any)
     }
     setOrders(rows); setLoading(false)
     void refreshCounts()
