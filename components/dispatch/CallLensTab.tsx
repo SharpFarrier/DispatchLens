@@ -71,40 +71,78 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const _xg = useExportGate('calllens', 'CallLens export')
   const supabase = createClient()
   // WhatsApp confirmation status per phone (last 10 digits) — furthest status reached.
-  const [waByPhone, setWaByPhone] = useState<Record<string, { status: string; at: string | null }>>({})
+  // Unified WhatsApp state per phone: none < sent < delivered < read < replied < changes/confirmed.
+  interface WaState { state: string; at: string | null; replyCount: number }
+  const [waByPhone, setWaByPhone] = useState<Record<string, WaState>>({})
+  const [hideConfirmed, setHideConfirmed] = useState(false)
+  const [chatPhone, setChatPhone] = useState<{ phone: string; name: string } | null>(null)
+  const [chatMsgs, setChatMsgs] = useState<{ direction: string; text: string; status: string; at: string | null }[]>([])
+  const [chatLoading, setChatLoading] = useState(false)
+
+  const classifyInbound = (t: string): 'confirm' | 'changes' | 'other' => {
+    const x = (t || '').toLowerCase().trim()
+    if (/\bconfirm(ed)?\b/.test(x) || x.includes('\u{1F44D}')) return 'confirm'
+    if (/\bchanges?\b/.test(x)) return 'changes'
+    return 'other'
+  }
+
   useEffect(() => {
-    const rank: Record<string, number> = { failed: 0, sent: 1, delivered: 2, read: 3 }
+    const outRank: Record<string, number> = { failed: 0, sent: 1, delivered: 2, read: 3 }
     void (async () => {
-      const { data } = await supabase.from('wa_messages').select('phone10, status, sent_at').order('sent_at', { ascending: false })
-      const m: Record<string, { status: string; at: string | null }> = {}
-      for (const r of (data || []) as { phone10: string; status: string; sent_at: string | null }[]) {
+      const { data } = await supabase.from('wa_messages').select('phone10, status, direction, text, sent_at').order('sent_at', { ascending: true })
+      const rows = (data || []) as { phone10: string; status: string; direction: string | null; text: string | null; sent_at: string | null }[]
+      const byPhone: Record<string, { out: number; outAt: string | null; inbound: { text: string; at: string | null }[] }> = {}
+      for (const r of rows) {
         if (!r.phone10) continue
-        const cur = m[r.phone10]
-        if (!cur || (rank[r.status] ?? -1) > (rank[cur.status] ?? -1)) m[r.phone10] = { status: r.status, at: r.sent_at }
+        const e = (byPhone[r.phone10] ||= { out: -1, outAt: null, inbound: [] })
+        if (r.direction === 'in') e.inbound.push({ text: r.text || '', at: r.sent_at })
+        else { const rk = outRank[r.status] ?? -1; if (rk >= e.out) { e.out = rk; e.outAt = r.sent_at } }
+      }
+      const m: Record<string, WaState> = {}
+      for (const [p10, e] of Object.entries(byPhone)) {
+        let state = 'none', at = e.outAt
+        if (e.out === 1) state = 'sent'; else if (e.out === 2) state = 'delivered'; else if (e.out === 3) state = 'read'; else if (e.out === 0) state = 'failed'
+        if (e.inbound.length) {
+          // latest meaningful inbound (confirm/changes) wins; else 'replied'
+          const latest = [...e.inbound].reverse().find(x => classifyInbound(x.text) !== 'other')
+          if (latest) { const c = classifyInbound(latest.text); state = c === 'confirm' ? 'confirmed' : 'changes'; at = latest.at }
+          else { state = 'replied'; at = e.inbound[e.inbound.length - 1].at }
+        }
+        m[p10] = { state, at, replyCount: e.inbound.length }
       }
       setWaByPhone(m)
     })()
   }, [supabase])
-  const waChip = (contact: string | null | undefined) => {
-    const p10 = (contact || '').replace(/\D/g, '').slice(-10)
-    const wa = p10 ? waByPhone[p10] : undefined
-    const ago = (iso: string | null) => { if (!iso) return ''; const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000); if (s < 3600) return `${Math.floor(s / 60)}m`; if (s < 86400) return `${Math.floor(s / 3600)}h`; return `${Math.floor(s / 86400)}d` }
-    let label: string, fg: string, bg: string, bd = 'transparent'
-    if (!wa) { label = 'No WhatsApp'; fg = 'var(--text3)'; bg = 'var(--bg2)'; bd = 'var(--border)' }
-    else if (wa.status === 'read') { label = `WhatsApp read · ${ago(wa.at)}`; fg = 'var(--dispatched)'; bg = 'var(--dispatched-bg)' }
-    else if (wa.status === 'delivered') { label = `WhatsApp delivered · ${ago(wa.at)}`; fg = 'var(--today)'; bg = 'var(--today-bg)' }
-    else if (wa.status === 'failed') { label = 'WhatsApp failed'; fg = 'var(--critical)'; bg = 'var(--critical-bg)' }
-    else { label = 'WhatsApp sent'; fg = 'var(--text2)'; bg = 'var(--bg2)'; bd = 'var(--border)' }
-    return <span title="Latest WhatsApp message to this customer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, color: fg, background: bg, border: `1px solid ${bd}`, padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap' as const }}><MessageCircle size={11} /> {label}</span>
+
+  const openChat = async (contact: string | null | undefined, name: string) => {
+    const p10 = (contact || '').replace(/\D/g, '').slice(-10); if (!p10) return
+    setChatPhone({ phone: contact || '', name }); setChatLoading(true); setChatMsgs([])
+    const { data } = await supabase.from('wa_messages').select('direction, text, status, sent_at').eq('phone10', p10).order('sent_at', { ascending: true })
+    setChatMsgs((data || []) as { direction: string; text: string; status: string; at: string | null }[])
+    setChatLoading(false)
   }
+
+  const WA_STYLE: Record<string, { label: string; fg: string; bg: string }> = {
+    none: { label: '\u2014', fg: 'var(--text3)', bg: 'transparent' },
+    sent: { label: 'Sent', fg: 'var(--text3)', bg: 'transparent' },
+    failed: { label: 'Failed', fg: 'var(--critical)', bg: 'var(--critical-bg)' },
+    delivered: { label: 'Delivered', fg: 'var(--text2)', bg: 'transparent' },
+    read: { label: 'Read', fg: 'var(--accent)', bg: 'transparent' },
+    replied: { label: 'Replied', fg: 'var(--accent)', bg: 'var(--accent-bg)' },
+    changes: { label: 'Changes \u00b7 call', fg: 'var(--critical)', bg: 'var(--critical-bg)' },
+    confirmed: { label: 'Confirmed', fg: 'var(--dispatched)', bg: 'var(--dispatched-bg)' },
+  }
+  const waStateOf = (contact: string | null | undefined) => { const p10 = (contact || '').replace(/\D/g, '').slice(-10); return p10 ? (waByPhone[p10] || { state: 'none', at: null, replyCount: 0 }) : { state: 'none', at: null, replyCount: 0 } }
+  const ago = (iso: string | null) => { if (!iso) return ''; const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000); if (s < 3600) return `${Math.floor(s / 60)}m`; if (s < 86400) return `${Math.floor(s / 3600)}h`; return `${Math.floor(s / 86400)}d` }
+
   const [markDeliver, setMarkDeliver] = useState<DBOrder | null>(null)
   const [markDate, setMarkDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
   const [markSaving, setMarkSaving] = useState(false)
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [queue, setQueue] = useState<Queue>('predispatch')
-  const [coordReturns, setCoordReturns] = useState<Record<string, string>>({})   // order_id -> return id (coordinating)
-  const [coordMarkedAt, setCoordMarkedAt] = useState<Record<string, string>>({}) // order_id -> created_at
+  const [coordReturns, setCoordReturns] = useState<Record<string, string>>({})
+  const [coordMarkedAt, setCoordMarkedAt] = useState<Record<string, string>>({})
   const [revDraft, setRevDraft] = useState<Record<string, string>>({})
   const [coordBusy, setCoordBusy] = useState<string | null>(null)
 
@@ -171,8 +209,10 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const base: Row[] = useMemo(() => {
     const inReturnCalls = (o: DBOrder) => !!coordReturns[o.order_id]
     const pred = queue === 'predispatch' ? inPreDispatch : queue === 'callbacks' ? inCallbacks : queue === 'returncalls' ? inReturnCalls : inDelay
-    return orders.filter(pred).map(o => ({ o }))
-  }, [orders, queue, inPreDispatch, inCallbacks, inDelay, coordReturns])
+    let list = orders.filter(pred)
+    if (hideConfirmed) list = list.filter(o => waStateOf(o.contact_number).state !== 'confirmed')
+    return list.map(o => ({ o }))
+  }, [orders, queue, inPreDispatch, inCallbacks, inDelay, coordReturns, hideConfirmed, waByPhone])
 
   const counts = useMemo(() => ({
     pre: orders.filter(inPreDispatch).length,
@@ -567,6 +607,28 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   return (
     <>
     {deliverModal}
+      {chatPhone && (
+        <div onClick={() => setChatPhone(null)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: 360, maxWidth: '100%', maxHeight: '70vh', display: 'flex', flexDirection: 'column' as const, background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden' as const }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div><div style={{ fontSize: 13, fontWeight: 600 }}>{chatPhone.name || 'Customer'}</div><div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{chatPhone.phone}</div></div>
+              <button onClick={() => setChatPhone(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)' }}><XCircle size={18} /></button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' as const, padding: 14, display: 'flex', flexDirection: 'column' as const, gap: 8, background: 'var(--bg2)' }}>
+              {chatLoading ? <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' as const }}>Loading…</div> : chatMsgs.length === 0 ? <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' as const }}>No messages.</div> : chatMsgs.map((msg, i) => {
+                const inbound = msg.direction === 'in'
+                return (
+                  <div key={i} style={{ alignSelf: inbound ? 'flex-start' : 'flex-end', maxWidth: '82%', background: inbound ? 'var(--surface)' : 'var(--dispatched-bg)', border: inbound ? '1px solid var(--border)' : 'none', borderRadius: inbound ? '12px 12px 12px 2px' : '12px 12px 2px 12px', padding: '7px 10px', fontSize: 12 }}>
+                    {inbound ? (msg.text || '—') : (msg.text ? `Sent: ${msg.text}` : 'Template message')}
+                    <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 3 }}>{inbound ? 'Customer' : 'You'}{msg.status && !inbound ? ` \u00b7 ${msg.status}` : ''}{msg.at ? ` \u00b7 ${new Date(msg.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</div>
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', fontSize: 10, color: 'var(--text3)', textAlign: 'center' as const }}>Read-only \u00b7 reply in Interakt</div>
+          </div>
+        </div>
+      )}
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' as const }}>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>CallLens</h1>
@@ -575,6 +637,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
           <QueueBtn q="callbacks" label="Callbacks" n={counts.cb} />
           <QueueBtn q="delay" label="Delay check" n={counts.del} />
           <QueueBtn q="returncalls" label="Return calls" n={counts.rc} />
+          <button onClick={() => setHideConfirmed(v => !v)} title="Hide orders the customer confirmed on WhatsApp" style={{ marginLeft: 8, padding: '5px 11px', borderRadius: 20, border: `1px solid ${hideConfirmed ? 'var(--accent)' : 'var(--border)'}`, background: hideConfirmed ? 'var(--accent-bg)' : 'var(--surface)', color: hideConfirmed ? 'var(--accent)' : 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><CheckCircle size={12} /> Hide WhatsApp-confirmed</button>
         </div>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
@@ -697,7 +760,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                     )}
                   </th>
                 ))}
-                {['WA', 'Disposition', ''].map((h, i) => <th key={i} style={{ padding: '8px 10px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>)}
+                {['WhatsApp', 'Disposition', ''].map((h, i) => <th key={i} style={{ padding: '8px 10px', textAlign: 'left' as const, color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 500, whiteSpace: 'nowrap' as const, background: 'var(--bg2)' }}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -730,8 +793,13 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                         </td>
                       ))}
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' as const }}>
-                        {waChip(o.contact_number)}
-                        <button onClick={() => toggleWhatsapp(o)} title="Toggle WhatsApp sent (manual)" style={{ background: 'none', border: 'none', cursor: 'pointer', color: o.whatsapp_sent ? '#16a34a' : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600 }}><MessageCircle size={13} /> {o.whatsapp_sent ? 'sent' : '—'}</button>
+                        {(() => { const w = waStateOf(o.contact_number); const st = WA_STYLE[w.state] || WA_STYLE.none; return (
+                          <span title={`WhatsApp: ${w.state}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: st.fg, background: st.bg, border: st.bg === 'transparent' ? 'none' : `1px solid ${st.fg}`, padding: st.bg === 'transparent' ? '0' : '2px 8px', borderRadius: 20, whiteSpace: 'nowrap' as const }}>{st.label}{w.at && w.state !== 'none' ? ` \u00b7 ${ago(w.at)}` : ''}</span>
+                        ) })()}
+                        <button onClick={() => void openChat(o.contact_number, o.customer_name || '')} disabled={waStateOf(o.contact_number).state === 'none'} title="View WhatsApp conversation"
+                          style={{ marginLeft: 6, background: 'none', border: `1px solid ${waStateOf(o.contact_number).replyCount > 0 ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 6, padding: '2px 7px', color: waStateOf(o.contact_number).state === 'none' ? 'var(--text3)' : waStateOf(o.contact_number).replyCount > 0 ? 'var(--accent)' : 'var(--text2)', cursor: waStateOf(o.contact_number).state === 'none' ? 'default' : 'pointer', fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: 'middle', opacity: waStateOf(o.contact_number).state === 'none' ? 0.4 : 1 }}>
+                          <MessageCircle size={12} />{waStateOf(o.contact_number).replyCount > 0 ? ` ${waStateOf(o.contact_number).replyCount}` : ''}
+                        </button>
                         {queue === 'delay' && o.delivery_source === 'manual' && <span title="Manually marked delivered" style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>manual</span>}
                         {queue === 'delay' && o.tracking_status !== 'delivered' && <button onClick={() => { setMarkDate(new Date().toISOString().slice(0, 10)); setMarkDeliver(o) }} title="Mark delivered (courier didn't update)" style={{ background: 'none', border: '1px solid var(--dispatched)', borderRadius: 5, padding: '2px 7px', color: 'var(--dispatched)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><CheckCircle size={11} /> Mark delivered</button>}
                         {queue === 'returncalls' && (
