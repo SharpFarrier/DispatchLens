@@ -188,6 +188,10 @@ export default function OrderHistoryPanel({ order, currentUserEmail, onClose, on
       // to it). For customer returns, left null — entered later in the Returns tab.
       reverse_tracking_id: returnType === 'rto' ? (order.tracking_number || null) : null,
       reverse_courier: returnType === 'rto' ? (order.courier || null) : null,
+      // Customer returns go to the CallLens "Return calls" queue first (coordinate pickup +
+      // add the reverse AWB) before reaching the Returns tab for refund. RTO is already coming
+      // back, so it skips coordination.
+      coord_state: returnType === 'customer' ? 'coordinating' : null,
       notes: returnNote.trim() || null,
       created_by: user?.id ?? null,
       created_by_email: user?.email ?? null,
