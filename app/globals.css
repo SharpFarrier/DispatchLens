@@ -110,3 +110,9 @@ tbody tr:hover { background: var(--surface2); }
   .dl-mobile-bottombar { display: flex !important; }
   .dl-content-wrap { padding-bottom: 62px; }
 }
+/* ── Mobile overhaul: global overflow guards + helpers (append to app/globals.css) ── */
+@media (max-width: 767px) {
+  html, body { overflow-x: clip; }
+}
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
