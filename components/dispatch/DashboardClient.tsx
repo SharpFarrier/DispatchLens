@@ -7,8 +7,6 @@ import { createClient } from '@/lib/supabase/client'
 import Badge, { tierVariant } from './Badge'
 import DrumDatePicker from './DrumDatePicker'
 import Sidebar, { type NavItem } from './Sidebar'
-import MobileShell, { MoreSheet, type TabItem, type SheetGroup } from '@/components/mobile/MobileShell'
-import { useIsMobile } from '@/hooks/useIsMobile'
 import DelaysTab from './DelaysTab'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
@@ -23,7 +21,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download, Flag, Undo2, Warehouse, Settings as SettingsIcon } from 'lucide-react'
+  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download, Flag, Undo2 } from 'lucide-react'
 
 // Non-Plan tabs are code-split so they are NOT in the initial bundle (which lands on
 // Plan). Each loads its own chunk the first time it's opened — this also keeps jsPDF and
@@ -156,8 +154,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const awbInputRef = useRef<HTMLInputElement>(null)
   const itemInputRef = useRef<HTMLInputElement>(null)
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
-  const isMobile = useIsMobile()
-  const [moreOpen, setMoreOpen] = useState(false)
   // Copy-block (deterrence): stop BULK copy (whole tables / many rows) while allowing single
   // values (an order ID, AWB, SKU, name). Owner exempt. Heuristic: block if the selection spans
   // more than one table row, or the copied text is long. Bypassable via devtools by design.
@@ -1635,20 +1631,31 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     (o.lr_number ? o.lr_number.toLowerCase().includes(q) : false) ||
     (o.pincode ? o.pincode.includes(q) : false), [])
   const searchTerms = useMemo(() => searchQuery.split(',').map(t => t.trim()).filter(t => t.length >= 3), [searchQuery])
-  const searchResults = useMemo(() => {
-    if (!searchTerms.length) return []
-    const ql = searchTerms.map(t => t.toLowerCase())
-    const seen = new Set<string>(); const out: DBOrder[] = []
-    for (const o of orders) {
-      if (seen.has(o.id)) continue
-      if (ql.some(q => searchMatch(o, q))) { seen.add(o.id); out.push(o); if (out.length >= 50) break }
-    }
-    return out
-  }, [orders, searchTerms, searchMatch])
+  // Universal search hits the DATABASE (not just the in-memory active-orders subset), so it finds
+  // ANY order — including dispatched/delivered ones that aren't loaded in memory.
+  const [searchResults, setSearchResults] = useState<DBOrder[]>([])
+  useEffect(() => {
+    if (!searchTerms.length) { setSearchResults([]); return }
+    let cancelled = false
+    const h = setTimeout(async () => {
+      const esc = (t: string) => t.replace(/[,()]/g, ' ').trim()
+      const all: DBOrder[] = []
+      const seen = new Set<string>()
+      for (const term of searchTerms.slice(0, 5)) {
+        const q = esc(term); if (q.length < 3) continue
+        const { data } = await supabase.from('dispatch_orders').select('*')
+          .or(`order_id.ilike.%${q}%,customer_name.ilike.%${q}%,sku.ilike.%${q}%,tracking_number.ilike.%${q}%,scanned_barcode.ilike.%${q}%,lr_number.ilike.%${q}%,pincode.ilike.%${q}%`)
+          .limit(50)
+        for (const o of (data || []) as DBOrder[]) { if (!seen.has(o.id)) { seen.add(o.id); all.push(o) } }
+      }
+      if (!cancelled) setSearchResults(all.slice(0, 50))
+    }, 250)
+    return () => { cancelled = true; clearTimeout(h) }
+  }, [searchTerms, supabase])
   const notFoundTerms = useMemo(() => {
     if (searchTerms.length < 2) return []
-    return searchTerms.filter(t => { const q = t.toLowerCase(); return !orders.some(o => searchMatch(o, q)) })
-  }, [orders, searchTerms, searchMatch])
+    return searchTerms.filter(t => { const q = t.toLowerCase(); return !searchResults.some(o => searchMatch(o, q)) })
+  }, [searchResults, searchTerms, searchMatch])
 
   // ── Computed ──
   const today = new Date().toISOString().split('T')[0]
@@ -2829,16 +2836,16 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
       {/* ── Header ── */}
       <style>{`
-        @media (max-width: 767px) {
-          /* Mobile overhaul: hide desktop sidebar + topbar; MobileShell takes over. */
-          .dl-sidebar { display: none !important; }
-          .dl-header { display: none !important; }
-          .dl-content-wrap { min-height: 100dvh !important; }
-          main { padding: calc(52px + 12px) 0 calc(58px + env(safe-area-inset-bottom, 0px) + 78px) !important; max-width: 100% !important; }
-          main > div { padding-left: 14px; padding-right: 14px; }
-        }
-        @media (max-width: 768px) and (min-width: 768px) {
+        @media (max-width: 768px) {
           .dl-header { padding: 0 8px !important; }
+          .dl-logo { margin-right: 8px !important; }
+          .dl-wordmark { display: none !important; }
+          .dl-nav { gap: 1px !important; flex: 1 1 auto !important; }
+          .dl-search-wrap { width: 36px !important; }
+          .dl-search-wrap.dl-search-open { width: 170px !important; }
+          .dl-date-pill { display: none !important; }
+          .dl-username { display: none !important; }
+          .dl-right { gap: 6px !important; }
         }
         .dl-nav { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .dl-nav::-webkit-scrollbar { display: none; }
@@ -2871,42 +2878,6 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           @page { size: A4; margin: 12mm; }
         }
       `}</style>
-      {isMobile && (() => {
-        const curKey = tab === 'warehouse' ? `wh:${warehouseTab}` : tab
-        const go = (k: string) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }
-        const sectionOf = (k: string): 'orders' | 'warehouse' | 'settings' => navItems.find(i => i.key === k)?.section ?? 'orders'
-        const activeSection = tab === 'warehouse' ? 'warehouse' : sectionOf(tab)
-        const nItem = (keyName: string): TabItem | null => { const it = navItems.find(i => i.key === keyName && i.show); return it ? { key: it.key, label: it.label, badge: it.count } : null }
-        // Section tabs shown in the header depend on the active section.
-        let primaryKeys: string[] = []
-        if (activeSection === 'orders') primaryKeys = ['import', 'plan', 'picklist', 'eod', 'dispatched']
-        else if (activeSection === 'warehouse') primaryKeys = ['wh:stock', 'wh:coating', 'wh:picking', 'wh:barcodes', 'wh:packing']
-        else primaryKeys = ['skumap', 'users']
-        const sectionTabs = primaryKeys.map(nItem).filter(Boolean) as TabItem[]
-        // "More" groups — only for the Orders section (14 tabs); warehouse/settings have few, no sheet.
-        const moreGroups: SheetGroup[] = activeSection === 'orders' ? [
-          { title: 'Ops', items: ['review', 'returns', 'calllens', 'delays', 'allorders'].map(nItem).filter(Boolean) as TabItem[] },
-          { title: 'Finance', items: ['recon'].map(nItem).filter(Boolean) as TabItem[] },
-          { title: 'Insights', items: ['otdr', 'handling', 'reports'].map(nItem).filter(Boolean) as TabItem[] },
-        ].filter(g => g.items.length) : []
-        const bottomNav = [
-          { key: 'orders', label: 'Orders', icon: <Package size={19} /> },
-          { key: 'warehouse', label: 'Warehouse', icon: <Warehouse size={19} /> },
-          { key: 'settings', label: 'Settings', icon: <SettingsIcon size={19} /> },
-        ]
-        const goSection = (sec: string) => {
-          if (sec === 'warehouse') { setTab('warehouse') }
-          else { const first = navItems.find(i => i.section === sec && i.show); if (first) go(first.key) }
-        }
-        return (
-          <>
-            <MobileShell sectionTabs={sectionTabs} activeTab={curKey} onTab={go}
-              onMore={moreGroups.length ? () => setMoreOpen(true) : undefined}
-              bottomNav={bottomNav} activeSection={activeSection} onSection={goSection} />
-            <MoreSheet open={moreOpen} groups={moreGroups} onPick={go} onClose={() => setMoreOpen(false)} />
-          </>
-        )
-      })()}
       <Sidebar items={navItems} tab={tab === 'warehouse' ? `wh:${warehouseTab}` : tab} setTab={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />
       <div className="dl-content-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, minHeight: '100vh' }}>
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
