@@ -76,7 +76,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [waByPhone, setWaByPhone] = useState<Record<string, WaState>>({})
   const [hideConfirmed, setHideConfirmed] = useState(false)
   const [chatPhone, setChatPhone] = useState<{ phone: string; name: string } | null>(null)
-  const [chatMsgs, setChatMsgs] = useState<{ direction: string; text: string; status: string; sent_at: string | null }[]>([])
+  const [chatMsgs, setChatMsgs] = useState<{ direction: string; text: string; status: string; sent_at: string | null; msg_id: string | null }[]>([])
   const [chatLoading, setChatLoading] = useState(false)
 
   const classifyInbound = (t: string): 'confirm' | 'changes' | 'other' => {
@@ -117,8 +117,8 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const openChat = async (contact: string | null | undefined, name: string) => {
     const p10 = (contact || '').replace(/\D/g, '').slice(-10); if (!p10) return
     setChatPhone({ phone: contact || '', name }); setChatLoading(true); setChatMsgs([])
-    const { data } = await supabase.from('wa_messages').select('direction, text, status, sent_at').eq('phone10', p10).order('sent_at', { ascending: true })
-    setChatMsgs((data || []) as { direction: string; text: string; status: string; sent_at: string | null }[])
+    const { data } = await supabase.from('wa_messages').select('direction, text, status, sent_at, msg_id').eq('phone10', p10).order('sent_at', { ascending: true })
+    setChatMsgs((data || []) as { direction: string; text: string; status: string; sent_at: string | null; msg_id: string | null }[])
     setChatLoading(false)
   }
 
@@ -615,15 +615,28 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
               <button onClick={() => setChatPhone(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)' }}><XCircle size={18} /></button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto' as const, padding: 14, display: 'flex', flexDirection: 'column' as const, gap: 8, background: 'var(--bg2)' }}>
-              {chatLoading ? <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' as const }}>Loading…</div> : chatMsgs.length === 0 ? <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' as const }}>No messages.</div> : chatMsgs.map((msg, i) => {
-                const inbound = msg.direction === 'in'
-                return (
-                  <div key={i} style={{ alignSelf: inbound ? 'flex-start' : 'flex-end', maxWidth: '82%', background: inbound ? 'var(--surface)' : 'var(--dispatched-bg)', border: inbound ? '1px solid var(--border)' : 'none', borderRadius: inbound ? '12px 12px 12px 2px' : '12px 12px 2px 12px', padding: '7px 10px', fontSize: 12 }}>
-                    {inbound ? (msg.text || '—') : (msg.text ? `Sent: ${msg.text}` : 'Template message')}
-                    <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 3 }}>{inbound ? 'Customer' : 'You'}{msg.status && !inbound ? ` \u00b7 ${msg.status}` : ''}{msg.sent_at ? ` \u00b7 ${new Date(msg.sent_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</div>
+              {chatLoading ? <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' as const }}>Loading…</div> : chatMsgs.length === 0 ? <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' as const }}>No messages.</div> : (() => {
+                // Collapse a message's sent/delivered/read (same msg_id) into ONE bubble with the furthest status.
+                const rank: Record<string, number> = { sent: 1, delivered: 2, read: 3 }
+                type Bubble = { inbound: boolean; text: string; status: string; at: string | null }
+                const bubbles: Bubble[] = []
+                const outByMsg: Record<string, Bubble> = {}
+                for (const m of chatMsgs) {
+                  if (m.direction === 'in') { bubbles.push({ inbound: true, text: m.text || '', status: '', at: m.sent_at }); continue }
+                  const key = m.msg_id || `${m.text}|${m.sent_at}`
+                  const ex = outByMsg[key]
+                  if (!ex) { const b: Bubble = { inbound: false, text: m.text || '', status: m.status, at: m.sent_at }; outByMsg[key] = b; bubbles.push(b) }
+                  else { if ((rank[m.status] ?? 0) > (rank[ex.status] ?? 0)) ex.status = m.status; if (!ex.text && m.text) ex.text = m.text }
+                }
+                bubbles.sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime())
+                const clean = (t: string) => t.replace(/\*([^*]+)\*/g, '$1')  // strip WhatsApp *bold* markers for display
+                return bubbles.map((b, i) => (
+                  <div key={i} style={{ alignSelf: b.inbound ? 'flex-start' : 'flex-end', maxWidth: '82%', background: b.inbound ? 'var(--surface)' : 'var(--dispatched-bg)', border: b.inbound ? '1px solid var(--border)' : 'none', borderRadius: b.inbound ? '12px 12px 12px 2px' : '12px 12px 2px 12px', padding: '7px 10px', fontSize: 12, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>
+                    {b.text ? clean(b.text) : (b.inbound ? '—' : 'Template message')}
+                    <div style={{ fontSize: 9, color: 'var(--text3)', marginTop: 4 }}>{b.inbound ? 'Customer' : 'You'}{b.status && !b.inbound ? ` \u00b7 ${b.status}` : ''}{b.at ? ` \u00b7 ${new Date(b.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</div>
                   </div>
-                )
-              })}
+                ))
+              })()}
             </div>
             <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', fontSize: 10, color: 'var(--text3)', textAlign: 'center' as const }}>Read-only \u00b7 reply in Interakt</div>
           </div>
