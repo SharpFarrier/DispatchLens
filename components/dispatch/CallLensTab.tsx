@@ -88,8 +88,10 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
 
   const loadWaStates = useCallback(async () => {
     const outRank: Record<string, number> = { failed: 0, sent: 1, delivered: 2, read: 3 }
-    const { data } = await supabase.from('wa_messages').select('phone10, status, direction, text, sent_at').order('sent_at', { ascending: true })
-    const rows = (data || []) as { phone10: string; status: string; direction: string | null; text: string | null; sent_at: string | null }[]
+    // Paginate — PostgREST caps a plain select at 1000 rows, which silently dropped the newest
+    // messages once wa_messages grew past 1000. fetchAllRows pages through everything.
+    const rows = await fetchAllRows<{ phone10: string; status: string; direction: string | null; text: string | null; sent_at: string | null }>((from, to) =>
+      supabase.from('wa_messages').select('phone10, status, direction, text, sent_at').order('sent_at', { ascending: true }).range(from, to))
     const byPhone: Record<string, { out: number; outAt: string | null; inbound: { text: string; at: string | null }[] }> = {}
     for (const r of rows) {
       if (!r.phone10) continue
