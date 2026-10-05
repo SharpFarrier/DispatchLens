@@ -2949,9 +2949,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           </>
         )
       })()}
-      <Sidebar items={navItems} tab={tab === 'warehouse' ? `wh:${warehouseTab}` : tab} setTab={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />
+      {!isMobile && (<Sidebar items={navItems} tab={tab === 'warehouse' ? `wh:${warehouseTab}` : tab} setTab={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />)}
       <div className="dl-content-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, minHeight: '100vh' }}>
-      <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+      {!isMobile && <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
           <div style={{ width: 30, height: 30, background: 'var(--accent)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 14, color: '#fff' }}>D</div>
           <span className="dl-wordmark" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>DispatchLens</span>
@@ -3159,7 +3159,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           </div>
           <button onClick={() => setShowLogoutConfirm(true)} title="Sign out" style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text3)', cursor: 'pointer', padding: '5px 8px', display: 'flex', alignItems: 'center', marginLeft: 4 }}><LogOut size={13} /></button>
         </div>
-      </header>
+      </header>}
 
       <main style={{ flex: 1, padding: '28px 32px', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
 
