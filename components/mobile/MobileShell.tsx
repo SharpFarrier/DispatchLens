@@ -46,7 +46,9 @@ export default function MobileShell({
           )}
         </div>
         {onSearch && (
-          <button onClick={onSearch} aria-label="Search" style={{ flex: '0 0 34px', width: 34, height: 34, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', display: 'grid', placeItems: 'center', color: 'var(--text2)', cursor: 'pointer' }}>🔍</button>
+          <button onClick={onSearch} aria-label="Search" style={{ flex: '0 0 36px', width: 36, height: 36, borderRadius: 9, border: '1px solid var(--accent)', background: 'var(--accent-bg)', display: 'grid', placeItems: 'center', color: 'var(--accent)', cursor: 'pointer', padding: 0, marginLeft: 2 }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          </button>
         )}
       </header>
 
