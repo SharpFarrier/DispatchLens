@@ -418,7 +418,7 @@ export default function ReturnsTab({ canSeeAmount, onOpenOrder, reloadSignal }: 
     setLoading(true)
     const { data: ret } = await supabase.from('returns').select('*').order('created_at', { ascending: false }).order('id', { ascending: false })
     // Returns still being coordinated (Return calls) or cancelled don't belong in the refund list.
-    const rows = ((ret || []) as ReturnRow[]).filter(r => r.coord_state !== 'coordinating' && r.coord_state !== 'cancelled')
+    const rows = ((ret || []) as ReturnRow[]).filter(r => r.coord_state !== 'coordinating' && r.coord_state !== 'approved' && r.coord_state !== 'cancelled')
     setReturns(rows)
     // Auto-RTO candidates: dispatched orders the courier flagged rto, not already in returns.
     const tracked = new Set(rows.filter(r => r.order_id).map(r => r.order_id as string))

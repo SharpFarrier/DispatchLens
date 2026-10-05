@@ -149,7 +149,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [queue, setQueue] = useState<Queue>('predispatch')
   const ACTUAL_REASONS = ['In-transit Damage', 'Manufacturing Defect', 'Delay in Delivery', 'Customer Refused Delivery', 'No Need', 'Not Available', 'Customer not Satisfied with Quality', 'A-Z Claim Received', 'Noise Issue', 'Size Issue', 'Self Ship Return', 'Alignment Issue', 'Other']
   const CANCEL_REASONS = ['Could not contact customer', 'Customer keeping the item', ...ACTUAL_REASONS]
-  const [coordReturns, setCoordReturns] = useState<Record<string, string>>({})
+  const [coordReturns, setCoordReturns] = useState<Record<string, { id: string; state: string; actualReason: string | null }>>({})
   const [actualReason, setActualReason] = useState<Record<string, string>>({})
   const [actualNote, setActualNote] = useState<Record<string, string>>({})
   const [cancelFor, setCancelFor] = useState<DBOrder | null>(null)
@@ -159,9 +159,11 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [coordBusy, setCoordBusy] = useState<string | null>(null)
 
   const loadCoord = useCallback(async () => {
-    const { data } = await supabase.from('returns').select('order_id, id, created_at').eq('coord_state', 'coordinating')
-    const m: Record<string, string> = {}; const t: Record<string, string> = {}
-    for (const r of (data || []) as { order_id: string; id: string; created_at: string }[]) { if (r.order_id) { m[r.order_id] = r.id; t[r.order_id] = r.created_at } }
+    const { data } = await supabase.from('returns').select('order_id, id, created_at, coord_state, actual_reason').in('coord_state', ['coordinating', 'approved'])
+    const m: Record<string, { id: string; state: string; actualReason: string | null }> = {}; const t: Record<string, string> = {}
+    for (const r of (data || []) as { order_id: string; id: string; created_at: string; coord_state: string; actual_reason: string | null }[]) {
+      if (r.order_id) { m[r.order_id] = { id: r.id, state: r.coord_state, actualReason: r.actual_reason }; t[r.order_id] = r.created_at }
+    }
     setCoordReturns(m); setCoordMarkedAt(t)
   }, [supabase])
   useEffect(() => { void loadCoord() }, [loadCoord])
@@ -543,29 +545,40 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   }
 
   // Return calls: confirm pickup — save reverse AWB, move the return to picked_up (-> Returns tab).
-  const confirmPickup = async (o: DBOrder) => {
-    const rid = coordReturns[o.order_id]; const rev = (revDraft[o.order_id] || '').trim()
-    const reason = (actualReason[o.order_id] || '').trim(); const note = (actualNote[o.order_id] || '').trim()
-    if (!rid) return
-    if (!rev || !reason) { return }   // approve requires BOTH a reverse AWB and an actual reason
+  // STEP A — Approve the return (after the call). Sets the actual reason; NO reverse AWB yet.
+  const approveReturn = async (o: DBOrder) => {
+    const c = coordReturns[o.order_id]; const reason = (actualReason[o.order_id] || '').trim(); const note = (actualNote[o.order_id] || '').trim()
+    if (!c || !reason) return
     setCoordBusy(o.order_id)
     try {
       const now = new Date().toISOString()
-      await supabase.from('returns').update({ reverse_tracking_id: rev, actual_reason: reason, notes: note || null, coord_state: 'picked_up', updated_at: now }).eq('id', rid)
-      void logOrderEvent(o.order_id, 'note', `Return pickup confirmed · actual reason: ${reason}${note ? ` (${note})` : ''} · reverse AWB ${rev}`, null)
-      setCoordReturns(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
-      setRevDraft(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+      await supabase.from('returns').update({ actual_reason: reason, notes: note || null, coord_state: 'approved', updated_at: now }).eq('id', c.id)
+      void logOrderEvent(o.order_id, 'note', `Return approved · actual reason: ${reason}${note ? ` (${note})` : ''} · awaiting pickup`, null)
+      setCoordReturns(prev => ({ ...prev, [o.order_id]: { ...c, state: 'approved', actualReason: reason } }))
       setActualReason(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
       setActualNote(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
     } finally { setCoordBusy(null) }
   }
-  // Return calls: customer cancelled the return — close it, log to history, revert the order.
-  const cancelReturn = async (o: DBOrder, cancelReason: string) => {
-    const rid = coordReturns[o.order_id]; if (!rid || !cancelReason) return
+  // STEP B — Mark picked up (later). Adds the reverse AWB; moves to Returns tab.
+  const confirmPickup = async (o: DBOrder) => {
+    const c = coordReturns[o.order_id]; const rev = (revDraft[o.order_id] || '').trim()
+    if (!c || c.state !== 'approved' || !rev) return
     setCoordBusy(o.order_id)
     try {
       const now = new Date().toISOString()
-      await supabase.from('returns').update({ coord_state: 'cancelled', cancel_reason: cancelReason, updated_at: now }).eq('id', rid)
+      await supabase.from('returns').update({ reverse_tracking_id: rev, coord_state: 'picked_up', updated_at: now }).eq('id', c.id)
+      void logOrderEvent(o.order_id, 'note', `Return picked up · reverse AWB ${rev} → ready for refund`, null)
+      setCoordReturns(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+      setRevDraft(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+    } finally { setCoordBusy(null) }
+  }
+  // Return calls: customer cancelled the return — close it, log to history, revert the order.
+  const cancelReturn = async (o: DBOrder, cancelReason: string) => {
+    const c = coordReturns[o.order_id]; if (!c || !cancelReason) return
+    setCoordBusy(o.order_id)
+    try {
+      const now = new Date().toISOString()
+      await supabase.from('returns').update({ coord_state: 'cancelled', cancel_reason: cancelReason, updated_at: now }).eq('id', c.id)
       await supabase.from('dispatch_orders').update({ tracking_status: 'delivered', last_disposition: 'Return cancelled', last_disposition_at: now, updated_at: now }).eq('order_id', o.order_id)
       void logOrderEvent(o.order_id, 'note', `Return cancelled — ${cancelReason} — closed, no refund`, null)
       setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, tracking_status: 'delivered' } as DBOrder : x))
@@ -876,26 +889,50 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                         </button>
                         {queue === 'delay' && o.delivery_source === 'manual' && <span title="Manually marked delivered" style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>manual</span>}
                         {queue === 'delay' && o.tracking_status !== 'delivered' && <button onClick={() => { setMarkDate(new Date().toISOString().slice(0, 10)); setMarkDeliver(o) }} title="Mark delivered (courier didn't update)" style={{ background: 'none', border: '1px solid var(--dispatched)', borderRadius: 5, padding: '2px 7px', color: 'var(--dispatched)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><CheckCircle size={11} /> Mark delivered</button>}
-                        {queue === 'returncalls' && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const }}>
-                            {o.contact_number && <a href={`tel:${o.contact_number}`} title="Call customer" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent)', textDecoration: 'none', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 7px', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Phone size={11} /> {o.contact_number}</a>}
-                            <select value={actualReason[o.order_id] || ''} onChange={e => setActualReason(prev => ({ ...prev, [o.order_id]: e.target.value }))} title="Actual reason (required to approve)"
-                              style={{ padding: '4px 8px', borderRadius: 5, border: `1px solid ${(actualReason[o.order_id] || '').trim() ? 'var(--border)' : '#fecaca'}`, background: 'var(--surface)', color: (actualReason[o.order_id] || '') ? 'var(--text)' : 'var(--text3)', fontSize: 12, outline: 'none', maxWidth: 170 }}>
-                              <option value="">Actual reason…</option>
-                              {ACTUAL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                            </select>
-                            <input value={actualNote[o.order_id] || ''} onChange={e => setActualNote(prev => ({ ...prev, [o.order_id]: e.target.value }))} placeholder="Note (optional)"
-                              style={{ width: 130, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, outline: 'none' }} />
-                            <input value={revDraft[o.order_id] || ''} onChange={e => setRevDraft(prev => ({ ...prev, [o.order_id]: e.target.value }))} placeholder="Reverse tracking ID"
-                              style={{ width: 150, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'var(--font-mono)', outline: 'none' }} />
-                            {(() => { const ok = !!(revDraft[o.order_id] || '').trim() && !!(actualReason[o.order_id] || '').trim(); return (
-                            <button onClick={() => void confirmPickup(o)} disabled={coordBusy === o.order_id || !ok} title="Approve: needs actual reason + reverse AWB → moves to Returns for refund"
-                              style={{ background: 'none', border: `1px solid ${ok ? 'var(--dispatched)' : 'var(--border)'}`, borderRadius: 5, padding: '3px 8px', color: ok ? 'var(--dispatched)' : 'var(--text3)', fontSize: 11, fontWeight: 600, cursor: ok ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Truck size={11} /> Approve &amp; picked up</button>
-                            ) })()}
-                            <button onClick={() => { setCancelReasonVal('Could not contact customer'); setCancelFor(o) }} disabled={coordBusy === o.order_id} title="Cancel the return request"
-                              style={{ background: 'none', border: '1px solid #fecaca', borderRadius: 5, padding: '3px 8px', color: 'var(--critical)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><XCircle size={11} /> Cancel return</button>
-                          </span>
-                        )}
+                        {queue === 'returncalls' && (() => {
+                          const c = coordReturns[o.order_id]; const approved = c?.state === 'approved'
+                          const inp = { padding: '5px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, outline: 'none' as const }
+                          return (
+                          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 7, minWidth: 300 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
+                              {o.contact_number && <a href={`tel:${o.contact_number}`} title="Call customer" style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent)', textDecoration: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Phone size={12} /> {o.contact_number}</a>}
+                              {approved && <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', borderRadius: 20, padding: '3px 9px' }}>✓ Approved · awaiting pickup</span>}
+                              {approved && c?.actualReason && <span style={{ fontSize: 11, color: 'var(--text2)' }}>Reason: <b>{c.actualReason}</b></span>}
+                            </div>
+                            {!approved ? (
+                              // STEP A — call, set actual reason, Approve / Cancel
+                              <>
+                                <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' as const }}>
+                                  <select value={actualReason[o.order_id] || ''} onChange={e => setActualReason(prev => ({ ...prev, [o.order_id]: e.target.value }))} title="Actual reason (required to approve)"
+                                    style={{ ...inp, minWidth: 160, border: `1px solid ${(actualReason[o.order_id] || '').trim() ? 'var(--border)' : '#fecaca'}`, color: (actualReason[o.order_id] || '') ? 'var(--text)' : 'var(--text3)' }}>
+                                    <option value="">Actual reason…</option>
+                                    {ACTUAL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                                  </select>
+                                  <input value={actualNote[o.order_id] || ''} onChange={e => setActualNote(prev => ({ ...prev, [o.order_id]: e.target.value }))} placeholder="Note (optional)" style={{ ...inp, flex: 1, minWidth: 120 }} />
+                                </div>
+                                <div style={{ display: 'flex', gap: 7 }}>
+                                  {(() => { const ok = !!(actualReason[o.order_id] || '').trim(); return (
+                                  <button onClick={() => void approveReturn(o)} disabled={coordBusy === o.order_id || !ok} title="Approve the return (adds the actual reason). Pickup/reverse AWB is a later step."
+                                    style={{ border: `1px solid ${ok ? 'var(--dispatched)' : 'var(--border)'}`, borderRadius: 6, padding: '6px 12px', background: 'var(--surface)', color: ok ? 'var(--dispatched)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: ok ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle size={13} /> Approve</button>
+                                  ) })()}
+                                  <button onClick={() => { setCancelReasonVal('Could not contact customer'); setCancelFor(o) }} disabled={coordBusy === o.order_id} title="Cancel the return request"
+                                    style={{ border: '1px solid #fecaca', borderRadius: 6, padding: '6px 12px', background: 'var(--surface)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}><XCircle size={13} /> Cancel return</button>
+                                </div>
+                              </>
+                            ) : (
+                              // STEP B — piece picked up: add reverse AWB, Mark picked up / Cancel
+                              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' as const }}>
+                                <input value={revDraft[o.order_id] || ''} onChange={e => setRevDraft(prev => ({ ...prev, [o.order_id]: e.target.value }))} placeholder="Reverse tracking ID" style={{ ...inp, minWidth: 160, fontFamily: 'var(--font-mono)' }} />
+                                {(() => { const ok = !!(revDraft[o.order_id] || '').trim(); return (
+                                <button onClick={() => void confirmPickup(o)} disabled={coordBusy === o.order_id || !ok} title="Mark picked up → moves to Returns for refund"
+                                  style={{ border: `1px solid ${ok ? 'var(--dispatched)' : 'var(--border)'}`, borderRadius: 6, padding: '6px 12px', background: 'var(--surface)', color: ok ? 'var(--dispatched)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: ok ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Truck size={13} /> Mark picked up</button>
+                                ) })()}
+                                <button onClick={() => { setCancelReasonVal('Could not contact customer'); setCancelFor(o) }} disabled={coordBusy === o.order_id} title="Cancel the return request"
+                                  style={{ border: '1px solid #fecaca', borderRadius: 6, padding: '6px 12px', background: 'var(--surface)', color: 'var(--critical)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}><XCircle size={13} /> Cancel return</button>
+                              </div>
+                            )}
+                          </div>
+                          ) })()}
                       </td>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' as const, minWidth: 260 }}>
                         {locked ? (
