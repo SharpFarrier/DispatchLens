@@ -147,7 +147,13 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [queue, setQueue] = useState<Queue>('predispatch')
+  const ACTUAL_REASONS = ['In-transit Damage', 'Manufacturing Defect', 'Delay in Delivery', 'Customer Refused Delivery', 'No Need', 'Not Available', 'Customer not Satisfied with Quality', 'A-Z Claim Received', 'Noise Issue', 'Size Issue', 'Self Ship Return', 'Alignment Issue', 'Other']
+  const CANCEL_REASONS = ['Could not contact customer', 'Customer keeping the item', ...ACTUAL_REASONS]
   const [coordReturns, setCoordReturns] = useState<Record<string, string>>({})
+  const [actualReason, setActualReason] = useState<Record<string, string>>({})
+  const [actualNote, setActualNote] = useState<Record<string, string>>({})
+  const [cancelFor, setCancelFor] = useState<DBOrder | null>(null)
+  const [cancelReasonVal, setCancelReasonVal] = useState<string>('Could not contact customer')
   const [coordMarkedAt, setCoordMarkedAt] = useState<Record<string, string>>({})
   const [revDraft, setRevDraft] = useState<Record<string, string>>({})
   const [coordBusy, setCoordBusy] = useState<string | null>(null)
@@ -539,28 +545,32 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   // Return calls: confirm pickup — save reverse AWB, move the return to picked_up (-> Returns tab).
   const confirmPickup = async (o: DBOrder) => {
     const rid = coordReturns[o.order_id]; const rev = (revDraft[o.order_id] || '').trim()
+    const reason = (actualReason[o.order_id] || '').trim(); const note = (actualNote[o.order_id] || '').trim()
     if (!rid) return
-    if (!rev) { return }
+    if (!rev || !reason) { return }   // approve requires BOTH a reverse AWB and an actual reason
     setCoordBusy(o.order_id)
     try {
       const now = new Date().toISOString()
-      await supabase.from('returns').update({ reverse_tracking_id: rev, coord_state: 'picked_up', updated_at: now }).eq('id', rid)
-      void logOrderEvent(o.order_id, 'note', `Return pickup confirmed · reverse AWB ${rev}`, null)
+      await supabase.from('returns').update({ reverse_tracking_id: rev, actual_reason: reason, notes: note || null, coord_state: 'picked_up', updated_at: now }).eq('id', rid)
+      void logOrderEvent(o.order_id, 'note', `Return pickup confirmed · actual reason: ${reason}${note ? ` (${note})` : ''} · reverse AWB ${rev}`, null)
       setCoordReturns(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
       setRevDraft(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+      setActualReason(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+      setActualNote(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
     } finally { setCoordBusy(null) }
   }
   // Return calls: customer cancelled the return — close it, log to history, revert the order.
-  const cancelReturn = async (o: DBOrder) => {
-    const rid = coordReturns[o.order_id]; if (!rid) return
+  const cancelReturn = async (o: DBOrder, cancelReason: string) => {
+    const rid = coordReturns[o.order_id]; if (!rid || !cancelReason) return
     setCoordBusy(o.order_id)
     try {
       const now = new Date().toISOString()
-      await supabase.from('returns').update({ coord_state: 'cancelled', updated_at: now }).eq('id', rid)
+      await supabase.from('returns').update({ coord_state: 'cancelled', cancel_reason: cancelReason, updated_at: now }).eq('id', rid)
       await supabase.from('dispatch_orders').update({ tracking_status: 'delivered', last_disposition: 'Return cancelled', last_disposition_at: now, updated_at: now }).eq('order_id', o.order_id)
-      void logOrderEvent(o.order_id, 'note', 'Return cancelled by customer — closed, no refund', null)
+      void logOrderEvent(o.order_id, 'note', `Return cancelled — ${cancelReason} — closed, no refund`, null)
       setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, tracking_status: 'delivered' } as DBOrder : x))
       setCoordReturns(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
+      setCancelFor(null)
     } finally { setCoordBusy(null) }
   }
 
@@ -642,6 +652,22 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   return (
     <>
     {deliverModal}
+      {cancelFor && (
+        <div onClick={() => !coordBusy && setCancelFor(null)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', padding: 18, width: 320, maxWidth: '100%' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Cancel this return?</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text2)', marginBottom: 12 }}>Order <span style={{ fontFamily: 'var(--font-mono)' }}>{cancelFor.order_id}</span> — record why the request is being cancelled.</div>
+            <select value={cancelReasonVal} onChange={e => setCancelReasonVal(e.target.value)}
+              style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, outline: 'none', marginBottom: 14 }}>
+              {CANCEL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setCancelFor(null)} disabled={coordBusy === cancelFor.order_id} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Back</button>
+              <button onClick={() => void cancelReturn(cancelFor, cancelReasonVal)} disabled={coordBusy === cancelFor.order_id || !cancelReasonVal} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--critical)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{coordBusy === cancelFor.order_id ? 'Cancelling…' : 'Cancel return'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {chatPhone && (
         <div onClick={() => setChatPhone(null)} style={{ position: 'fixed' as const, inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div onClick={e => e.stopPropagation()} style={{ width: 360, maxWidth: '100%', maxHeight: '70vh', display: 'flex', flexDirection: 'column' as const, background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden' as const }}>
@@ -853,11 +879,20 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                         {queue === 'returncalls' && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' as const }}>
                             {o.contact_number && <a href={`tel:${o.contact_number}`} title="Call customer" style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent)', textDecoration: 'none', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 7px', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Phone size={11} /> {o.contact_number}</a>}
+                            <select value={actualReason[o.order_id] || ''} onChange={e => setActualReason(prev => ({ ...prev, [o.order_id]: e.target.value }))} title="Actual reason (required to approve)"
+                              style={{ padding: '4px 8px', borderRadius: 5, border: `1px solid ${(actualReason[o.order_id] || '').trim() ? 'var(--border)' : '#fecaca'}`, background: 'var(--surface)', color: (actualReason[o.order_id] || '') ? 'var(--text)' : 'var(--text3)', fontSize: 12, outline: 'none', maxWidth: 170 }}>
+                              <option value="">Actual reason…</option>
+                              {ACTUAL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                            <input value={actualNote[o.order_id] || ''} onChange={e => setActualNote(prev => ({ ...prev, [o.order_id]: e.target.value }))} placeholder="Note (optional)"
+                              style={{ width: 130, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, outline: 'none' }} />
                             <input value={revDraft[o.order_id] || ''} onChange={e => setRevDraft(prev => ({ ...prev, [o.order_id]: e.target.value }))} placeholder="Reverse tracking ID"
                               style={{ width: 150, padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontFamily: 'var(--font-mono)', outline: 'none' }} />
-                            <button onClick={() => void confirmPickup(o)} disabled={coordBusy === o.order_id || !(revDraft[o.order_id] || '').trim()} title="Confirm pickup → moves to Returns for refund"
-                              style={{ background: 'none', border: '1px solid var(--dispatched)', borderRadius: 5, padding: '3px 8px', color: (revDraft[o.order_id] || '').trim() ? 'var(--dispatched)' : 'var(--text3)', fontSize: 11, fontWeight: 600, cursor: (revDraft[o.order_id] || '').trim() ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Truck size={11} /> Picked up</button>
-                            <button onClick={() => void cancelReturn(o)} disabled={coordBusy === o.order_id} title="Customer cancelled the return"
+                            {(() => { const ok = !!(revDraft[o.order_id] || '').trim() && !!(actualReason[o.order_id] || '').trim(); return (
+                            <button onClick={() => void confirmPickup(o)} disabled={coordBusy === o.order_id || !ok} title="Approve: needs actual reason + reverse AWB → moves to Returns for refund"
+                              style={{ background: 'none', border: `1px solid ${ok ? 'var(--dispatched)' : 'var(--border)'}`, borderRadius: 5, padding: '3px 8px', color: ok ? 'var(--dispatched)' : 'var(--text3)', fontSize: 11, fontWeight: 600, cursor: ok ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Truck size={11} /> Approve &amp; picked up</button>
+                            ) })()}
+                            <button onClick={() => { setCancelReasonVal('Could not contact customer'); setCancelFor(o) }} disabled={coordBusy === o.order_id} title="Cancel the return request"
                               style={{ background: 'none', border: '1px solid #fecaca', borderRadius: 5, padding: '3px 8px', color: 'var(--critical)', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3 }}><XCircle size={11} /> Cancel return</button>
                           </span>
                         )}

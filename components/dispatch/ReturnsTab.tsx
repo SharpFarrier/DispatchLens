@@ -59,6 +59,9 @@ export interface ReturnRow {
   source: 'manual' | 'rto_auto' | 'rto' | 'cancelled'
   return_type: 'customer' | 'rto' | null
   reason: string | null
+  platform_reason: string | null
+  actual_reason: string | null
+  cancel_reason: string | null
   refund_status: 'pending' | 'refunded'
   refund_amount: number | null
   refund_type: 'full' | 'partial' | null
@@ -106,7 +109,13 @@ function returnCols(canSeeAmount: boolean): RetCol[] {
   const cols: RetCol[] = [
     { key: 'order_id', label: 'Order', type: 'text', get: r => r.order_id ?? '' },
     { key: 'barcode', label: 'SKU', type: 'text', get: r => r.barcode || '' },
-    { key: 'reason', label: 'Reason', type: 'category', get: r => (!r.reason || r.reason === 'Pending review') ? '(no reason)' : r.reason },
+    { key: 'reason', label: 'Reason', type: 'category', get: r => {
+      const parts: string[] = []
+      if (r.platform_reason) parts.push(`Platform: ${r.platform_reason}`)
+      if (r.actual_reason) parts.push(`Actual: ${r.actual_reason}`)
+      if (parts.length) return parts.join(' · ')
+      return (!r.reason || r.reason === 'Pending review') ? '(no reason)' : r.reason
+    } },
     { key: 'type', label: 'Type', type: 'category', get: r => isRtoRow(r) ? 'RTO' : 'Customer' },
     { key: 'reverse', label: 'Reverse', type: 'text', get: r => r.reverse_tracking_id || '' },
     { key: 'warehouse', label: 'Warehouse', type: 'category', get: r => r.warehouse_received ? 'Received' : 'Not received' },
