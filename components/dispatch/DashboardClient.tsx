@@ -140,6 +140,11 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const [orders, setOrders] = useState<DBOrder[]>(initialOrders)
   const [loadingOrders, setLoadingOrders] = useState(false)
   const [dispatchedCount, setDispatchedCount] = useState<number | null>(null)
+  // Orders dispatched locally very recently (id -> epoch ms). A background full-refetch can race
+  // the just-committed write and come back WITHOUT the new dispatch, which would momentarily
+  // un-dispatch it (the count flickers up→down→up). We preserve these through any refetch for a
+  // short window so the optimistic state is never clobbered by a stale read.
+  const recentlyDispatchedRef = useRef<Record<string, number>>({})
   const [fullLoaded, setFullLoaded] = useState(false)
   const [skuMaps, setSkuMaps] = useState<SkuMap[]>([])
   const [flaggedSkus, setFlaggedSkus] = useState<Record<string, { reason: string; note: string | null; set_by: string | null; set_at: string }>>({})
@@ -440,7 +445,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Used to keep the End-of-Day batch/courier counts live while another device dispatches.
   const silentRefreshOrders = useCallback(async () => {
     const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
-    if (data.length) { setOrders(data); setFullLoaded(true) }
+    if (!data.length) return
+    // Drop expired entries (older than 90s — well past write propagation), then force any still-recent
+    // locally-dispatched order to stay dispatched even if this (possibly stale) refetch missed it.
+    const now = Date.now()
+    const recent = recentlyDispatchedRef.current
+    for (const id of Object.keys(recent)) { if (now - recent[id] > 90000) delete recent[id] }
+    const ids = new Set(Object.keys(recent))
+    const merged = ids.size === 0 ? data : data.map(o => (ids.has(o.id) && !o.is_dispatched) ? { ...o, is_dispatched: true } : o)
+    setOrders(merged); setFullLoaded(true)
   }, [supabase])
 
   // Auto-load on mount if initialOrders is empty
@@ -869,6 +882,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       updated_at: now,
     }).eq('id', manualDispatchOrder.id)
     logEvent(manualDispatchOrder.order_id, 'dispatched', `Manually dispatched · Barcode SKU: ${manualDispatchSku.trim()}`)
+    recentlyDispatchedRef.current[manualDispatchOrder.id] = Date.now()
     setOrders(prev => prev.map(o => o.id === manualDispatchOrder.id ? {
       ...o, is_dispatched: true, dispatched_at: now,
     } : o))
@@ -1116,6 +1130,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     }
 
     logEvent(scanOrder.order_id, 'dispatched', `${forced ? 'FORCE-dispatched (not in stock)' : 'Scan-verified dispatch'} · ${scanned}${seq ? ` (piece #${seq})` : ''} · AWB ${scanOrder.tracking_number}`)
+    recentlyDispatchedRef.current[scanOrder.id] = Date.now()
     setOrders(prev => prev.map(o => o.id === scanOrder.id ? { ...o, is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now, scanned_barcode: scanned } : o))
 
     // Move past instantly — clear and refocus AWB for the next box (effect handles focus).
