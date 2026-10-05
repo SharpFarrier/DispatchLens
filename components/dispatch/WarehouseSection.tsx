@@ -49,6 +49,7 @@ const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; per
 function tabBtn(active: boolean): React.CSSProperties {
   return {
     display: 'flex', alignItems: 'center', gap: 6,
+    flex: '0 0 auto', whiteSpace: 'nowrap',
     padding: '8px 16px', border: 'none', cursor: 'pointer', background: 'transparent',
     color: active ? 'var(--accent)' : 'var(--text2)',
     fontFamily: 'var(--font-sans)', fontWeight: active ? 600 : 400, fontSize: 14,
@@ -77,7 +78,7 @@ export default function WarehouseSection({ userId, access, isOwner = false, user
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Top-level tabs — shown only when NOT driven by the sidebar */}
       {!controlledTop && (
-        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
+        <div className="no-scrollbar" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', overflowX: 'auto', flexWrap: 'nowrap' as const }}>
           {topTabs.map(({ key, label, icon }) => (
             <button key={key} onClick={() => setTopTab(key)} style={tabBtn(topTab === key)}>
               {icon}{label}
@@ -95,7 +96,7 @@ export default function WarehouseSection({ userId, access, isOwner = false, user
       {topTab === 'packing' && packingTabs.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* Inner row (only permitted ones) */}
-          <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
+          <div className="no-scrollbar" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', overflowX: 'auto', flexWrap: 'nowrap' as const }}>
             {packingTabs.map(({ key, label, icon }) => (
               <button key={key} onClick={() => setPackingTab(key)} style={tabBtn(packingTab === key)}>
                 {icon}{label}
