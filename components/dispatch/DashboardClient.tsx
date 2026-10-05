@@ -7,6 +7,9 @@ import { createClient } from '@/lib/supabase/client'
 import Badge, { tierVariant } from './Badge'
 import DrumDatePicker from './DrumDatePicker'
 import Sidebar, { type NavItem } from './Sidebar'
+import MobileShell, { MoreSheet, type TabItem, type SheetGroup } from '@/components/mobile/MobileShell'
+import PlanMobileCards from './PlanMobileCards'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import DelaysTab from './DelaysTab'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
@@ -21,7 +24,7 @@ import {
   Star, Printer, CheckCircle, ChevronDown, ChevronUp,
   Upload, LogOut, Package, Truck, AlertTriangle, Clock,
   RefreshCw, Plus, ArrowRight, X, AlertCircle, Calendar,
-  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download, Flag, Undo2 } from 'lucide-react'
+  Ban, History, Search, Pencil, Filter, ExternalLink, ScanLine, Download, Flag, Undo2, Warehouse, Settings as SettingsIcon } from 'lucide-react'
 
 // Non-Plan tabs are code-split so they are NOT in the initial bundle (which lands on
 // Plan). Each loads its own chunk the first time it's opened — this also keeps jsPDF and
@@ -154,6 +157,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const awbInputRef = useRef<HTMLInputElement>(null)
   const itemInputRef = useRef<HTMLInputElement>(null)
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
+  const isMobile = useIsMobile()
+  const [moreOpen, setMoreOpen] = useState(false)
   // Copy-block (deterrence): stop BULK copy (whole tables / many rows) while allowing single
   // values (an order ID, AWB, SKU, name). Owner exempt. Heuristic: block if the selection spans
   // more than one table row, or the copied text is long. Bypassable via devtools by design.
@@ -2836,16 +2841,12 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
       {/* ── Header ── */}
       <style>{`
-        @media (max-width: 768px) {
-          .dl-header { padding: 0 8px !important; }
-          .dl-logo { margin-right: 8px !important; }
-          .dl-wordmark { display: none !important; }
-          .dl-nav { gap: 1px !important; flex: 1 1 auto !important; }
-          .dl-search-wrap { width: 36px !important; }
-          .dl-search-wrap.dl-search-open { width: 170px !important; }
-          .dl-date-pill { display: none !important; }
-          .dl-username { display: none !important; }
-          .dl-right { gap: 6px !important; }
+        @media (max-width: 767px) {
+          .dl-sidebar { display: none !important; }
+          .dl-header { display: none !important; }
+          .dl-content-wrap { min-height: 100dvh !important; }
+          main { padding: calc(52px + 12px) 0 calc(58px + env(safe-area-inset-bottom, 0px) + 78px) !important; max-width: 100% !important; }
+          main > div { padding-left: 14px; padding-right: 14px; }
         }
         .dl-nav { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .dl-nav::-webkit-scrollbar { display: none; }
@@ -2878,6 +2879,37 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           @page { size: A4; margin: 12mm; }
         }
       `}</style>
+      {isMobile && (() => {
+        const curKey = tab === 'warehouse' ? `wh:${warehouseTab}` : tab
+        const go = (k: string) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }
+        const sectionOf = (k: string): 'orders' | 'warehouse' | 'settings' => navItems.find(i => i.key === k)?.section ?? 'orders'
+        const activeSection = tab === 'warehouse' ? 'warehouse' : sectionOf(tab)
+        const nItem = (keyName: string): TabItem | null => { const it = navItems.find(i => i.key === keyName && i.show); return it ? { key: it.key, label: it.label, badge: it.count } : null }
+        let primaryKeys: string[] = []
+        if (activeSection === 'orders') primaryKeys = ['import', 'plan', 'picklist', 'eod', 'dispatched']
+        else if (activeSection === 'warehouse') primaryKeys = ['wh:stock', 'wh:coating', 'wh:picking', 'wh:barcodes', 'wh:packing']
+        else primaryKeys = ['skumap', 'users']
+        const sectionTabs = primaryKeys.map(nItem).filter(Boolean) as TabItem[]
+        const moreGroups: SheetGroup[] = activeSection === 'orders' ? [
+          { title: 'Ops', items: ['review', 'returns', 'calllens', 'delays', 'allorders'].map(nItem).filter(Boolean) as TabItem[] },
+          { title: 'Finance', items: ['recon'].map(nItem).filter(Boolean) as TabItem[] },
+          { title: 'Insights', items: ['otdr', 'handling', 'reports'].map(nItem).filter(Boolean) as TabItem[] },
+        ].filter(g => g.items.length) : []
+        const bottomNav = [
+          { key: 'orders', label: 'Orders', icon: <Package size={19} /> },
+          { key: 'warehouse', label: 'Warehouse', icon: <Warehouse size={19} /> },
+          { key: 'settings', label: 'Settings', icon: <SettingsIcon size={19} /> },
+        ]
+        const goSection = (sec: string) => { if (sec === 'warehouse') { setTab('warehouse') } else { const first = navItems.find(i => i.section === sec && i.show); if (first) go(first.key) } }
+        return (
+          <>
+            <MobileShell sectionTabs={sectionTabs} activeTab={curKey} onTab={go}
+              onMore={moreGroups.length ? () => setMoreOpen(true) : undefined}
+              bottomNav={bottomNav} activeSection={activeSection} onSection={goSection} />
+            <MoreSheet open={moreOpen} groups={moreGroups} onPick={go} onClose={() => setMoreOpen(false)} />
+          </>
+        )
+      })()}
       <Sidebar items={navItems} tab={tab === 'warehouse' ? `wh:${warehouseTab}` : tab} setTab={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />
       <div className="dl-content-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, minHeight: '100vh' }}>
       <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
@@ -3223,7 +3255,32 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ PLAN ════ */}
-        {tab === 'plan' && effectiveAccess.can_plan && (
+        {tab === 'plan' && effectiveAccess.can_plan && isMobile && (
+          <PlanMobileCards
+            orders={filteredActive}
+            stats={[
+              { label: 'Active', value: activeOrders.length, tone: 'accent' as const, onClick: () => toggleFilter('ALL' as ActiveFilter) },
+              { label: 'Undecided', value: undecidedCount, onClick: () => toggleFilter('undecided' as ActiveFilter) },
+              { label: 'Scheduled', value: scheduledCount, tone: 'ok' as const, onClick: () => toggleFilter('scheduled' as ActiveFilter) },
+              { label: 'Today', value: dispatchTodayCount, tone: 'today' as const, onClick: () => toggleFilter('scheduled_today' as ActiveFilter) },
+              { label: 'Slipped', value: slippedCount, tone: 'critical' as const, onClick: () => toggleFilter('slipped' as ActiveFilter) },
+              { label: 'On Hold', value: holdCount, onClick: () => toggleFilter('hold' as ActiveFilter) },
+              { label: 'Unfulfillable', value: unfulfillableCount, tone: 'critical' as const, onClick: () => toggleFilter('unfulfillable' as ActiveFilter) },
+              { label: 'Unmapped', value: unmappedCount, onClick: () => toggleFilter('unmapped' as ActiveFilter) },
+            ]}
+            urgencyChips={URGENCY_ORDER.map(tier => ({ key: tier, label: tier, count: tierCounts[tier] ?? 0, active: activeFilter === tier, onClick: () => toggleFilter(tier) }))}
+            selectedIds={selectedIds}
+            onToggleSelect={(id) => setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })}
+            onDecision={(orderId, decision) => void updateDecision(orderId, decision)}
+            onGenerate={generateDispatchDocs}
+            genBusy={genDocs}
+            genLabel={`Generate Dispatch${selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}`}
+            daysLeft={displayDaysLeft}
+            urgencyTone={(o) => { const u = liveUrgency(o); return u === 'CRITICAL' ? 'critical' : u === 'TODAY' ? 'today' : u === 'HOLD' ? 'plan' : 'ok' }}
+            platformOf={(o) => (o.order_id || '').startsWith('0') ? 'Flipkart' : /^\d{3}-/.test(o.order_id || '') ? 'Amazon' : 'Website'}
+          />
+        )}
+        {tab === 'plan' && effectiveAccess.can_plan && !isMobile && (
           <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
             {/* Flagged SKUs — sticky-unfulfillable. New imports of these auto-go unfulfillable
                 and they drop out of the picklist. Mark fulfillable to release. */}
