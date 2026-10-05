@@ -159,6 +159,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const isOwner = user.email === 'adityaramnani91581@gmail.com'
   const isMobile = useIsMobile()
   const [moreOpen, setMoreOpen] = useState(false)
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   // Copy-block (deterrence): stop BULK copy (whole tables / many rows) while allowing single
   // values (an order ID, AWB, SKU, name). Owner exempt. Heuristic: block if the selection spans
   // more than one table row, or the copied text is long. Bypassable via devtools by design.
@@ -2905,8 +2906,31 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           <>
             <MobileShell sectionTabs={sectionTabs} activeTab={curKey} onTab={go}
               onMore={moreGroups.length ? () => setMoreOpen(true) : undefined}
+              onSearch={() => setMobileSearchOpen(true)}
               bottomNav={bottomNav} activeSection={activeSection} onSection={goSection} />
             <MoreSheet open={moreOpen} groups={moreGroups} onPick={go} onClose={() => setMoreOpen(false)} />
+            {mobileSearchOpen && (
+              <div style={{ position: 'fixed' as const, inset: 0, background: 'var(--bg)', zIndex: 60, display: 'flex', flexDirection: 'column' as const }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 'calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+                  <input autoFocus value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Order · AWB · barcode · LR…"
+                    style={{ flex: 1, height: 42, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg2)', padding: '0 12px', fontSize: 16, color: 'var(--text)', outline: 'none' }} />
+                  <button onClick={() => { setSearchQuery(''); setMobileSearchOpen(false) }} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 15, fontWeight: 600, cursor: 'pointer', padding: '0 4px' }}>Cancel</button>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto' as const }}>
+                  {searchQuery.trim().length >= 3 && searchResults.length === 0 && (
+                    <div style={{ padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 14 }}>No orders found</div>
+                  )}
+                  {searchResults.slice(0, 20).map(order => (
+                    <button key={order.id} onClick={() => { setHistoryOrder(order); setSearchQuery(''); setMobileSearchOpen(false) }}
+                      style={{ width: '100%', padding: '12px 16px', background: 'none', border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer', textAlign: 'left' as const }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{order.order_id}</div>
+                      <div style={{ fontSize: 13.5, fontWeight: 500, margin: '2px 0' }}>{order.customer_name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text3)', fontFamily: 'var(--font-mono)' }}>{order.sku}{order.tracking_number ? ` · ${order.tracking_number}` : ''}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )
       })()}
