@@ -31,7 +31,7 @@ export default function MobileShell({
     <>
       <header style={{ height: 52, flex: '0 0 52px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px 0 12px', position: 'fixed', top: 0, left: 0, right: 0, zIndex: 30 }}>
         <div style={{ width: 26, height: 26, borderRadius: 7, background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 14, display: 'grid', placeItems: 'center', flex: '0 0 26px' }}>D</div>
-        <div ref={tabsRef} className="no-scrollbar" style={{ flex: 1, display: 'flex', gap: 4, overflowX: 'auto', WebkitMaskImage: 'linear-gradient(90deg,#000 88%,transparent)', maskImage: 'linear-gradient(90deg,#000 88%,transparent)' }}>
+        <div ref={tabsRef} className="no-scrollbar" style={{ flex: '1 1 0%', minWidth: 0, display: 'flex', gap: 4, overflowX: 'auto' }}>
           {sectionTabs.map(t => {
             const on = t.key === activeTab
             return (
