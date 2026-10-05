@@ -1,7 +1,7 @@
 'use client'
 import type { DBOrder, PlanDecision } from '@/types'
-import StatStrip, { type Stat } from './mobile/StatStrip'
-import MobileActionBar from './mobile/MobileActionBar'
+import StatStrip, { type Stat } from '@/components/mobile/StatStrip'
+import MobileActionBar from '@/components/mobile/MobileActionBar'
 import { CheckCircle, PauseCircle, XCircle, Printer } from 'lucide-react'
 
 export interface PlanMobileProps {
