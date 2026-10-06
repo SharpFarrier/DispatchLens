@@ -2901,11 +2901,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         const sectionOf = (k: string): 'orders' | 'warehouse' | 'settings' => navItems.find(i => i.key === k)?.section ?? 'orders'
         const activeSection = tab === 'warehouse' ? 'warehouse' : sectionOf(tab)
         const nItem = (keyName: string): TabItem | null => { const it = navItems.find(i => i.key === keyName && i.show); return it ? { key: it.key, label: it.label, badge: it.count } : null }
-        let primaryKeys: string[] = []
-        if (activeSection === 'orders') primaryKeys = ['import', 'plan', 'picklist', 'eod', 'dispatched']
-        else if (activeSection === 'warehouse') primaryKeys = ['wh:stock', 'wh:coating', 'wh:picking', 'wh:barcodes', 'wh:packing']
-        else primaryKeys = ['skumap', 'users']
-        const sectionTabs = primaryKeys.map(nItem).filter(Boolean) as TabItem[]
+        // Orders has 14 tabs → show 5 primary + a "More" sheet. Warehouse/Settings have few tabs →
+        // show ALL of them in the scrolling row (so nothing, e.g. Inventory, is ever omitted).
+        let sectionTabs: TabItem[]
+        if (activeSection === 'orders') {
+          sectionTabs = ['import', 'plan', 'picklist', 'eod', 'dispatched'].map(nItem).filter(Boolean) as TabItem[]
+        } else {
+          sectionTabs = navItems.filter(i => i.section === activeSection && i.show)
+            .map(i => ({ key: i.key, label: i.label, badge: i.count })) as TabItem[]
+        }
         const moreGroups: SheetGroup[] = activeSection === 'orders' ? [
           { title: 'Ops', items: ['review', 'returns', 'calllens', 'delays', 'allorders'].map(nItem).filter(Boolean) as TabItem[] },
           { title: 'Finance', items: ['recon'].map(nItem).filter(Boolean) as TabItem[] },
