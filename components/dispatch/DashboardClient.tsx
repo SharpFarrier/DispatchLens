@@ -2910,7 +2910,8 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           { title: 'Ops', items: ['review', 'returns', 'calllens', 'delays', 'allorders'].map(nItem).filter(Boolean) as TabItem[] },
           { title: 'Finance', items: ['recon'].map(nItem).filter(Boolean) as TabItem[] },
           { title: 'Insights', items: ['otdr', 'handling', 'reports'].map(nItem).filter(Boolean) as TabItem[] },
-        ].filter(g => g.items.length) : []
+          { title: 'Account', items: [{ key: 'signout', label: 'Sign out' }] },
+        ].filter(g => g.items.length) : [{ title: 'Account', items: [{ key: 'signout', label: 'Sign out' }] }]
         const bottomNav = [
           { key: 'orders', label: 'Orders', icon: <Package size={19} /> },
           { key: 'warehouse', label: 'Warehouse', icon: <Warehouse size={19} /> },
@@ -2923,7 +2924,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
               onMore={moreGroups.length ? () => setMoreOpen(true) : undefined}
               onSearch={() => setMobileSearchOpen(true)}
               bottomNav={bottomNav} activeSection={activeSection} onSection={goSection} />
-            <MoreSheet open={moreOpen} groups={moreGroups} onPick={go} onClose={() => setMoreOpen(false)} />
+            <MoreSheet open={moreOpen} groups={moreGroups} onPick={(k) => { if (k === 'signout') { setMoreOpen(false); setShowLogoutConfirm(true) } else { go(k) } }} onClose={() => setMoreOpen(false)} />
             {mobileSearchOpen && (
               <div style={{ position: 'fixed' as const, inset: 0, background: 'var(--bg)', zIndex: 60, display: 'flex', flexDirection: 'column' as const }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 'calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
