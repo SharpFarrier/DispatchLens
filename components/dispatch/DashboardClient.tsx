@@ -443,6 +443,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 
   // Silent refresh — re-pull orders without a loading flash or clearing selections.
   // Used to keep the End-of-Day batch/courier counts live while another device dispatches.
+  // Scoped live-refresh for the EOD/Dispatched tabs: fetch only TODAY's relevant orders (scheduled
+  // for today or dispatched today) — a few hundred rows, not all ~13k — and merge their current
+  // state into the orders array. This keeps the courier counters live (other devices' dispatches
+  // show up) WITHOUT the full-table refetch that was ~83% of the DB load.
+  const refreshTodayDispatch = useCallback(async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    const { data } = await supabase.from('dispatch_orders').select('*')
+      .or(`scheduled_date.eq.${today},and(is_dispatched.eq.true,dispatched_at.gte.${today})`)
+    const fresh = (data || []) as DBOrder[]
+    if (!fresh.length) return
+    const byId = new Map(fresh.map(o => [o.id, o]))
+    setOrders(prev => prev.map(o => byId.get(o.id) ?? o))
+  }, [supabase])
+
   const silentRefreshOrders = useCallback(async () => {
     const data = await fetchAllRows<DBOrder>((from, to) => supabase.from('dispatch_orders').select('*').order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to))
     if (!data.length) return
@@ -949,22 +963,31 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Pauses polling mid-scan to avoid disrupting an in-progress AWB lookup.
   useEffect(() => {
     if (tab !== 'eod' && tab !== 'dispatched') return
-    silentRefreshOrders()
+    void refreshTodayDispatch()
     if (tab === 'eod') void loadLeftoverPicks()
     const iv = setInterval(() => {
-      if (!scanOrder) silentRefreshOrders()
-    }, 15000)
+      if (!scanOrder) void refreshTodayDispatch()
+    }, 20000)
     return () => clearInterval(iv)
-  }, [tab, scanOrder, silentRefreshOrders])
+  }, [tab, scanOrder, refreshTodayDispatch, loadLeftoverPicks])
 
-  const handleScanAwb = (awbRaw: string) => {
+  const handleScanAwb = async (awbRaw: string) => {
     const awb = awbRaw.trim().replace(/\.0+$/, '')
     if (!awb) return
     setScanError(null)
     setScanResult(null)
 
-    // Every order carrying this AWB (any state), so we can hard-block with a clear reason.
-    const awbOrders = orders.filter(o => o.tracking_number?.trim().replace(/\.0+$/, '') === awb)
+    // Query ONLY this AWB's orders (indexed lookup) instead of scanning all ~13k orders in memory.
+    // This is the fix for the DB-load/slowness: the scan no longer needs the full orders set, and
+    // the dispatched-check is also more reliable (it sees the live DB, not a possibly-stale array).
+    const { data: awbData } = await supabase.from('dispatch_orders').select('*')
+      .eq('tracking_number', awb)
+    let awbOrders = (awbData || []) as DBOrder[]
+    // tracking_number may be stored with a trailing .0 on some imports — try that variant too.
+    if (!awbOrders.length) {
+      const { data: alt } = await supabase.from('dispatch_orders').select('*').ilike('tracking_number', `${awb}%`)
+      awbOrders = ((alt || []) as DBOrder[]).filter(o => o.tracking_number?.trim().replace(/\.0+$/, '') === awb)
+    }
 
     // ── HARD BLOCKS (no override — the decision must be changed in the Plan tab) ──
     // 1) Already dispatched — never ship the same AWB twice.
@@ -990,10 +1013,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
       return
     }
 
-    const allMatches = orders.filter(o =>
-      o.tracking_number?.trim().replace(/\.0+$/, '') === awb &&
-      !o.is_cancelled && !o.is_dispatched
-    )
+    const allMatches = awbOrders.filter(o => !o.is_cancelled && !o.is_dispatched)
     if (!allMatches.length) {
       beepError()
       setScanError(`No pending order found for AWB ${awb}`)
