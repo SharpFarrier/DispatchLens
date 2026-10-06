@@ -2921,7 +2921,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
           { key: 'warehouse', label: 'Warehouse', icon: <Warehouse size={19} /> },
           { key: 'settings', label: 'Settings', icon: <SettingsIcon size={19} /> },
         ]
-        const goSection = (sec: string) => { if (sec === 'warehouse') { setTab('warehouse') } else { const first = navItems.find(i => i.section === sec && i.show); if (first) go(first.key) } }
+        const goSection = (sec: string) => { const first = navItems.find(i => i.section === sec && i.show); if (first) go(first.key); else if (sec === 'warehouse') setTab('warehouse') }
         return (
           <>
             <MobileShell sectionTabs={sectionTabs} activeTab={curKey} onTab={go}
