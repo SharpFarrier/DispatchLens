@@ -86,6 +86,51 @@ export default function CoatingTab({ userId }: { userId: string }) {
     } finally { setErrMarking(false) }
   }
 
+  // Export the Day View (all days currently loaded) to a CSV, mirroring the
+  // day → trolley grouping shown on screen. One row per coating frame.
+  function handleExportDay() {
+    if (!sorted.length) { showToast('Nothing to export', 'error'); return }
+    const esc = (v: unknown) => {
+      const s = v == null ? '' : String(v)
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const header = ['Date', 'Trolley #', 'Trolley Label', 'Shape', 'Size', 'Mattress', 'Colour', 'Pieces']
+    const lines: string[] = [header.join(',')]
+    dayGroups.forEach(group => {
+      // Number trolleys within each day in order of first appearance (matches the view).
+      const trolleyNo: Record<string, number> = {}
+      let next = 0
+      ;(group.items as CoatingItem[]).forEach(it => {
+        const tid = it.trolley_id || '—'
+        if (!(tid in trolleyNo)) trolleyNo[tid] = ++next
+      })
+      ;(group.items as CoatingItem[]).forEach(it => {
+        const tid = it.trolley_id || '—'
+        lines.push([
+          esc(format(new Date(it.created_at), 'dd MMM yy')),
+          esc(trolleyNo[tid]),
+          esc(it.trolley_label || ''),
+          esc(it.shape),
+          esc(it.size || ''),
+          esc(it.mattress || ''),
+          esc(it.colour),
+          esc(it.pieces),
+        ].join(','))
+      })
+    })
+    const csv = '﻿' + lines.join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `coating-log-${format(new Date(), 'ddMMM-HHmm')}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast(`Exported ${sorted.length} row(s)`)
+  }
+
   async function handleShareLabels() {
     if (!lastLabels || !lastLabels.length) return
     try {
@@ -295,7 +340,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
         <LogTable isFetching={isFetching} hasData={!!sorted.length} viewMode={viewMode} setViewMode={setViewMode}
           allCollapsed={allCollapsed()} toggleAllDays={toggleAllDays} tableHead={tableHead}
           sorted={sorted} dayGroups={dayGroups} collapsedDays={collapsedDays} toggleDay={toggleDay}
-          renderRow={renderRow} totalPcs={totalPcs} colCount={COL_COUNT} emptyIcon="🎨" emptyMsg="No coating entries yet" groupByTrolley />
+          renderRow={renderRow} totalPcs={totalPcs} colCount={COL_COUNT} emptyIcon="🎨" emptyMsg="No coating entries yet" groupByTrolley onExport={handleExportDay} />
       )}
     </div>
   )
@@ -304,14 +349,14 @@ export default function CoatingTab({ userId }: { userId: string }) {
 // Shared log-table renderer (also used by Picks)
 export function LogTable<T extends { id?: string; pieces: number; created_at: string }>({
   isFetching, hasData, viewMode, setViewMode, allCollapsed, toggleAllDays, tableHead,
-  sorted, dayGroups, collapsedDays, toggleDay, renderRow, totalPcs, colCount, emptyIcon, emptyMsg, groupByTrolley,
+  sorted, dayGroups, collapsedDays, toggleDay, renderRow, totalPcs, colCount, emptyIcon, emptyMsg, groupByTrolley, onExport,
 }: {
   isFetching: boolean; hasData: boolean; viewMode: 'all' | 'day'; setViewMode: (v: 'all' | 'day') => void
   allCollapsed: boolean; toggleAllDays: () => void; tableHead: ReactNode
   sorted: T[]; dayGroups: Array<{ dateKey: string; items: T[]; total: number }>
   collapsedDays: Record<string, boolean>; toggleDay: (k: string) => void
   renderRow: (item: T, i: number) => ReactNode; totalPcs: number; colCount: number
-  emptyIcon: string; emptyMsg: string; groupByTrolley?: boolean
+  emptyIcon: string; emptyMsg: string; groupByTrolley?: boolean; onExport?: () => void
 }) {
   if (isFetching && !hasData) return <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><Spinner size="lg" /></div>
   if (!hasData) return <EmptyState icon={emptyIcon} message={emptyMsg} />
@@ -329,10 +374,18 @@ export function LogTable<T extends { id?: string; pieces: number; created_at: st
           ))}
         </div>
         {viewMode === 'day' && (
-          <button onClick={toggleAllDays}
-            style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'var(--surface)', color: 'var(--text3)', border: '1px solid var(--border)', cursor: 'pointer' }}>
-            {allCollapsed ? 'Expand All' : 'Collapse All'}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {onExport && (
+              <button onClick={onExport}
+                style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'var(--surface)', color: 'var(--text3)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+                ⬇ Export
+              </button>
+            )}
+            <button onClick={toggleAllDays}
+              style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'var(--surface)', color: 'var(--text3)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+              {allCollapsed ? 'Expand All' : 'Collapse All'}
+            </button>
+          </div>
         )}
       </div>
 
