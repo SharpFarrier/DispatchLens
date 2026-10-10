@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { SkuMap } from '@/types'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
 import { Search, Plus, X, Pencil, Trash2, Upload, Package, CheckCircle, AlertCircle } from 'lucide-react'
+import AddProductWizard from './AddProductWizard'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -26,6 +27,7 @@ export default function SkuMapTab() {
   const [bulkText, setBulkText] = useState('')
   const [bulkResult, setBulkResult] = useState<{ added: number; updated: number; errors: number } | null>(null)
   const [bulkRunning, setBulkRunning] = useState(false)
+  const [showWizard, setShowWizard] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -198,8 +200,11 @@ export default function SkuMapTab() {
           <button onClick={() => { setShowBulk(true); setBulkResult(null); setBulkText('') }} style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
             <Upload size={13} /> Bulk Paste
           </button>
-          <button onClick={openNew} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-            <Plus size={14} /> Add Product
+          <button onClick={openNew} style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+            <Plus size={14} /> Add Mapping
+          </button>
+          <button onClick={() => setShowWizard(true)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+            <Package size={14} /> New Product
           </button>
         </div>
       </div>
@@ -313,6 +318,15 @@ export default function SkuMapTab() {
                 </span>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full product wizard — fans out to the whole catalogue, then refreshes this list */}
+      {showWizard && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: '24px 12px' }} onClick={() => setShowWizard(false)}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, width: 800, maxWidth: '96vw', boxShadow: '0 20px 40px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+            <AddProductWizard onClose={() => setShowWizard(false)} onSaved={() => { setShowWizard(false); void load() }} />
           </div>
         </div>
       )}

@@ -17,10 +17,11 @@ import PicksTab from './PicksTab'
 import InventoryProdTab from './InventoryProdTab'
 import BarcodesTab from './BarcodesTab'
 import LifecycleTab from './LifecycleTab'
+import ProductMasterTab from './ProductMasterTab'
 
 import { UserAccess } from '@/types'
 
-type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'packing'
+type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'products' | 'packing'
 type PackingTab = 'generate' | 'scan' | 'colstockin' | 'colpick' | 'columns' | 'fba' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
 
 const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof UserAccess | 'packing' }[] = [
@@ -29,6 +30,7 @@ const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof
   { key: 'picking', label: 'Picking', icon: <Hand size={14} />, perm: 'can_wh_picking' },
   { key: 'inventory', label: 'Inventory', icon: <Warehouse size={14} />, perm: 'can_wh_inventory' },
   { key: 'barcodes', label: 'Barcodes', icon: <Tag size={14} />, perm: 'can_wh_barcodes' },
+  { key: 'products', label: 'Products', icon: <Package size={14} />, perm: 'can_wh_inventory' },
   { key: 'packing', label: 'Packing', icon: <Layers size={14} />, perm: 'packing' },
 ]
 
@@ -92,6 +94,7 @@ export default function WarehouseSection({ userId, access, isOwner = false, user
       {topTab === 'picking' && <PicksTab userId={userId} />}
       {topTab === 'inventory' && <InventoryProdTab />}
       {topTab === 'barcodes' && <BarcodesTab />}
+      {topTab === 'products' && <ProductMasterTab />}
 
       {topTab === 'packing' && packingTabs.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
