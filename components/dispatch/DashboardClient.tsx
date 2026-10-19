@@ -11,6 +11,7 @@ import MobileShell, { MoreSheet, type TabItem, type SheetGroup } from '@/compone
 import PlanMobileCards from './PlanMobileCards'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import DelaysTab from './DelaysTab'
+import OverviewClient from './OverviewClient'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
@@ -68,10 +69,11 @@ function orderLatestUpdate(o: DBOrder): { label: string; tone: 'success' | 'warn
   return { label: o.plan_decision ? o.plan_decision.replace(/^\w/, (c: string) => c.toUpperCase()) : 'Pending', tone: 'muted', detail: '' }
 }
 
-type Tab = 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users' | 'delays'
+type Tab = 'overview' | 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users' | 'delays'
 
 // ── URL <-> tab sync (Option B: real bookmarkable URLs over the tab-state model) ──
 const SECTION_OF: Record<string, 'orders' | 'warehouse' | 'settings'> = {
+  overview: 'orders',
   import: 'orders', plan: 'orders', review: 'orders', eod: 'orders', dispatched: 'orders',
   picklist: 'orders', returns: 'orders', allorders: 'orders', calllens: 'orders', recon: 'orders',
   otdr: 'orders', handling: 'orders', reports: 'orders', skumap: 'settings', users: 'settings',
@@ -222,7 +224,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_delays: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
+    ? { ...access, can_owner: true, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_delays: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
     : access
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
@@ -2550,6 +2552,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const reviewCount = unfulfillableOrders.filter(o => !o.target_dispatch_date).length
 
   const navItems: NavItem[] = [
+    { key: 'overview', label: 'Overview', count: 0, section: 'orders', show: effectiveAccess.can_owner },
     { key: 'import', label: 'Import', count: 0, section: 'orders', show: effectiveAccess.can_import },
     { key: 'plan', label: 'Plan', count: activeOrders.length, section: 'orders', show: effectiveAccess.can_plan },
     { key: 'review', label: 'Review', count: reviewCount, section: 'orders', show: effectiveAccess.can_review },
@@ -3317,6 +3320,14 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 )}
             </>
           </div>
+        )}
+
+        {/* ════ OVERVIEW (owner) ════ */}
+        {tab === 'overview' && effectiveAccess.can_owner && (
+          <OverviewClient onNavigate={(k) => {
+            if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') }
+            else { setTab(k as Tab) }
+          }} />
         )}
 
         {/* ════ PLAN ════ */}

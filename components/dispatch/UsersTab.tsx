@@ -21,6 +21,7 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
   { key: 'can_handling', label: 'Handling Time', desc: 'Handling-time tracker' },
   { key: 'can_reports', label: 'Reports', desc: 'Export reports / approvals' },
   { key: 'can_delays', label: 'Delays', desc: 'Delayed-order escalation tracker' },
+  { key: 'can_owner', label: 'Owner Overview', desc: 'Owner overview dashboard (/overview)' },
 ]
 
 const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [

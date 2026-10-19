@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { LogOut, LayoutGrid, Warehouse as WarehouseIcon, Settings as SettingsIcon, ChevronDown, ChevronRight } from 'lucide-react'
+import { LogOut, LayoutGrid, Warehouse as WarehouseIcon, Settings as SettingsIcon, ChevronDown, ChevronRight, LayoutDashboard } from 'lucide-react'
 
 export interface NavItem { key: string; label: string; count?: number; section: 'orders' | 'warehouse' | 'settings'; show: boolean }
 
@@ -48,8 +48,11 @@ export default function Sidebar({ items, tab, setTab, username, onSignOut }: {
     )
   }
 
+  // Owner Overview is a standalone top item (desktop), not inside the Orders accordion.
+  const overviewItem = visible.find(i => i.key === 'overview')
+
   const sectionHeader = (sec: typeof SECTIONS[number]) => {
-    const list = bySection(sec.key)
+    const list = bySection(sec.key).filter(i => !(sec.key === 'orders' && i.key === 'overview'))
     if (list.length === 0) return null
     const isOpen = openSection === sec.key
     const hasActive = list.some(i => i.key === tab)
@@ -86,6 +89,20 @@ export default function Sidebar({ items, tab, setTab, username, onSignOut }: {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' as const, display: 'flex', flexDirection: 'column' as const, gap: 2 }} className="no-scrollbar">
+          {overviewItem && (
+            <button onClick={() => setTab('overview')} style={{
+              display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left' as const,
+              padding: '9px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              background: tab === 'overview' ? 'var(--accent-solid)' : 'transparent',
+              color: tab === 'overview' ? '#fff' : 'var(--sidebar-muted)',
+              fontSize: 13.5, fontWeight: 600, fontFamily: 'var(--font-sans)', marginBottom: 2,
+            }}
+              onMouseEnter={e => { if (tab !== 'overview') e.currentTarget.style.background = 'var(--sidebar-hover)' }}
+              onMouseLeave={e => { if (tab !== 'overview') e.currentTarget.style.background = 'transparent' }}>
+              <span style={{ display: 'flex', color: tab === 'overview' ? '#fff' : 'var(--accent)' }}><LayoutDashboard size={18} /></span>
+              <span style={{ flex: 1 }}>{overviewItem.label}</span>
+            </button>
+          )}
           {sectionHeader(SECTIONS[0])}
           {sectionHeader(SECTIONS[1])}
         </div>
