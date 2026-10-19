@@ -12,6 +12,8 @@ import PlanMobileCards from './PlanMobileCards'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import DelaysTab from './DelaysTab'
 import OverviewClient from './OverviewClient'
+import RequestButton from './RequestButton'
+import RequestsTab from './RequestsTab'
 import { useExportGate } from './exportGate'
 import DeviceGate from './DeviceGate'
 import { fetchAllRows } from './fetchAll'
@@ -69,14 +71,14 @@ function orderLatestUpdate(o: DBOrder): { label: string; tone: 'success' | 'warn
   return { label: o.plan_decision ? o.plan_decision.replace(/^\w/, (c: string) => c.toUpperCase()) : 'Pending', tone: 'muted', detail: '' }
 }
 
-type Tab = 'overview' | 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users' | 'delays'
+type Tab = 'overview' | 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users' | 'delays' | 'requests'
 
 // ── URL <-> tab sync (Option B: real bookmarkable URLs over the tab-state model) ──
 const SECTION_OF: Record<string, 'orders' | 'warehouse' | 'settings'> = {
   overview: 'orders',
   import: 'orders', plan: 'orders', review: 'orders', eod: 'orders', dispatched: 'orders',
   picklist: 'orders', returns: 'orders', allorders: 'orders', calllens: 'orders', recon: 'orders',
-  otdr: 'orders', handling: 'orders', reports: 'orders', skumap: 'settings', users: 'settings',
+  otdr: 'orders', handling: 'orders', reports: 'orders', skumap: 'settings', users: 'settings', requests: 'settings',
 }
 const WH_SUBS = ['stock', 'coating', 'picking', 'inventory', 'barcodes', 'packing']
 const TAB_KEYS = Object.keys(SECTION_OF)
@@ -221,11 +223,20 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const xgDemand = useExportGate('demand', 'Upcoming-demand export')
   const xgPlan = useExportGate('plan', 'Dispatch-plan export')
   const [pendingReports, setPendingReports] = useState(0)
+  // Feature-request tracker: open-count badge for the sidebar (role-scoped by the API).
+  const [requestOpenCount, setRequestOpenCount] = useState(0)
+  const [reqBump, setReqBump] = useState(0)
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
     ? { ...access, can_owner: true, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_delays: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_manage_columns: true }
     : access
+  // Keep the Requests badge fresh when the tab changes or something is submitted.
+  useEffect(() => {
+    let alive = true
+    fetch('/api/requests?scope=count').then(r => (r.ok ? r.json() : null)).then(d => { if (alive && d) setRequestOpenCount(d.open || 0) }).catch(() => {})
+    return () => { alive = false }
+  }, [tab, reqBump])
   // Stock gate: when ON, EOD scan-out requires the piece to be a 'stocked' packed_unit.
   // Default OFF so dispatch works before opening stock is imported. Persisted in app_config.
   const [stockGateOn, setStockGateOn] = useState(false)
@@ -2576,6 +2587,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'wh:packing', label: 'Packing', section: 'warehouse', show: effectiveAccess.can_wh_pack_generate || effectiveAccess.can_wh_pack_scan || effectiveAccess.can_wh_pack_stockin || effectiveAccess.can_wh_pack_pick || effectiveAccess.can_wh_pack_columns || effectiveAccess.can_wh_pack_fba || effectiveAccess.can_wh_pack_inventory || effectiveAccess.can_wh_pack_rto || effectiveAccess.can_wh_pack_treatment || effectiveAccess.can_wh_pack_units || effectiveAccess.can_wh_pack_lifecycle },
     { key: 'skumap', label: 'SKU Map', section: 'settings', show: effectiveAccess.can_users },
     { key: 'users', label: 'Users', section: 'settings', show: effectiveAccess.can_users },
+    { key: 'requests', label: 'Requests', count: requestOpenCount, section: 'settings', show: true },
   ]
   return (
     <DeviceGate userEmail={user.email || ''} isOwner={isOwner}>
@@ -2979,6 +2991,17 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )
       })()}
       {!isMobile && (<Sidebar items={navItems} tab={tab === 'warehouse' ? `wh:${warehouseTab}` : tab} setTab={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }} username={user.user_metadata?.name?.split(' ')[0] || user.email?.split('@')[0] || ''} onSignOut={() => setShowLogoutConfirm(true)} />)}
+
+      {/* Floating "+ Request" — on every tab except the Requests list itself */}
+      {tab !== 'requests' && (
+        <RequestButton
+          tabKey={tab === 'warehouse' ? `wh:${warehouseTab}` : tab}
+          tabLabel={navItems.find(i => i.key === (tab === 'warehouse' ? `wh:${warehouseTab}` : tab))?.label || (tab === 'warehouse' ? `wh:${warehouseTab}` : tab)}
+          userEmail={user.email || ''}
+          isMobile={isMobile}
+          onSubmitted={() => setReqBump(b => b + 1)}
+        />
+      )}
       <div className="dl-content-wrap" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, minHeight: '100vh' }}>
       {!isMobile && <header className="dl-header" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 32px', height: 56, display: 'flex', alignItems: 'center', position: 'sticky' as const, top: 0, zIndex: 100, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div className="dl-logo" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 32, flexShrink: 0 }}>
@@ -3328,6 +3351,15 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') }
             else { setTab(k as Tab) }
           }} />
+        )}
+
+        {/* ════ REQUESTS (everyone) ════ */}
+        {tab === 'requests' && (
+          <RequestsTab
+            userEmail={user.email || ''}
+            onNavigate={(k) => { if (k.startsWith('wh:')) { setWarehouseTab(k.slice(3) as typeof warehouseTab); setTab('warehouse') } else { setTab(k as Tab) } }}
+            onCountChange={setRequestOpenCount}
+          />
         )}
 
         {/* ════ PLAN ════ */}
