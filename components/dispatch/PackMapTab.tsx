@@ -3,7 +3,8 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { PRODUCT_SHAPE, SIZE_PACKED_TO_SUPPLY } from '@/lib/catalogueMap'
 import { computeMatch, type MatchResult } from '@/lib/packMatch'
-import { Link2, Check, AlertTriangle } from 'lucide-react'
+import { Link2, Check, AlertTriangle, Camera } from 'lucide-react'
+import BarcodeScanner from './BarcodeScanner'
 
 // Pack & Map (barcoding phase 2). Scan a picked frame, then the NON-SERIAL SKU
 // sticker going on its box. Records which physical frame was packed as which SKU
@@ -34,6 +35,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
   const [done, setDone] = useState<Done[]>([])
   const [packed, setPacked] = useState<number | null>(null)
   const [picked, setPicked] = useState<number | null>(null)
+  const [cameraOn, setCameraOn] = useState(false)
   const frameRef = useRef<HTMLInputElement>(null)
   const skuRef = useRef<HTMLInputElement>(null)
 
@@ -114,6 +116,22 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
       </div>
 
       <div style={card}>
+        {/* Camera scanning (USB gun / keyboard still works via the inputs). One camera,
+            auto-targeting: scans the frame first, then the SKU sticker. */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: cameraOn ? 10 : 0 }}>
+          <button onClick={() => setCameraOn(o => !o)} style={{ ...btn, padding: '7px 12px', background: cameraOn ? 'var(--critical-bg)' : 'var(--surface2)', color: cameraOn ? 'var(--red)' : 'var(--text2)', border: '1px solid var(--border)' }}>
+            <Camera size={14} /> {cameraOn ? 'Stop camera' : 'Use camera'}
+          </button>
+        </div>
+        {cameraOn && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text3)', marginBottom: 6 }}>
+              Camera — now scanning: <b style={{ color: 'var(--accent)' }}>{frame ? 'SKU sticker' : 'frame barcode'}</b>
+            </div>
+            <BarcodeScanner onScan={(v) => { if (!frame) void scanFrame(v); else void scanSku(v) }} onClose={() => setCameraOn(false)} />
+          </div>
+        )}
+
         <Label n={1} text="Scan frame barcode (picked piece)" />
         <input ref={frameRef} autoFocus onKeyDown={onKey(scanFrame)} placeholder="Scan or type frame barcode" style={input} />
         {frameErr && <Msg>{frameErr}</Msg>}
