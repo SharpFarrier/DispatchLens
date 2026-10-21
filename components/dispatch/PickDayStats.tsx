@@ -5,7 +5,11 @@ import { createClient } from '@/lib/supabase/client'
 /**
  * Live daily picking stats strip, shown above the scan terminal.
  * Everything is derived from existing columns (no migration):
- *  - "Today" = pieces whose picked_at falls on the current IST day.
+ *  - "Today" = pieces whose picked_at falls on the current IST day. This is a pick
+ *    THROUGHPUT log, so it counts by picked_at alone and does NOT require the piece
+ *    to still be status='picked' — a frame that was picked today and has since been
+ *    packed (Pack & Map) still counts, so the number never drops as packing happens.
+ *    (undo clears picked_at, so un-picks correctly leave the count.)
  *  - Per-picker = today's picked pieces grouped by their pick_session's created_by.
  *  - By-shape  = today's picked pieces grouped by shape.
  * Refetches whenever `refreshKey` bumps (a scan / undo in the terminal) and on a
@@ -40,9 +44,11 @@ export default function PickDayStats({ userId, refreshKey }: { userId: string; r
     setErr(null)
     try {
       const since = istDayStartUtcISO()
+      // Count by picked_at (throughput), NOT by current status — so a frame picked
+      // today still counts after it's packed. picked_at is set on pick and cleared
+      // on undo, so "picked today" reflects net pieces picked on the table today.
       const { data: pcs, error: pErr } = await supabase.from('pieces')
         .select('id, shape, size, colour, pick_session_id')
-        .eq('status', 'picked')
         .gte('picked_at', since)
       if (pErr) throw pErr
       const rows: PieceRow[] = (pcs as PieceRow[]) || []

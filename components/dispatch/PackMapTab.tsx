@@ -3,21 +3,22 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { PRODUCT_SHAPE, SIZE_PACKED_TO_SUPPLY } from '@/lib/catalogueMap'
 import { computeMatch, type MatchResult } from '@/lib/packMatch'
-import { Link2, Check, AlertTriangle, Camera, X } from 'lucide-react'
+import { AlertTriangle, Camera, Undo2 } from 'lucide-react'
 import BarcodeScanner from './BarcodeScanner'
 
 // Pack & Map (barcoding phase 2). Scan a picked frame, then the NON-SERIAL SKU
-// sticker. On a frame-identity match the pair auto-queues (no per-box click);
-// mismatches block. One "Confirm session" button writes the whole batch:
-// pieces.packed_barcode = SKU and status picked -> packed. We map to the SKU,
-// not the serial (the serialized format is being retired -> SW-001).
+// sticker. On a frame-identity match it COMMITS immediately (pieces.packed_barcode
+// = SKU, status picked -> packed) and lists it with an Undo; mismatches block and
+// don't commit. We map to the SKU, not the serial (serialized format is being
+// retired -> SW-001). Undo reverts packed -> picked (picked_at is untouched, so the
+// frame returns to the Picking "picked today" log).
 
 interface Frame {
   id: string; barcode: string; shape: string | null; size: string | null
   colour: string | null; mattress: string | null; status: string
 }
 interface SkuMeta { sku: string; product: string | null; size: string | null; fcolor: string | null; mattress: string | null }
-interface Queued { frameId: string; frameBarcode: string; sku: string }
+interface Done { frameId: string; frameBarcode: string; sku: string; at: number }
 
 const stripSerial = (code: string) => code.replace(/-\d+$/, '')
 
@@ -28,7 +29,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
   const [meta, setMeta] = useState<SkuMeta | null>(null)
   const [skuErr, setSkuErr] = useState('')
   const [match, setMatch] = useState<MatchResult | null>(null)
-  const [queue, setQueue] = useState<Queued[]>([])
+  const [done, setDone] = useState<Done[]>([])
   const [busy, setBusy] = useState(false)
   const [flash, setFlash] = useState('')
   const [packed, setPacked] = useState<number | null>(null)
@@ -52,7 +53,6 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     const barcode = raw.trim()
     if (!barcode) return
     setFrameErr(''); setFlash('')
-    if (queue.some(q => q.frameBarcode === barcode)) { setFrameErr(`${barcode} is already queued this session`); return }
     const { data, error } = await supabase.from('pieces')
       .select('id, barcode, shape, size, colour, mattress, status').eq('barcode', barcode).maybeSingle()
     if (error) { setFrameErr('Lookup failed: ' + error.message); return }
@@ -80,38 +80,39 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     if (!data) { setSkuErr(`${scanned} — not a known SKU (scan the SKU sticker)`); return }
     const m = data as SkuMeta
     const result = computeMatch(frame, m)
-    if (result.ok) {
-      // Auto-queue on match — no per-box confirm.
-      setQueue(prev => [{ frameId: frame.id, frameBarcode: frame.barcode, sku: m.sku }, ...prev])
-      setFlash(`Queued ${frame.barcode} → ${m.sku}`)
+    if (!result.ok) { setMeta(m); setMatch(result); return }   // block; stays until fixed/cleared
+    // Match → commit immediately.
+    setBusy(true)
+    try {
+      const now = new Date().toISOString()
+      const { data: upd, error } = await supabase.from('pieces')
+        .update({ status: 'packed', packed_barcode: m.sku, packed_at: now })
+        .eq('id', frame.id).in('status', ['picked', 'coated']).select('id')
+      if (error) throw error
+      if (!upd || !upd.length) { setSkuErr(`${frame.barcode} was no longer pickable (already packed?)`); return }
+      setDone(prev => [{ frameId: frame.id, frameBarcode: frame.barcode, sku: m.sku, at: Date.now() }, ...prev].slice(0, 60))
+      setFlash(`Mapped ${frame.barcode} → ${m.sku}`)
       clearCurrent()
-    } else {
-      setMeta(m); setMatch(result)   // show the block; stays until fixed/cleared
+      loadCounts()
+    } catch (e) {
+      setSkuErr('Map failed: ' + (e as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
 
-  const removeQueued = (frameId: string) => setQueue(prev => prev.filter(q => q.frameId !== frameId))
-
-  const commitSession = async () => {
-    if (!queue.length || busy) return
+  const undo = async (item: Done) => {
     setBusy(true); setFlash('')
     try {
-      const now = new Date().toISOString()
-      const results = await Promise.all(queue.map(async q => {
-        const { data, error } = await supabase.from('pieces')
-          .update({ status: 'packed', packed_barcode: q.sku, packed_at: now })
-          .eq('id', q.frameId).in('status', ['picked', 'coated']).select('id')
-        return { q, ok: !error && !!data && data.length > 0, err: error?.message }
-      }))
-      const failed = results.filter(r => !r.ok)
-      setQueue(failed.map(r => r.q))   // keep only the ones that didn't commit
-      const okN = results.length - failed.length
-      setFlash(failed.length
-        ? `Mapped ${okN}. ${failed.length} could not be mapped (already packed elsewhere?) — kept in the list.`
-        : `Mapped ${okN} frame${okN === 1 ? '' : 's'} this session.`)
+      const { error } = await supabase.from('pieces')
+        .update({ status: 'picked', packed_barcode: null, packed_at: null })
+        .eq('id', item.frameId).eq('status', 'packed')
+      if (error) throw error
+      setDone(prev => prev.filter(d => d.frameId !== item.frameId))
+      setFlash(`Undone — ${item.frameBarcode} back to picked`)
       loadCounts()
     } catch (e) {
-      setFlash('Commit failed: ' + (e as Error).message)
+      setFlash('Undo failed: ' + (e as Error).message)
     } finally {
       setBusy(false)
     }
@@ -126,7 +127,6 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
       <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
         <Tile n={packed} label="Frames packed" />
         <Tile n={picked} label="Still picked" warn />
-        <Tile n={queue.length} label="Queued (uncommitted)" accent />
       </div>
 
       <div style={card}>
@@ -154,40 +154,34 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
           </div>
         )}
 
-        <div style={{ marginTop: 16 }}><Label n={2} text="Scan the SKU sticker (non-serial)" /></div>
+        <div style={{ marginTop: 16 }}><Label n={2} text="Scan the SKU sticker (non-serial) — maps on match" /></div>
         <input ref={skuRef} onKeyDown={onKey(scanSku)} placeholder="Scan or type the SKU barcode" style={input} />
         {skuErr && <Msg>{skuErr}</Msg>}
         {match && !match.ok && meta && (
           <div style={blockBanner}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div><b>Blocked — not queued.</b> {match.reasons.join('; ')}. Grab the right SKU sticker (or frame), then rescan. <button onClick={clearCurrent} style={{ background: 'none', border: 'none', color: 'var(--red)', textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5, padding: 0 }}>clear</button></div>
+            <div><b>Blocked — not mapped.</b> {match.reasons.join('; ')}. Grab the right SKU sticker (or frame), then rescan. <button onClick={clearCurrent} style={{ background: 'none', border: 'none', color: 'var(--red)', textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5, padding: 0 }}>clear</button></div>
           </div>
         )}
         {flash && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--green)', background: 'var(--green-soft)', padding: '8px 11px', borderRadius: 8 }}>{flash}</div>}
       </div>
 
-      {/* Queue + single session confirm */}
-      {queue.length > 0 && (
-        <div style={card}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Queued this session · {queue.length}</span>
-            <span style={{ flex: 1 }} />
-            <button onClick={commitSession} disabled={busy} style={{ ...btn, background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}>
-              <Check size={14} /> {busy ? 'Confirming…' : `Confirm session (${queue.length})`}
-            </button>
-          </div>
+      {done.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text2)', marginBottom: 8 }}>Mapped this session · {done.length}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {queue.map(q => (
-              <div key={q.frameId} style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5 }}>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{q.frameBarcode}</span>
+            {done.map(d => (
+              <div key={d.frameId} style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{d.frameBarcode}</span>
                 <span style={{ color: 'var(--text3)' }}>→</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{q.sku}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{d.sku}</span>
                 <span style={{ flex: 1 }} />
-                <button onClick={() => removeQueued(q.frameId)} title="Remove" style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', display: 'grid', placeItems: 'center', padding: 2 }}><X size={15} /></button>
+                <button onClick={() => undo(d)} disabled={busy} title="Undo this mapping" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text2)', borderRadius: 7, padding: '4px 9px', cursor: 'pointer', fontSize: 11.5, fontWeight: 600 }}>
+                  <Undo2 size={13} /> Undo
+                </button>
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 9 }}>Nothing is written until you confirm. Frames stay picked until then.</div>
         </div>
       )}
     </div>
@@ -200,11 +194,10 @@ const resolved: React.CSSProperties = { marginTop: 9, border: '1px solid var(--b
 const blockBanner: React.CSSProperties = { display: 'flex', gap: 9, alignItems: 'flex-start', background: 'var(--critical-bg)', border: '1px solid #E6B9B9', borderRadius: 9, padding: '11px 13px', fontSize: 12.5, color: '#7A1F1F', marginTop: 8 }
 const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, borderRadius: 9, padding: '10px 16px', cursor: 'pointer' }
 
-function Tile({ n, label, warn, accent }: { n?: number | null; label: string; warn?: boolean; accent?: boolean }) {
-  const col = accent && (n ?? 0) > 0 ? 'var(--accent)' : warn && (n ?? 0) > 0 ? 'var(--amber)' : 'var(--text)'
+function Tile({ n, label, warn }: { n?: number | null; label: string; warn?: boolean }) {
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 14px', minWidth: 110 }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600, color: col }}>{n ?? '—'}</div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600, color: warn && (n ?? 0) > 0 ? 'var(--amber)' : 'var(--text)' }}>{n ?? '—'}</div>
       <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text3)' }}>{label}</div>
     </div>
   )
