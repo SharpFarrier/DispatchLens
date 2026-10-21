@@ -70,6 +70,7 @@ export default function GenerateTab({ userId }: { userId: string }) {
     setGenerating(true)
     try {
       const allUnits: LabelUnit[] = []
+      let serialCount = 0
       for (const line of cart) {
         const { data: startSeq, error: seqErr } = await supabase.rpc('reserve_packed_seq', { p_sku: line.sku, p_count: line.qty })
         if (seqErr) throw seqErr
@@ -80,10 +81,15 @@ export default function GenerateTab({ userId }: { userId: string }) {
         }
         const { error: insErr } = await supabase.from('packed_units').insert(rows)
         if (insErr) throw insErr
-        for (const r of rows) allUnits.push({ barcode: r.barcode, descr: line.descr || undefined })
+        // Per box: the serialized label (as before) + a non-serial SKU sticker (serial stripped).
+        for (const r of rows) {
+          allUnits.push({ barcode: r.barcode, descr: line.descr || undefined })   // serialized
+          allUnits.push({ barcode: line.sku, descr: line.descr || undefined })     // SKU, no serial
+          serialCount++
+        }
       }
       setLastBatch({ units: allUnits, lineCount: cart.length })
-      flash(`Generated ${allUnits.length} barcode(s) across ${cart.length} SKU(s)`)
+      flash(`Generated ${serialCount} serialized + ${serialCount} SKU label(s) across ${cart.length} SKU(s)`)
       setCart([])
       loadSkus()
     } catch (e) {

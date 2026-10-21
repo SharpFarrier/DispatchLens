@@ -49,3 +49,20 @@ export function mattressEquivalent(a: string | null, b: string | null): boolean 
   const ga = mattressGroup(a), gb = mattressGroup(b)
   return ga !== 'other' && ga === gb
 }
+
+// ── Frame-identity bridges (packed_skus → pieces vocab) ──────────────────────
+// packed_skus.product is a marketing family name ("Atlas"); pieces.shape is the
+// supply shape ("Round"). This is the authoritative bridge (mirror of the one in
+// FulfillmentWaterfall), exported for the Pack & Map match so a scanned SKU can be
+// compared to a scanned frame piece. Products absent here can't be shape-verified.
+export const PRODUCT_SHAPE: Record<string, string> = {
+  Nova: 'Element', Jasper: 'Headboard', Atlas: 'Round', Aura: 'Round',
+  Nexon: 'Square', Avon: 'Metal', Oslo: 'Oslo', Boston: 'Golden',
+  Base: 'Base', Luvo: 'Wooden', Elvo: 'Wooden',
+}
+
+// packed_skus.size code ("3x6") → pieces.size supply vocab ("Single 3ft").
+export const SIZE_PACKED_TO_SUPPLY: Record<string, string> = {
+  '2.5x6': 'Single 2.5ft', '3x6': 'Single 3ft', '4x6.25': 'Double 4ft',
+  '5x6.25': 'Queen 5ft', '5x6.5': 'Queen 5ft', '6x6.25': 'King 6ft',
+}

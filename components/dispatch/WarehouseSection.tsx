@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag, Activity, MapPin, ListChecks, Grid3x3 } from 'lucide-react'
+import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag, Activity, MapPin, ListChecks, Grid3x3, Link2 } from 'lucide-react'
 import InventoryTab from './InventoryTab'
 import UnitsTab from './UnitsTab'
 import ScanToStockTab from './ScanToStockTab'
@@ -18,11 +18,12 @@ import InventoryProdTab from './InventoryProdTab'
 import BarcodesTab from './BarcodesTab'
 import LifecycleTab from './LifecycleTab'
 import ProductMasterTab from './ProductMasterTab'
+import PackMapTab from './PackMapTab'
 
 import { UserAccess } from '@/types'
 
 type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'products' | 'packing'
-type PackingTab = 'generate' | 'scan' | 'colstockin' | 'colpick' | 'columns' | 'fba' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
+type PackingTab = 'generate' | 'packmap' | 'scan' | 'colstockin' | 'colpick' | 'columns' | 'fba' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
 
 const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof UserAccess | 'packing' }[] = [
   { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} />, perm: 'can_wh_stock' },
@@ -36,6 +37,7 @@ const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof
 
 const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; perm: keyof UserAccess }[] = [
   { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} />, perm: 'can_wh_pack_generate' },
+  { key: 'packmap',   label: 'Pack & Map',    icon: <Link2 size={14} />, perm: 'can_wh_pack_generate' },
   { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} />, perm: 'can_wh_pack_scan' },
   { key: 'colstockin', label: 'Stock-in (cols)', icon: <MapPin size={14} />, perm: 'can_wh_pack_stockin' },
   { key: 'colpick',   label: 'Pick',          icon: <ListChecks size={14} />, perm: 'can_wh_pack_pick' },
@@ -108,6 +110,7 @@ export default function WarehouseSection({ userId, access, isOwner = false, user
           </div>
 
           {packingTab === 'generate' && <GenerateTab userId={userId} />}
+          {packingTab === 'packmap' && <PackMapTab userId={userId} userEmail={userEmail} />}
           {packingTab === 'scan' && <ScanToStockTab />}
           {packingTab === 'colstockin' && <ColumnStockInTab userEmail={userEmail} />}
           {packingTab === 'colpick' && <ColumnPickTab userEmail={userEmail} />}
