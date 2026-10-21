@@ -88,6 +88,18 @@ export default function GenerateTab({ userId }: { userId: string }) {
           serialCount++
         }
       }
+      // Persist the batch so a page refresh never loses the print — the admin
+      // Batches tab can re-download the exact sheet after approval. Non-fatal.
+      try {
+        await supabase.from('barcode_batches').insert({
+          created_by: userId,
+          label_count: serialCount,
+          sku_count: serialCount,
+          line_count: cart.length,
+          units: allUnits,
+          sku_summary: cart.map(l => ({ sku: l.sku, descr: l.descr, qty: l.qty })),
+        })
+      } catch { /* labels are already generated; batch logging is best-effort */ }
       setLastBatch({ units: allUnits, lineCount: cart.length })
       flash(`Generated ${serialCount} serialized + ${serialCount} SKU label(s) across ${cart.length} SKU(s)`)
       setCart([])
