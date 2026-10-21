@@ -37,7 +37,7 @@ const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof
 
 const PACKING_TABS: { key: PackingTab; label: string; icon: React.ReactNode; perm: keyof UserAccess }[] = [
   { key: 'generate',  label: 'Generate',      icon: <PackagePlus size={14} />, perm: 'can_wh_pack_generate' },
-  { key: 'packmap',   label: 'Pack & Map',    icon: <Link2 size={14} />, perm: 'can_wh_pack_generate' },
+  { key: 'packmap',   label: 'Pack & Map',    icon: <Link2 size={14} />, perm: 'can_wh_pack_map' },
   { key: 'scan',      label: 'Scan to Stock', icon: <ScanLine size={14} />, perm: 'can_wh_pack_scan' },
   { key: 'colstockin', label: 'Stock-in (cols)', icon: <MapPin size={14} />, perm: 'can_wh_pack_stockin' },
   { key: 'colpick',   label: 'Pick',          icon: <ListChecks size={14} />, perm: 'can_wh_pack_pick' },

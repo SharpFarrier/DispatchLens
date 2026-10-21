@@ -41,6 +41,7 @@ const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[
   { key: 'can_wh_pack_fba',      label: 'Pack·FBA',   desc: 'Packing: FBA shipments' },
   { key: 'can_wh_pack_treatment',label: 'Pack·Treatment', desc: 'Packing: RTO treatment' },
   { key: 'can_wh_pack_lifecycle',label: 'Pack·Lifecycle', desc: 'Packing: piece lifecycle' },
+  { key: 'can_wh_pack_map',      label: 'Pack·Map',   desc: 'Packing: Pack & Map (frame ↔ serial)' },
   { key: 'can_wh_manage_columns',label: 'Cols·Manage',desc: 'Columns: create/remove, set max, change SKU, audit' },
 ]
 
@@ -59,9 +60,9 @@ const ROLE_PRESETS: { label: string; desc: string; keys: (keyof UserAccess)[] }[
   { label: 'Warehouse Operator', desc: 'Stock, coating, picking, inventory, barcodes',
     keys: ['can_wh_stock', 'can_wh_coating', 'can_wh_picking', 'can_wh_inventory', 'can_wh_barcodes'] },
   { label: 'Packing Operator', desc: 'All packing sub-tabs',
-    keys: ['can_wh_pack_generate', 'can_wh_pack_scan', 'can_wh_pack_stockin', 'can_wh_pack_pick', 'can_wh_pack_columns', 'can_wh_pack_fba', 'can_wh_pack_inventory', 'can_wh_pack_rto', 'can_wh_pack_treatment', 'can_wh_pack_units', 'can_wh_pack_lifecycle'] },
+    keys: ['can_wh_pack_generate', 'can_wh_pack_scan', 'can_wh_pack_stockin', 'can_wh_pack_pick', 'can_wh_pack_columns', 'can_wh_pack_fba', 'can_wh_pack_inventory', 'can_wh_pack_rto', 'can_wh_pack_treatment', 'can_wh_pack_units', 'can_wh_pack_lifecycle', 'can_wh_pack_map'] },
   { label: 'Full Warehouse', desc: 'Every warehouse + packing permission',
-    keys: ['can_wh_stock', 'can_wh_coating', 'can_wh_picking', 'can_wh_inventory', 'can_wh_barcodes', 'can_wh_pack_generate', 'can_wh_pack_scan', 'can_wh_pack_stockin', 'can_wh_pack_pick', 'can_wh_pack_columns', 'can_wh_pack_fba', 'can_wh_pack_inventory', 'can_wh_pack_rto', 'can_wh_pack_treatment', 'can_wh_pack_units', 'can_wh_pack_lifecycle'] },
+    keys: ['can_wh_stock', 'can_wh_coating', 'can_wh_picking', 'can_wh_inventory', 'can_wh_barcodes', 'can_wh_pack_generate', 'can_wh_pack_scan', 'can_wh_pack_stockin', 'can_wh_pack_pick', 'can_wh_pack_columns', 'can_wh_pack_fba', 'can_wh_pack_inventory', 'can_wh_pack_rto', 'can_wh_pack_treatment', 'can_wh_pack_units', 'can_wh_pack_lifecycle', 'can_wh_pack_map'] },
 ]
 
 interface DeviceRow { device_id: string; code: string | null; label: string | null; status: string; requested_by: string | null; user_agent: string | null; approved_at: string | null; requested_at: string; last_seen_at: string | null }
