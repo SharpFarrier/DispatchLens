@@ -3,25 +3,22 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { PRODUCT_SHAPE, SIZE_PACKED_TO_SUPPLY } from '@/lib/catalogueMap'
 import { computeMatch, type MatchResult } from '@/lib/packMatch'
-import { Link2, Check, AlertTriangle, Camera } from 'lucide-react'
+import { Link2, Check, AlertTriangle, Camera, X } from 'lucide-react'
 import BarcodeScanner from './BarcodeScanner'
 
 // Pack & Map (barcoding phase 2). Scan a picked frame, then the NON-SERIAL SKU
-// sticker going on its box. Records which physical frame was packed as which SKU
-// (pieces.packed_barcode) and moves it picked -> packed. We map to the SKU, NOT
-// the serial, because the current serialized format is being retired (-> SW-001);
-// the exact per-serial link is a later phase. Blocks on a frame-identity mismatch
-// (shape/size/colour; mattress is decided at packing so it never blocks).
+// sticker. On a frame-identity match the pair auto-queues (no per-box click);
+// mismatches block. One "Confirm session" button writes the whole batch:
+// pieces.packed_barcode = SKU and status picked -> packed. We map to the SKU,
+// not the serial (the serialized format is being retired -> SW-001).
 
 interface Frame {
   id: string; barcode: string; shape: string | null; size: string | null
   colour: string | null; mattress: string | null; status: string
 }
 interface SkuMeta { sku: string; product: string | null; size: string | null; fcolor: string | null; mattress: string | null }
-interface Done { sku: string; frame: string; at: number }
+interface Queued { frameId: string; frameBarcode: string; sku: string }
 
-// Scanning the non-serial sticker gives the SKU directly. If someone scans the
-// serialized sticker (SKU-seq) instead, strip the trailing -<digits> so either works.
 const stripSerial = (code: string) => code.replace(/-\d+$/, '')
 
 export default function PackMapTab(_props: { userId: string; userEmail?: string }) {
@@ -31,8 +28,9 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
   const [meta, setMeta] = useState<SkuMeta | null>(null)
   const [skuErr, setSkuErr] = useState('')
   const [match, setMatch] = useState<MatchResult | null>(null)
+  const [queue, setQueue] = useState<Queued[]>([])
   const [busy, setBusy] = useState(false)
-  const [done, setDone] = useState<Done[]>([])
+  const [flash, setFlash] = useState('')
   const [packed, setPacked] = useState<number | null>(null)
   const [picked, setPicked] = useState<number | null>(null)
   const [cameraOn, setCameraOn] = useState(false)
@@ -48,12 +46,13 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
   }, [supabase])
   useEffect(() => { loadCounts() }, [loadCounts])
 
-  const resetAll = () => { setFrame(null); setFrameErr(''); setMeta(null); setSkuErr(''); setMatch(null); frameRef.current?.focus() }
+  const clearCurrent = () => { setFrame(null); setFrameErr(''); setMeta(null); setSkuErr(''); setMatch(null); frameRef.current?.focus() }
 
   const scanFrame = async (raw: string) => {
     const barcode = raw.trim()
     if (!barcode) return
-    setFrameErr('')
+    setFrameErr(''); setFlash('')
+    if (queue.some(q => q.frameBarcode === barcode)) { setFrameErr(`${barcode} is already queued this session`); return }
     const { data, error } = await supabase.from('pieces')
       .select('id, barcode, shape, size, colour, mattress, status').eq('barcode', barcode).maybeSingle()
     if (error) { setFrameErr('Lookup failed: ' + error.message); return }
@@ -61,8 +60,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     const f = data as Frame
     if (f.status === 'packed') { setFrameErr(`${barcode} is already packed`); return }
     if (!['picked', 'coated'].includes(f.status)) { setFrameErr(`${barcode} is "${f.status}", not ready to pack`); return }
-    setFrame(f)
-    if (meta) setMatch(computeMatch(f, meta))
+    setFrame(f); setMeta(null); setMatch(null); setSkuErr('')
     skuRef.current?.focus()
   }
 
@@ -70,7 +68,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     const scanned = raw.trim()
     if (!scanned) return
     setSkuErr('')
-    // Try the scanned value as a SKU; if that's a serialized sticker, strip the serial.
+    if (!frame) { setSkuErr('Scan the frame first'); return }
     let { data } = await supabase.from('packed_skus').select('sku, product, size, fcolor, mattress').eq('sku', scanned).maybeSingle()
     if (!data) {
       const base = stripSerial(scanned)
@@ -81,24 +79,39 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     }
     if (!data) { setSkuErr(`${scanned} — not a known SKU (scan the SKU sticker)`); return }
     const m = data as SkuMeta
-    setMeta(m)
-    setMatch(frame ? computeMatch(frame, m) : null)
+    const result = computeMatch(frame, m)
+    if (result.ok) {
+      // Auto-queue on match — no per-box confirm.
+      setQueue(prev => [{ frameId: frame.id, frameBarcode: frame.barcode, sku: m.sku }, ...prev])
+      setFlash(`Queued ${frame.barcode} → ${m.sku}`)
+      clearCurrent()
+    } else {
+      setMeta(m); setMatch(result)   // show the block; stays until fixed/cleared
+    }
   }
 
-  const confirm = async () => {
-    if (!frame || !meta || !match?.ok || busy) return
-    setBusy(true)
+  const removeQueued = (frameId: string) => setQueue(prev => prev.filter(q => q.frameId !== frameId))
+
+  const commitSession = async () => {
+    if (!queue.length || busy) return
+    setBusy(true); setFlash('')
     try {
       const now = new Date().toISOString()
-      const { error } = await supabase.from('pieces')
-        .update({ status: 'packed', packed_barcode: meta.sku, packed_at: now })
-        .eq('id', frame.id).in('status', ['picked', 'coated'])
-      if (error) throw error
-      setDone(prev => [{ sku: meta.sku, frame: frame.barcode, at: Date.now() }, ...prev].slice(0, 40))
-      resetAll()
+      const results = await Promise.all(queue.map(async q => {
+        const { data, error } = await supabase.from('pieces')
+          .update({ status: 'packed', packed_barcode: q.sku, packed_at: now })
+          .eq('id', q.frameId).in('status', ['picked', 'coated']).select('id')
+        return { q, ok: !error && !!data && data.length > 0, err: error?.message }
+      }))
+      const failed = results.filter(r => !r.ok)
+      setQueue(failed.map(r => r.q))   // keep only the ones that didn't commit
+      const okN = results.length - failed.length
+      setFlash(failed.length
+        ? `Mapped ${okN}. ${failed.length} could not be mapped (already packed elsewhere?) — kept in the list.`
+        : `Mapped ${okN} frame${okN === 1 ? '' : 's'} this session.`)
       loadCounts()
     } catch (e) {
-      setSkuErr('Map failed: ' + (e as Error).message)
+      setFlash('Commit failed: ' + (e as Error).message)
     } finally {
       setBusy(false)
     }
@@ -113,11 +126,10 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
       <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
         <Tile n={packed} label="Frames packed" />
         <Tile n={picked} label="Still picked" warn />
+        <Tile n={queue.length} label="Queued (uncommitted)" accent />
       </div>
 
       <div style={card}>
-        {/* Camera scanning (USB gun / keyboard still works via the inputs). One camera,
-            auto-targeting: scans the frame first, then the SKU sticker. */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: cameraOn ? 10 : 0 }}>
           <button onClick={() => setCameraOn(o => !o)} style={{ ...btn, padding: '7px 12px', background: cameraOn ? 'var(--critical-bg)' : 'var(--surface2)', color: cameraOn ? 'var(--red)' : 'var(--text2)', border: '1px solid var(--border)' }}>
             <Camera size={14} /> {cameraOn ? 'Stop camera' : 'Use camera'}
@@ -138,7 +150,6 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
         {frame && (
           <div style={resolved}>
             <Row k="Frame identity" v={[frame.shape, frame.size, frame.colour].filter(Boolean).join(' · ') || '—'} />
-            <Row k="Mattress (planning tag)" v={frame.mattress || '—'} />
             <Row k="Status" v={frame.status} />
           </div>
         )}
@@ -146,52 +157,37 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
         <div style={{ marginTop: 16 }}><Label n={2} text="Scan the SKU sticker (non-serial)" /></div>
         <input ref={skuRef} onKeyDown={onKey(scanSku)} placeholder="Scan or type the SKU barcode" style={input} />
         {skuErr && <Msg>{skuErr}</Msg>}
-        {meta && (
-          <div style={resolved}>
-            <Row k="SKU" v={meta.sku} mono />
-            <Row k="SKU frame identity" v={[meta.product ? PRODUCT_SHAPE[meta.product] : null, meta.size ? SIZE_PACKED_TO_SUPPLY[meta.size] : null, meta.fcolor].filter(Boolean).join(' · ') || '—'} />
-            {match && (
-              <Row k="Check" v={match.ok
-                ? <span style={{ ...chip, ...chipOk }}>✓ frame matches SKU</span>
-                : <span style={{ ...chip, ...chipBad }}>✗ mismatch</span>} />
-            )}
-          </div>
-        )}
-
-        <div style={{ marginTop: 16 }}><Label n={3} text="Confirm" /></div>
-        {match && !match.ok && (
+        {match && !match.ok && meta && (
           <div style={blockBanner}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div><b>Blocked — not mapped.</b> {match.reasons.join('; ')}. Fix the frame or grab the right SKU sticker, then rescan.</div>
+            <div><b>Blocked — not queued.</b> {match.reasons.join('; ')}. Grab the right SKU sticker (or frame), then rescan. <button onClick={clearCurrent} style={{ background: 'none', border: 'none', color: 'var(--red)', textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5, padding: 0 }}>clear</button></div>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 9, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button onClick={confirm} disabled={!frame || !meta || !match?.ok || busy}
-            style={{ ...btn, background: 'var(--accent)', color: '#fff', opacity: (!frame || !meta || !match?.ok || busy) ? 0.45 : 1, cursor: (!frame || !meta || !match?.ok || busy) ? 'not-allowed' : 'pointer' }}>
-            <Link2 size={14} /> {busy ? 'Mapping…' : 'Map & mark Packed'}
-          </button>
-          <button onClick={resetAll} style={{ ...btn, background: 'var(--surface2)', color: 'var(--text2)', border: '1px solid var(--border)' }}>Clear</button>
-          {frame && meta && match?.ok && (
-            <span style={{ fontSize: 12, color: 'var(--text3)' }}>
-              Frame <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{frame.barcode}</b> → <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{meta.sku}</b>
-            </span>
-          )}
-        </div>
+        {flash && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--green)', background: 'var(--green-soft)', padding: '8px 11px', borderRadius: 8 }}>{flash}</div>}
       </div>
 
-      {done.length > 0 && (
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text2)', marginBottom: 8 }}>Mapped this session · {done.length}</div>
+      {/* Queue + single session confirm */}
+      {queue.length > 0 && (
+        <div style={card}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Queued this session · {queue.length}</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={commitSession} disabled={busy} style={{ ...btn, background: 'var(--accent)', color: '#fff', opacity: busy ? 0.5 : 1 }}>
+              <Check size={14} /> {busy ? 'Confirming…' : `Confirm session (${queue.length})`}
+            </button>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {done.map((d, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5 }}>
-                <Check size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{d.frame}</span>
+            {queue.map(q => (
+              <div key={q.frameId} style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{q.frameBarcode}</span>
                 <span style={{ color: 'var(--text3)' }}>→</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{d.sku}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{q.sku}</span>
+                <span style={{ flex: 1 }} />
+                <button onClick={() => removeQueued(q.frameId)} title="Remove" style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', display: 'grid', placeItems: 'center', padding: 2 }}><X size={15} /></button>
               </div>
             ))}
           </div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 9 }}>Nothing is written until you confirm. Frames stay picked until then.</div>
         </div>
       )}
     </div>
@@ -201,16 +197,14 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
 const card: React.CSSProperties = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }
 const input: React.CSSProperties = { width: '100%', fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--text)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 9, padding: '10px 12px', boxSizing: 'border-box' }
 const resolved: React.CSSProperties = { marginTop: 9, border: '1px solid var(--border)', borderRadius: 9, padding: '10px 12px', background: 'var(--surface2)' }
-const blockBanner: React.CSSProperties = { display: 'flex', gap: 9, alignItems: 'flex-start', background: 'var(--critical-bg)', border: '1px solid #E6B9B9', borderRadius: 9, padding: '11px 13px', fontSize: 12.5, color: '#7A1F1F', marginTop: 4 }
-const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, borderRadius: 9, padding: '10px 16px' }
-const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', fontSize: 11.5, fontWeight: 600, borderRadius: 6, padding: '2px 8px' }
-const chipOk: React.CSSProperties = { color: 'var(--green)', background: 'var(--green-soft)' }
-const chipBad: React.CSSProperties = { color: 'var(--red)', background: 'var(--red-soft)' }
+const blockBanner: React.CSSProperties = { display: 'flex', gap: 9, alignItems: 'flex-start', background: 'var(--critical-bg)', border: '1px solid #E6B9B9', borderRadius: 9, padding: '11px 13px', fontSize: 12.5, color: '#7A1F1F', marginTop: 8 }
+const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, borderRadius: 9, padding: '10px 16px', cursor: 'pointer' }
 
-function Tile({ n, label, warn }: { n?: number | null; label: string; warn?: boolean }) {
+function Tile({ n, label, warn, accent }: { n?: number | null; label: string; warn?: boolean; accent?: boolean }) {
+  const col = accent && (n ?? 0) > 0 ? 'var(--accent)' : warn && (n ?? 0) > 0 ? 'var(--amber)' : 'var(--text)'
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 14px', minWidth: 110 }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600, color: warn && (n ?? 0) > 0 ? 'var(--amber)' : 'var(--text)' }}>{n ?? '—'}</div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 18, fontWeight: 600, color: col }}>{n ?? '—'}</div>
       <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text3)' }}>{label}</div>
     </div>
   )
