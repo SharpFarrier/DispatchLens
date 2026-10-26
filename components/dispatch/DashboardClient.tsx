@@ -1063,11 +1063,29 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     const esc = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const seqMatch = scanned.match(new RegExp(`^${esc}-(\\d+)$`, 'i'))
     const isExact = scanned.toLowerCase() === expected.toLowerCase()
-    const isMatch = !!seqMatch || isExact
-    const seq = seqMatch ? seqMatch[1] : null
+    let isMatch = !!seqMatch || isExact
+    let seq = seqMatch ? seqMatch[1] : null
+
+    // New SW box labels carry a running serial (e.g. "SW-00043") that does NOT
+    // contain the SKU, so the string match above can't catch them. Resolve the
+    // scanned barcode to its packed_unit and accept it when that unit's SKU is the
+    // one this order expects. (Old "<SKU>-<seq>" and bare-SKU labels still match above.)
+    if (!isMatch) {
+      const { data: u } = await supabase.from('packed_units').select('sku').eq('barcode', scanned).maybeSingle()
+      if (u && (u.sku || '').trim().toLowerCase() === expected.toLowerCase()) {
+        isMatch = true
+        const sw = scanned.match(/(\d+)$/)
+        seq = sw ? sw[1] : null
+      } else if (u) {
+        // A real box, but a different SKU than this order needs — clearer message.
+        beepError()
+        setScanResult({ ok: false, expected, scanned: `${scanned} · ${u.sku}` })
+        return
+      }
+    }
 
     if (!isMatch) {
-      // Wrong SKU — block, beep, keep order loaded for a retry.
+      // Wrong / unknown item — block, beep, keep order loaded for a retry.
       beepError()
       setScanResult({ ok: false, expected, scanned })
       return
