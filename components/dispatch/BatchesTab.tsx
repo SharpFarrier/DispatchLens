@@ -99,7 +99,7 @@ export default function BatchesTab() {
                 </div>
 
                 <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 7 }}>
-                  {[[b.label_count, 'serialized'], [b.sku_count, 'SKU stickers'], [b.line_count, b.line_count === 1 ? 'SKU' : 'SKUs']].map(([n, l], i) => (
+                  {[[b.label_count, b.label_count === 1 ? 'SW label' : 'SW labels'], [b.line_count, b.line_count === 1 ? 'SKU' : 'SKUs']].map(([n, l], i) => (
                     <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text2)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px' }}><b style={{ color: 'var(--text)' }}>{n}</b> {l}</span>
                   ))}
                 </div>

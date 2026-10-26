@@ -7,6 +7,12 @@ import { Share2, Loader2, Plus, Trash2 } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
+// Phase 3: new packs get a global SW running serial instead of the old
+// per-SKU "<sku>-<seq>" label. Old labels keep scanning (barcode lookup is
+// exact), so the two formats run in parallel during changeover — no relabeling.
+const SW_PAD = 5
+const swCode = (n: number) => `SW-${String(n).padStart(SW_PAD, '0')}`
+
 // A line waiting to be generated.
 interface CartLine { sku: string; descr: string | null; last_seq: number; qty: number }
 interface LastBatch { units: LabelUnit[]; lineCount: number }
@@ -64,44 +70,44 @@ export default function GenerateTab({ userId }: { userId: string }) {
     setCart(prev => prev.map(l => l.sku === sku ? { ...l, qty: Math.max(1, l.qty + delta) } : l))
   }
 
-  // Generate every line: reserve seqs + insert packed_units per SKU, then ONE combined PDF.
+  // Generate every line: reserve ONE global block of SW serials for the whole
+  // run, assign them SKU by SKU (contiguous), insert packed_units, then ONE PDF.
+  // Each box gets a single SW label: the SW serial barcode with the SKU printed
+  // as readable text beneath it.
   async function handleGenerateAll() {
     if (!cart.length) { flash('Add at least one SKU to the list', 'error'); return }
+    const totalQty = cart.reduce((s, l) => s + l.qty, 0)
     setGenerating(true)
     try {
+      const { data: startSw, error: seqErr } = await supabase.rpc('reserve_sw_seq', { p_count: totalQty })
+      if (seqErr) throw seqErr
+      let n = Number(startSw)
       const allUnits: LabelUnit[] = []
-      let serialCount = 0
+      const rows: Record<string, unknown>[] = []
       for (const line of cart) {
-        const { data: startSeq, error: seqErr } = await supabase.rpc('reserve_packed_seq', { p_sku: line.sku, p_count: line.qty })
-        if (seqErr) throw seqErr
-        const rows = []
         for (let i = 0; i < line.qty; i++) {
-          const seq = (startSeq as number) + i
-          rows.push({ barcode: `${line.sku}-${seq}`, sku: line.sku, seq, status: 'packed', source: 'warelens', created_by: userId })
-        }
-        const { error: insErr } = await supabase.from('packed_units').insert(rows)
-        if (insErr) throw insErr
-        // Per box: the serialized label (as before) + a non-serial SKU sticker (serial stripped).
-        for (const r of rows) {
-          allUnits.push({ barcode: r.barcode, descr: line.descr || undefined })   // serialized
-          allUnits.push({ barcode: line.sku, descr: line.descr || undefined })     // SKU, no serial
-          serialCount++
+          const barcode = swCode(n)
+          rows.push({ barcode, sku: line.sku, seq: n, status: 'packed', source: 'warelens', created_by: userId })
+          allUnits.push({ barcode, descr: line.sku })   // SW serial + SKU as readable text
+          n++
         }
       }
+      const { error: insErr } = await supabase.from('packed_units').insert(rows)
+      if (insErr) throw insErr
       // Persist the batch so a page refresh never loses the print — the admin
       // Batches tab can re-download the exact sheet after approval. Non-fatal.
       try {
         await supabase.from('barcode_batches').insert({
           created_by: userId,
-          label_count: serialCount,
-          sku_count: serialCount,
+          label_count: totalQty,
+          sku_count: totalQty,
           line_count: cart.length,
           units: allUnits,
           sku_summary: cart.map(l => ({ sku: l.sku, descr: l.descr, qty: l.qty })),
         })
       } catch { /* labels are already generated; batch logging is best-effort */ }
       setLastBatch({ units: allUnits, lineCount: cart.length })
-      flash(`Generated ${serialCount} serialized + ${serialCount} SKU label(s) across ${cart.length} SKU(s)`)
+      flash(`Generated ${totalQty} SW label(s) across ${cart.length} SKU(s) — ${swCode(Number(startSw))} to ${swCode(n - 1)}`)
       setCart([])
       loadSkus()
     } catch (e) {
@@ -152,7 +158,7 @@ export default function GenerateTab({ userId }: { userId: string }) {
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase' as const, letterSpacing: '0.05em', marginBottom: 4 }}>SKU Resolved</div>
                 <div style={{ fontFamily: 'DM Mono', fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{resolved.sku}</div>
                 <div style={{ fontSize: 13, color: 'var(--text2)' }}>{resolved.descr}</div>
-                <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>Last number used: {resolved.last_seq} · next will be {resolved.last_seq + 1}</div>
+                <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>Prints as an SW serial (e.g. SW-00001) with this SKU as text</div>
               </div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>Quantity</div>
@@ -185,7 +191,7 @@ export default function GenerateTab({ userId }: { userId: string }) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontFamily: 'DM Mono', fontSize: 13, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{line.sku}</div>
                       {line.descr && <div style={{ fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' }}>{line.descr}</div>}
-                      <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'DM Mono', marginTop: 1 }}>{line.sku}-{line.last_seq + 1} → {line.sku}-{line.last_seq + line.qty}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'DM Mono', marginTop: 1 }}>× {line.qty} → SW serials</div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       <button onClick={() => changeLineQty(line.sku, -1)} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 16, fontWeight: 700, color: 'var(--text3)', cursor: 'pointer' }}>−</button>
