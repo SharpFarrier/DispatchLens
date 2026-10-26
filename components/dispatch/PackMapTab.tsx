@@ -1,24 +1,31 @@
 'use client'
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { PRODUCT_SHAPE, SIZE_PACKED_TO_SUPPLY } from '@/lib/catalogueMap'
 import { computeMatch, type MatchResult } from '@/lib/packMatch'
 import { AlertTriangle, Camera, Undo2 } from 'lucide-react'
 import BarcodeScanner from './BarcodeScanner'
 
-// Pack & Map (barcoding phase 2). Scan a picked frame, then the NON-SERIAL SKU
-// sticker. On a frame-identity match it COMMITS immediately (pieces.packed_barcode
-// = SKU, status picked -> packed) and lists it with an Undo; mismatches block and
-// don't commit. We map to the SKU, not the serial (serialized format is being
-// retired -> SW-001). Undo reverts packed -> picked (picked_at is untouched, so the
-// frame returns to the Picking "picked today" log).
+// Pack & Map (barcoding phase 3). Scan a picked frame, then the SW box barcode.
+// On a frame-identity match it COMMITS immediately and lists it with an Undo;
+// mismatches block and don't commit.
+//
+//  - SW path (preferred): the scanned code is an SW box barcode (a packed_units
+//    row). We verify the frame against that unit's SKU, then link both sides of
+//    the leg — pieces.packed_barcode = the SW serial, status picked -> packed,
+//    and packed_units.piece_id = the frame id (the frame<->box genealogy).
+//  - SKU fallback (changeover): if the scanned code isn't a packed_units box
+//    barcode, we treat it as the old non-serial SKU sticker (map to the SKU, no
+//    piece_id link) so leftover old-flow boxes still map during the transition.
+//
+// Undo reverts packed -> picked (picked_at is untouched, so the frame returns to
+// the Picking "picked today" log) and clears the box's piece_id link.
 
 interface Frame {
   id: string; barcode: string; shape: string | null; size: string | null
   colour: string | null; mattress: string | null; status: string
 }
 interface SkuMeta { sku: string; product: string | null; size: string | null; fcolor: string | null; mattress: string | null }
-interface Done { frameId: string; frameBarcode: string; sku: string; at: number }
+interface Done { frameId: string; frameBarcode: string; mappedTo: string; swUnitId: string | null; at: number }
 
 const stripSerial = (code: string) => code.replace(/-\d+$/, '')
 
@@ -27,7 +34,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
   const [frame, setFrame] = useState<Frame | null>(null)
   const [frameErr, setFrameErr] = useState('')
   const [meta, setMeta] = useState<SkuMeta | null>(null)
-  const [skuErr, setSkuErr] = useState('')
+  const [boxErr, setBoxErr] = useState('')
   const [match, setMatch] = useState<MatchResult | null>(null)
   const [done, setDone] = useState<Done[]>([])
   const [busy, setBusy] = useState(false)
@@ -36,7 +43,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
   const [picked, setPicked] = useState<number | null>(null)
   const [cameraOn, setCameraOn] = useState(false)
   const frameRef = useRef<HTMLInputElement>(null)
-  const skuRef = useRef<HTMLInputElement>(null)
+  const boxRef = useRef<HTMLInputElement>(null)
 
   const loadCounts = useCallback(async () => {
     const [p, k] = await Promise.all([
@@ -47,7 +54,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
   }, [supabase])
   useEffect(() => { loadCounts() }, [loadCounts])
 
-  const clearCurrent = () => { setFrame(null); setFrameErr(''); setMeta(null); setSkuErr(''); setMatch(null); frameRef.current?.focus() }
+  const clearCurrent = () => { setFrame(null); setFrameErr(''); setMeta(null); setBoxErr(''); setMatch(null); frameRef.current?.focus() }
 
   const scanFrame = async (raw: string) => {
     const barcode = raw.trim()
@@ -60,42 +67,75 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     const f = data as Frame
     if (f.status === 'packed') { setFrameErr(`${barcode} is already packed`); return }
     if (!['picked', 'coated'].includes(f.status)) { setFrameErr(`${barcode} is "${f.status}", not ready to pack`); return }
-    setFrame(f); setMeta(null); setMatch(null); setSkuErr('')
-    skuRef.current?.focus()
+    setFrame(f); setMeta(null); setMatch(null); setBoxErr('')
+    boxRef.current?.focus()
   }
 
-  const scanSku = async (raw: string) => {
-    const scanned = raw.trim()
-    if (!scanned) return
-    setSkuErr('')
-    if (!frame) { setSkuErr('Scan the frame first'); return }
-    let { data } = await supabase.from('packed_skus').select('sku, product, size, fcolor, mattress').eq('sku', scanned).maybeSingle()
-    if (!data) {
+  // Resolve the scanned box code to a SKU meta + (for the SW path) the unit to link.
+  // Returns { meta, swUnitId } on success, or { error } to show.
+  const resolveBox = async (scanned: string): Promise<{ meta: SkuMeta; swUnitId: string | null } | { error: string }> => {
+    // 1. SW path — is this a packed_units box barcode?
+    const { data: unit } = await supabase.from('packed_units')
+      .select('id, sku, status, piece_id').eq('barcode', scanned).maybeSingle()
+    if (unit) {
+      if (unit.piece_id) return { error: `${scanned} is already mapped to a frame` }
+      if (unit.status !== 'packed') return { error: `${scanned} is "${unit.status}", not available to map` }
+      const { data: sk } = await supabase.from('packed_skus')
+        .select('sku, product, size, fcolor, mattress').eq('sku', unit.sku).maybeSingle()
+      if (!sk) return { error: `${scanned} → SKU ${unit.sku} not found in the catalogue` }
+      return { meta: sk as SkuMeta, swUnitId: unit.id }
+    }
+    // 2. SKU fallback — treat it as the old non-serial SKU sticker.
+    let { data: sk } = await supabase.from('packed_skus')
+      .select('sku, product, size, fcolor, mattress').eq('sku', scanned).maybeSingle()
+    if (!sk) {
       const base = stripSerial(scanned)
       if (base !== scanned) {
         const r = await supabase.from('packed_skus').select('sku, product, size, fcolor, mattress').eq('sku', base).maybeSingle()
-        data = r.data
+        sk = r.data
       }
     }
-    if (!data) { setSkuErr(`${scanned} — not a known SKU (scan the SKU sticker)`); return }
-    const m = data as SkuMeta
+    if (!sk) return { error: `${scanned} — not a known SW box or SKU (scan the SW label)` }
+    return { meta: sk as SkuMeta, swUnitId: null }
+  }
+
+  const scanBox = async (raw: string) => {
+    const scanned = raw.trim()
+    if (!scanned) return
+    setBoxErr('')
+    if (!frame) { setBoxErr('Scan the frame first'); return }
+
+    const resolved = await resolveBox(scanned)
+    if ('error' in resolved) { setBoxErr(resolved.error); return }
+    const { meta: m, swUnitId } = resolved
+
     const result = computeMatch(frame, m)
     if (!result.ok) { setMeta(m); setMatch(result); return }   // block; stays until fixed/cleared
-    // Match → commit immediately.
+
+    // Match → commit immediately. For the SW path, packed_barcode carries the SW
+    // serial and the box is linked back to the frame via piece_id.
     setBusy(true)
     try {
       const now = new Date().toISOString()
+      const mappedTo = swUnitId ? scanned : m.sku
       const { data: upd, error } = await supabase.from('pieces')
-        .update({ status: 'packed', packed_barcode: m.sku, packed_at: now })
+        .update({ status: 'packed', packed_barcode: mappedTo, packed_at: now })
         .eq('id', frame.id).in('status', ['picked', 'coated']).select('id')
       if (error) throw error
-      if (!upd || !upd.length) { setSkuErr(`${frame.barcode} was no longer pickable (already packed?)`); return }
-      setDone(prev => [{ frameId: frame.id, frameBarcode: frame.barcode, sku: m.sku, at: Date.now() }, ...prev].slice(0, 60))
-      setFlash(`Mapped ${frame.barcode} → ${m.sku}`)
+      if (!upd || !upd.length) { setBoxErr(`${frame.barcode} was no longer pickable (already packed?)`); return }
+      if (swUnitId) {
+        // Link the box to the frame. Guard on piece_id still null so two frames
+        // can't race onto one box.
+        const { error: linkErr } = await supabase.from('packed_units')
+          .update({ piece_id: frame.id }).eq('id', swUnitId).is('piece_id', null)
+        if (linkErr) throw linkErr
+      }
+      setDone(prev => [{ frameId: frame.id, frameBarcode: frame.barcode, mappedTo, swUnitId, at: Date.now() }, ...prev].slice(0, 60))
+      setFlash(`Mapped ${frame.barcode} → ${mappedTo}`)
       clearCurrent()
       loadCounts()
     } catch (e) {
-      setSkuErr('Map failed: ' + (e as Error).message)
+      setBoxErr('Map failed: ' + (e as Error).message)
     } finally {
       setBusy(false)
     }
@@ -108,6 +148,9 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
         .update({ status: 'picked', packed_barcode: null, packed_at: null })
         .eq('id', item.frameId).eq('status', 'packed')
       if (error) throw error
+      if (item.swUnitId) {
+        await supabase.from('packed_units').update({ piece_id: null }).eq('id', item.swUnitId)
+      }
       setDone(prev => prev.filter(d => d.frameId !== item.frameId))
       setFlash(`Undone — ${item.frameBarcode} back to picked`)
       loadCounts()
@@ -138,9 +181,9 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
         {cameraOn && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11.5, color: 'var(--text3)', marginBottom: 6 }}>
-              Camera — now scanning: <b style={{ color: 'var(--accent)' }}>{frame ? 'SKU sticker' : 'frame barcode'}</b>
+              Camera — now scanning: <b style={{ color: 'var(--accent)' }}>{frame ? 'SW box barcode' : 'frame barcode'}</b>
             </div>
-            <BarcodeScanner onScan={(v) => { if (!frame) void scanFrame(v); else void scanSku(v) }} onClose={() => setCameraOn(false)} />
+            <BarcodeScanner onScan={(v) => { if (!frame) void scanFrame(v); else void scanBox(v) }} onClose={() => setCameraOn(false)} />
           </div>
         )}
 
@@ -154,13 +197,13 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
           </div>
         )}
 
-        <div style={{ marginTop: 16 }}><Label n={2} text="Scan the SKU sticker (non-serial) — maps on match" /></div>
-        <input ref={skuRef} onKeyDown={onKey(scanSku)} placeholder="Scan or type the SKU barcode" style={input} />
-        {skuErr && <Msg>{skuErr}</Msg>}
+        <div style={{ marginTop: 16 }}><Label n={2} text="Scan the SW box barcode — maps on match" /></div>
+        <input ref={boxRef} onKeyDown={onKey(scanBox)} placeholder="Scan or type the SW box barcode" style={input} />
+        {boxErr && <Msg>{boxErr}</Msg>}
         {match && !match.ok && meta && (
           <div style={blockBanner}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-            <div><b>Blocked — not mapped.</b> {match.reasons.join('; ')}. Grab the right SKU sticker (or frame), then rescan. <button onClick={clearCurrent} style={{ background: 'none', border: 'none', color: 'var(--red)', textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5, padding: 0 }}>clear</button></div>
+            <div><b>Blocked — not mapped.</b> {match.reasons.join('; ')}. Grab the right box (or frame), then rescan. <button onClick={clearCurrent} style={{ background: 'none', border: 'none', color: 'var(--red)', textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5, padding: 0 }}>clear</button></div>
           </div>
         )}
         {flash && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--green)', background: 'var(--green-soft)', padding: '8px 11px', borderRadius: 8 }}>{flash}</div>}
@@ -174,7 +217,8 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
               <div key={d.frameId} style={{ display: 'flex', gap: 10, alignItems: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5 }}>
                 <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{d.frameBarcode}</span>
                 <span style={{ color: 'var(--text3)' }}>→</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{d.sku}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text2)' }}>{d.mappedTo}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: d.swUnitId ? 'var(--accent)' : 'var(--text3)', background: d.swUnitId ? 'var(--accent-bg)' : 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 5px' }}>{d.swUnitId ? 'SW' : 'SKU'}</span>
                 <span style={{ flex: 1 }} />
                 <button onClick={() => undo(d)} disabled={busy} title="Undo this mapping" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text2)', borderRadius: 7, padding: '4px 9px', cursor: 'pointer', fontSize: 11.5, fontWeight: 600 }}>
                   <Undo2 size={13} /> Undo
