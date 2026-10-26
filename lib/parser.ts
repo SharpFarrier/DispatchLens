@@ -67,10 +67,6 @@ function isCancelledStatus(status: string): boolean {
   return ['cancel', 'cancelled', 'canceled'].includes(status.toLowerCase().trim())
 }
 
-function isDispatchedStatus(status: string): boolean {
-  return status.toLowerCase().trim() === 'dispatched'
-}
-
 function isReplacementStatus(status: string): boolean {
   return status.toLowerCase().trim() === 'replacement'
 }
@@ -201,7 +197,11 @@ export function parseOrders(rawText: string, courier: Courier): ParsedOrder[] {
       urgency: computeUrgency(daysLeft),
       is_cancelled: isCancelledStatus(rawStatus) || isCancelledStatus(skuRaw),
       is_replacement: isReplacementStatus(rawStatus),
-      is_dispatched: isDispatchedStatus(rawStatus),
+      // Never auto-dispatch from the imported sheet status. Marketplaces (esp.
+      // Flipkart) flag an order "Dispatched" when the seller confirms RTD / the
+      // label is generated — before the parcel physically leaves the warehouse.
+      // Dispatch is set only by a real scan or manual dispatch inside DispatchLens.
+      is_dispatched: false,
       is_priority: false,
       // ── Invoice + contact tail ──
       contact_number: get('contact') || null,
