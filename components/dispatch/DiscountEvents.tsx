@@ -110,7 +110,7 @@ export default function DiscountEvents() {
       const rows = chosen.map(sku => ({ event_id: eventId, sku, discount_pct: disc, commission_rate: comm }))
       const { error } = await supabase.from('recon_discount_event_skus').insert(rows)
       if (error) throw error
-      setMsg({ ok: true, text: `Applied ${disc}% off${comm != null ? ` · ${comm}% commission` : ''} to ${chosen.length} SKU(s).` })
+      setMsg({ ok: true, text: `Applied ${disc}% off${comm != null ? ` · ${comm}% commission off` : ''} to ${chosen.length} SKU(s).` })
       void load()
     } catch (e) { setMsg({ ok: false, text: 'Apply failed: ' + (e as Error).message }) }
     setSaving(false)
@@ -132,7 +132,7 @@ export default function DiscountEvents() {
     <div style={{ maxWidth: 1000, display: 'flex', flexDirection: 'column' as const, gap: 18 }}>
       <div>
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px' }}>Discount events</h2>
-        <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0 }}>Time-boxed promotions. During an event, expected price = base × (1 − discount%), and if you set a reduced commission %, recon uses it and shows the reward (commission saved). Use <code style={{ background: 'var(--bg2)', padding: '1px 5px', borderRadius: 4 }}>__ALL__</code> for every SKU.</p>
+        <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0 }}>Time-boxed promotions. During an event, expected price = base × (1 − discount%), and the <strong>commission off</strong> is deducted (in percentage points) from your rate-card commission — so it applies correctly to above/below-threshold tiers. The reward is the commission saved. Use <code style={{ background: 'var(--bg2)', padding: '1px 5px', borderRadius: 4 }}>__ALL__</code> for every SKU.</p>
       </div>
 
       {msg && <div style={{ borderRadius: 8, padding: '10px 14px', fontSize: 13, fontWeight: 600, border: `1px solid ${msg.ok ? '#bbf7d0' : '#fecaca'}`, background: msg.ok ? 'var(--dispatched-bg)' : 'var(--critical-bg)', color: msg.ok ? 'var(--dispatched)' : 'var(--critical)' }}>{msg.text}</div>}
@@ -177,7 +177,7 @@ export default function DiscountEvents() {
                       <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg2)', borderRadius: 6, padding: '6px 10px' }}>
                         <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: s.sku === '__ALL__' ? 'var(--accent)' : 'var(--text)', fontWeight: s.sku === '__ALL__' ? 700 : 400, minWidth: 160 }}>{s.sku === '__ALL__' ? 'All SKUs' : s.sku}</span>
                         <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 700, color: 'var(--today)' }}>{s.discount_pct}% off</span>
-                        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: s.commission_rate != null ? 'var(--accent)' : 'var(--text3)' }}>{s.commission_rate != null ? `${s.commission_rate}% comm` : 'comm unchanged'}</span>
+                        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: s.commission_rate != null ? 'var(--accent)' : 'var(--text3)' }}>{s.commission_rate != null ? `−${s.commission_rate}% comm off` : 'comm unchanged'}</span>
                         <button onClick={() => deleteSku(s.id, e.id)} title="Remove" style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'inline-flex' }}><Trash2 size={13} /></button>
                       </div>
                     ))}
@@ -189,7 +189,7 @@ export default function DiscountEvents() {
                   <div style={{ fontSize: 12, fontWeight: 700 }}>Add discount to many SKUs — deselect the ones not participating</div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
                     <input value={b.disc} onChange={ch => setBulkFor(e.id, { disc: ch.target.value })} inputMode="decimal" placeholder="Discount %" style={{ ...input, width: 110, fontFamily: 'DM Mono' }} />
-                    <input value={b.comm} onChange={ch => setBulkFor(e.id, { comm: ch.target.value })} inputMode="decimal" placeholder="Reduced commission % (optional)" style={{ ...input, width: 220, fontFamily: 'DM Mono' }} />
+                    <input value={b.comm} onChange={ch => setBulkFor(e.id, { comm: ch.target.value })} inputMode="decimal" placeholder="Commission off % — deducted from rate card (optional)" style={{ ...input, width: 300, fontFamily: 'DM Mono' }} />
                     <input value={b.filter} onChange={ch => setBulkFor(e.id, { filter: ch.target.value })} placeholder="Filter SKUs…" style={{ ...input, width: 180 }} />
                     <button onClick={() => { ensureInit(e.id); const sel = { ...b.sel }; for (const m of filtered) sel[m.sku] = true; setBulkFor(e.id, { sel }) }} style={{ ...chipBtn }}>Select all</button>
                     <button onClick={() => { const sel = { ...b.sel }; for (const m of filtered) sel[m.sku] = false; setBulkFor(e.id, { sel }) }} style={{ ...chipBtn }}>Clear</button>
@@ -227,7 +227,7 @@ function SingleAdd({ onAdd }: { onAdd: (sku: string, disc: string, comm: string)
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const, marginLeft: 'auto' }}>
       <input value={sku} onChange={e => setSku(e.target.value)} placeholder="SKU or __ALL__" style={{ ...input, width: 150, fontFamily: 'DM Mono' }} />
       <input value={disc} onChange={e => setDisc(e.target.value)} inputMode="decimal" placeholder="Disc %" style={{ ...input, width: 80, fontFamily: 'DM Mono' }} />
-      <input value={comm} onChange={e => setComm(e.target.value)} inputMode="decimal" placeholder="Comm %" style={{ ...input, width: 80, fontFamily: 'DM Mono' }} />
+      <input value={comm} onChange={e => setComm(e.target.value)} inputMode="decimal" placeholder="Comm off %" style={{ ...input, width: 90, fontFamily: 'DM Mono' }} />
       <button onClick={() => { onAdd(sku, disc, comm); setSku(''); setDisc(''); setComm('') }} style={{ ...chipBtn }}><Plus size={13} /> Add one</button>
     </div>
   )

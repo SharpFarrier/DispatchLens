@@ -823,10 +823,14 @@ function ChargesView() {
       const gross = platform === 'Amazon' ? invoice : principal   // customer-paid price
       const normalRate = gross <= card.threshold ? card.rate_below : card.rate_above
       const ev = eventFor(platform, sku, orderDate)
-      const effRate = (ev && ev.commission != null) ? ev.commission : normalRate   // reduced during an event
+      // The event "commission off" is DEDUCTED (in percentage points) from the rate-card
+      // rate, so it applies correctly across tiers (above/below the threshold have different
+      // base rates). e.g. normal 15.5 with 8 off -> 7.5; a ₹15k+ order at 11 -> 3.
+      const reduction = (ev && ev.commission != null) ? ev.commission : 0
+      const effRate = Math.max(0, normalRate - reduction)
       const gstFactor = platform === 'Amazon' ? 1.18 : 1
       const toBeChargedPct = effRate * gstFactor
-      const reward = (ev && ev.commission != null) ? ((normalRate - ev.commission) * gstFactor / 100) * principal : null
+      const reward = (ev && ev.commission != null) ? ((normalRate - effRate) * gstFactor / 100) * principal : null
       const expComm = (toBeChargedPct / 100) * principal
       const expClosing = card.closing_fee * (qty || 1) + (card.closing_fee_pct / 100) * gross   // flat closing/fixed fee is per piece
       const expGst = gstR * (expComm + expClosing)
