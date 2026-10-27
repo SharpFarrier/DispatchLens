@@ -533,9 +533,15 @@ function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
       const tt = (l.transaction_type || '').toLowerCase()
       const amt = l.amount || 0
       detail.push({ label: `${l.amount_description || l.transaction_type || 'line'}${tt !== 'order' ? ` (${l.transaction_type})` : ''}`, amount: amt })
-      if (tt !== 'order') { returned = true; reverseResidual += amt; continue }
-      const key = amazonBucket(l.amount_description || '') as keyof typeof b
-      b[key] += amt; b.net += amt
+      if (/refund|return/.test(tt)) { returned = true; reverseResidual += amt; continue }  // only an actual refund/return marks the order returned
+      if (tt === 'order') {
+        const key = amazonBucket(l.amount_description || '') as keyof typeof b
+        b[key] += amt; b.net += amt
+      } else {
+        // Other non-order deductions/credits — Promotion Deduction (promo rebate / No-Cost EMI),
+        // Adjustment, Service Fee, etc. Real money that belongs in net; bucket as "other". NOT a return.
+        b.other += amt; b.net += amt
+      }
     }
   } else if (platform === 'Flipkart') {
     for (const l of lines) {
