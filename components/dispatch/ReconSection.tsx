@@ -884,7 +884,9 @@ function ChargesView() {
   const pctSub = (fee: number | null | undefined, sale: number | null | undefined) => (fee && sale) ? <span style={{ display: 'block', fontSize: 10, color: 'var(--text3)' }}>{(Math.abs(fee) / sale * 100).toFixed(1)}%</span> : null
 
   // Invoice (sold-at, incl 18% GST) = Principal × 1.18, uniform across platforms.
-  const invoiceOf = (r: ChargeRow) => (r.agg?.sale ?? 0) * 1.18
+  // Customer-paid price. Only Amazon's Principal is ex-GST (so ×1.18); Flipkart and
+  // Website Principal is already the tax-inclusive selling price.
+  const invoiceOf = (r: ChargeRow) => r.platform === 'Amazon' ? (r.agg?.sale ?? 0) * 1.18 : (r.agg?.sale ?? 0)
   const pctCell = (v: number | null) => v == null ? <span style={{ color: 'var(--text3)' }}>—</span> : <span style={{ fontFamily: 'var(--font-mono)' }}>{v.toFixed(1)}%</span>
   const COLS: ChgCol[] = useMemo(() => [
     { key: 'order_date', label: 'Order date', type: 'date', get: r => r.order_date || '', render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{fmt(r.order_date)}</span> },
