@@ -582,6 +582,7 @@ interface ChargeRow {
   qty: number
   order_id: string; sku: string | null; platform: string; order_date: string | null
   payment_date: string | null; agg: ChargeAgg | null
+  bau: number | null   // listing price I set (recon_prices), effective on the order date
 }
 type ChgCol = { key: string; label: string; type: 'text' | 'category' | 'number' | 'date'; align?: 'right'; get: (r: ChargeRow) => string | number; render?: (r: ChargeRow) => ReactNode }
 
@@ -726,6 +727,25 @@ function ChargesView() {
     // span several rows). This is the "Qty" the charges cover.
     const qtyByOid: Record<string, number> = {}
     for (const o of (orders || [])) { const k = (o.order_id || '').trim(); if (k) qtyByOid[k] = (qtyByOid[k] || 0) + 1 }
+
+    // Listing price (BAU) per SKU, effective-dated, from recon_prices. A SKU can have
+    // several dated rows (e.g. a discounted price for an event window); pick the one in
+    // effect on the order's date, else the most recent.
+    const { data: priceRows } = await supabase.from('recon_prices').select('sku, price, effective_from, effective_to')
+    const priceBySku: Record<string, { price: number; from: string | null; to: string | null }[]> = {}
+    for (const p of (priceRows || [])) {
+      const k = (p.sku || '').trim(); if (!k) continue
+      ;(priceBySku[k] ??= []).push({ price: Number(p.price) || 0, from: p.effective_from ?? null, to: p.effective_to ?? null })
+    }
+    const bauFor = (sku: string | null, date: string | null): number | null => {
+      const k = (sku || '').trim(); if (!k) return null
+      const list = priceBySku[k]; if (!list || !list.length) return null
+      const d = date || ''
+      const inRange = list.filter(p => (!p.from || p.from <= d) && (!p.to || p.to >= d))
+      const pick = (inRange.length ? inRange : list).slice().sort((a, b) => (b.from || '').localeCompare(a.from || ''))[0]
+      return pick ? pick.price : null
+    }
+
     const seenOids = new Set<string>()
     const out: ChargeRow[] = []
     for (const o of (orders || [])) {
@@ -734,7 +754,7 @@ function ChargesView() {
       if (seenOids.has(oid)) continue
       seenOids.add(oid)
       const plat = platformOf(oid); const lines = byOrder[oid]
-      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null })
+      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null, bau: bauFor(o.barcode_sku || o.sku, o.order_date) })
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
@@ -745,18 +765,26 @@ function ChargesView() {
   const pctBucket = (p: number | null | undefined) => (p == null || p < 0) ? '—' : (Math.round(p * 2) / 2).toFixed(1)
   const pctSub = (fee: number | null | undefined, sale: number | null | undefined) => (fee && sale) ? <span style={{ display: 'block', fontSize: 10, color: 'var(--text3)' }}>{(Math.abs(fee) / sale * 100).toFixed(1)}%</span> : null
 
+  // Invoice (sold-at, incl 18% GST) = Principal × 1.18, uniform across platforms.
+  const invoiceOf = (r: ChargeRow) => (r.agg?.sale ?? 0) * 1.18
+  const pctCell = (v: number | null) => v == null ? <span style={{ color: 'var(--text3)' }}>—</span> : <span style={{ fontFamily: 'var(--font-mono)' }}>{v.toFixed(1)}%</span>
   const COLS: ChgCol[] = useMemo(() => [
     { key: 'qty', label: 'Qty', type: 'number', align: 'right', get: r => r.qty, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.qty}</span> },
-    { key: 'sale', label: 'Sale', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.sale)}</span> },
+    { key: 'bau', label: 'BAU (Listing Price)', type: 'number', align: 'right', get: r => r.bau ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.bau)}</span> },
+    { key: 'invoice', label: 'Invoice Amount', type: 'number', align: 'right', get: r => invoiceOf(r), render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(invoiceOf(r))}</span> },
+    { key: 'sale', label: 'Principal', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.sale)}</span> },
+    { key: 'discountPct', label: 'Discount %', type: 'number', align: 'right', get: r => r.bau ? ((r.bau - invoiceOf(r)) / r.bau * 100) : 0, render: r => pctCell(r.bau ? ((r.bau - invoiceOf(r)) / r.bau * 100) : null) },
     { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.commission)}</span> },
     { key: 'commissionPct', label: 'Comm %', type: 'number', align: 'right', get: r => r.agg?.commissionPct ?? -1, render: r => r.agg?.commissionPct != null ? <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)' }}>{r.agg.commissionPct.toFixed(1)}%</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
-    { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.closing)}{pctSub(r.agg?.closing, r.agg?.sale)}</span> },
+    { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.closing)}</span> },
+    { key: 'closingPct', label: 'Closing %', type: 'number', align: 'right', get: r => r.agg?.sale ? Math.abs(r.agg.closing) / r.agg.sale * 100 : 0, render: r => pctCell(r.agg?.sale ? Math.abs(r.agg.closing) / r.agg.sale * 100 : null) },
     { key: 'shipping', label: 'Shipping', type: 'number', align: 'right', get: r => r.agg?.shipping ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.shipping)}{pctSub(r.agg?.shipping, r.agg?.sale)}</span> },
     { key: 'fba', label: 'FBA', type: 'number', align: 'right', get: r => r.agg?.fba ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.fba)}{pctSub(r.agg?.fba, r.agg?.sale)}</span> },
     { key: 'productTax', label: 'Tax', type: 'number', align: 'right', get: r => r.agg?.productTax ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.productTax)}</span> },
     { key: 'tcs', label: 'TCS', type: 'number', align: 'right', get: r => r.agg?.tcs ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.tcs)}</span> },
     { key: 'tds', label: 'TDS', type: 'number', align: 'right', get: r => r.agg?.tds ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.tds)}</span> },
     { key: 'gstOnFees', label: 'GST on fees', type: 'number', align: 'right', get: r => r.agg?.gstOnFees ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{money(r.agg?.gstOnFees)}</span> },
+    { key: 'other', label: 'Other charges', type: 'number', align: 'right', get: r => r.agg?.other ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.other)}</span> },
     { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
   ], [])
 
