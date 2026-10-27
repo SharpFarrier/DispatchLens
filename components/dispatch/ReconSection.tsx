@@ -14,7 +14,7 @@ import PriceMaster from './PriceMaster'
 import DiscountEvents from './DiscountEvents'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }
-type Tab = 'inbox' | 'orders' | 'charges' | 'ratecard' | 'prices' | 'discounts'
+type Tab = 'inbox' | 'charges' | 'ratecard' | 'prices' | 'discounts'
 
 interface UploadRow { id: string; platform: string; file_name: string; row_count: number; dedup_ids: string[]; created_at: string; total_settled?: number | null; order_count?: number | null; deposit_date?: string | null; period_start?: string | null; period_end?: string | null }
 type FileAggMap = Record<string, { total: number; orders: number; depositDate: string | null; periodStart: string | null; periodEnd: string | null }>
@@ -195,11 +195,11 @@ export default function ReconSection() {
   return (
     <div style={{ maxWidth: 1280 }}>
       <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
-        {(['inbox', 'orders', 'charges', 'ratecard', 'prices', 'discounts'] as Tab[]).map(t => (
+        {(['inbox', 'charges', 'ratecard', 'prices', 'discounts'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
             background: tab === t ? 'var(--accent)' : 'var(--surface)', color: tab === t ? '#fff' : 'var(--text2)',
-          }}>{t === 'inbox' ? 'Settlement Inbox' : t === 'orders' ? 'Orders' : t === 'charges' ? 'Charges' : t === 'ratecard' ? 'Rate Card' : t === 'prices' ? 'Price Master' : 'Discounts'}</button>
+          }}>{t === 'inbox' ? 'Settlement Inbox' : t === 'charges' ? 'Charges' : t === 'ratecard' ? 'Rate Card' : t === 'prices' ? 'Price Master' : 'Discounts'}</button>
         ))}
         <button onClick={() => loadInbox()} style={{ marginLeft: 'auto', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', cursor: 'pointer', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
           <RefreshCw size={13} /> Refresh
@@ -215,8 +215,6 @@ export default function ReconSection() {
 
       {tab === 'inbox' ? (
         <InboxView uploads={uploads} totals={totals} fileAgg={fileAgg} loading={loading} busy={busy} onFiles={handleFiles} />
-      ) : tab === 'orders' ? (
-        <OrdersView />
       ) : tab === 'charges' ? (
         <ChargesView />
       ) : tab === 'ratecard' ? (
@@ -598,9 +596,11 @@ interface ChargeRow {
   qty: number
   order_id: string; sku: string | null; platform: string; order_date: string | null
   payment_date: string | null; agg: ChargeAgg | null
-  bau: number | null       // listing price (New Price from master sheet, else recon_prices)
+  bau: number | null       // listing price × qty (New Price from master sheet, else recon_prices)
   category: string | null  // from master sheet, for the rate card
   exp: Expected | null     // expected charges + gap (B2)
+  dispatch_date: string | null; delivery_date: string | null
+  tracking_number: string | null; tracking_status: string | null
 }
 type ChgCol = { key: string; label: string; type: 'text' | 'category' | 'number' | 'date'; align?: 'right'; get: (r: ChargeRow) => string | number; render?: (r: ChargeRow) => ReactNode }
 
@@ -718,12 +718,15 @@ function ChargesView() {
   const loadWindow = useCallback(async () => {
     if (win === 'custom' && (!customFrom || !customTo)) { setRows([]); setLoading(false); return }
     setLoading(true)
-    const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; order_date: string | null }>((from, to) => {
-      let q = supabase.from('dispatch_orders').select('order_id, sku, barcode_sku, order_date').eq('is_dispatched', true).eq('is_cancelled', false)
+    const orders = await fetchAllRows<{ order_id: string; sku: string | null; barcode_sku: string | null; order_date: string | null; dispatched_at: string | null; delivered_at: string | null; tracking_number: string | null; tracking_status: string | null }>((from, to) => {
+      let q = supabase.from('dispatch_orders').select('order_id, sku, barcode_sku, order_date, dispatched_at, delivered_at, tracking_number, tracking_status').eq('is_dispatched', true).eq('is_cancelled', false)
       if (range.from) q = q.gte('order_date', range.from)
       if (range.to) q = q.lte('order_date', range.to)
       return q.order('order_date', { ascending: false }).order('id', { ascending: false }).range(from, to)
     })
+    // Per-order dispatch/delivery/tracking (first row per order_id).
+    const ometa: Record<string, { dispatched_at: string | null; delivered_at: string | null; tracking_number: string | null; tracking_status: string | null }> = {}
+    for (const o of (orders || [])) { const k = (o.order_id || '').trim(); if (k && !ometa[k]) ometa[k] = { dispatched_at: o.dispatched_at, delivered_at: o.delivered_at, tracking_number: o.tracking_number, tracking_status: o.tracking_status } }
     const oids = Array.from(new Set((orders || []).map(o => o.order_id).filter(Boolean)))
     const byOrder: Record<string, SettleLine[]> = {}
     const payDate: Record<string, string> = {}
@@ -810,7 +813,7 @@ function ChargesView() {
       return null
     }
 
-    const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null, sku: string | null, orderDate: string | null): Expected | null => {
+    const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null, sku: string | null, orderDate: string | null, qty: number): Expected | null => {
       if (!agg) return null
       if (agg.returned) return null   // refunded/returned order — we don't expect a payout, so no expected net / gap
       const card = rateCard[platform]?.[category || 'Uncategorized'] || rateCard[platform]?.['Uncategorized']
@@ -825,7 +828,7 @@ function ChargesView() {
       const toBeChargedPct = effRate * gstFactor
       const reward = (ev && ev.commission != null) ? ((normalRate - ev.commission) * gstFactor / 100) * principal : null
       const expComm = (toBeChargedPct / 100) * principal
-      const expClosing = card.closing_fee + (card.closing_fee_pct / 100) * gross
+      const expClosing = card.closing_fee * (qty || 1) + (card.closing_fee_pct / 100) * gross   // flat closing/fixed fee is per piece
       const expGst = gstR * (expComm + expClosing)
       const expTcs = tcsR * gross, expTds = tdsR * gross
       const expNet = gross + (agg.shipping || 0) + (agg.fba || 0) + (agg.other || 0) - (expComm + expClosing + expGst + expTcs + expTds)
@@ -852,7 +855,10 @@ function ChargesView() {
       const sp = sheetFor(o.barcode_sku || o.sku)
       const agg = lines ? aggregateCharges(plat, lines) : null
       const category = sp?.category ?? null
-      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date), category, exp: computeExpected(plat, category, agg, o.barcode_sku || o.sku, o.order_date) })
+      const qty = qtyByOid[oid] || 1
+      const perPieceBau = (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date)
+      const om = ometa[oid]
+      out.push({ order_id: o.order_id, qty, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: perPieceBau != null ? perPieceBau * qty : null, category, dispatch_date: om?.dispatched_at ?? null, delivery_date: om?.delivered_at ?? null, tracking_number: om?.tracking_number ?? null, tracking_status: om?.tracking_status ?? null, exp: computeExpected(plat, category, agg, o.barcode_sku || o.sku, o.order_date, qty) })
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
@@ -867,6 +873,12 @@ function ChargesView() {
   const invoiceOf = (r: ChargeRow) => (r.agg?.sale ?? 0) * 1.18
   const pctCell = (v: number | null) => v == null ? <span style={{ color: 'var(--text3)' }}>—</span> : <span style={{ fontFamily: 'var(--font-mono)' }}>{v.toFixed(1)}%</span>
   const COLS: ChgCol[] = useMemo(() => [
+    { key: 'order_date', label: 'Order date', type: 'date', get: r => r.order_date || '', render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{fmt(r.order_date)}</span> },
+    { key: 'dispatch_date', label: 'Dispatch date', type: 'date', get: r => r.dispatch_date || '', render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{fmt(r.dispatch_date)}</span> },
+    { key: 'delivery_date', label: 'Delivery date', type: 'date', get: r => r.delivery_date || '', render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{fmt(r.delivery_date)}</span> },
+    { key: 'payment_date', label: 'Payment date', type: 'date', get: r => r.payment_date || '', render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{fmt(r.payment_date)}</span> },
+    { key: 'tracking', label: 'Tracking ID', type: 'text', get: r => r.tracking_number || '', render: r => <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{r.tracking_number || '—'}</span> },
+    { key: 'tracking_status', label: 'Tracking status', type: 'text', get: r => r.tracking_status || '', render: r => <span style={{ fontSize: 11, color: 'var(--text2)' }}>{r.tracking_status || '—'}</span> },
     { key: 'qty', label: 'Qty', type: 'number', align: 'right', get: r => r.qty, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.qty}</span> },
     { key: 'category', label: 'Category', type: 'text', get: r => r.category || '', render: r => <span style={{ fontSize: 11, color: r.category ? 'var(--text2)' : 'var(--text3)' }}>{r.category || '—'}</span> },
     { key: 'bau', label: 'BAU (Listing Price)', type: 'number', align: 'right', get: r => r.bau ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.bau)}</span> },
@@ -921,10 +933,10 @@ function ChargesView() {
   const _cxg = useExportGate('recon', 'Recon charges export')
   const exportChargesCsv = () => {
     const esc = (v: string | number | null | undefined) => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t }
-    const headers = ['Order ID', 'SKU', 'Platform', 'Order Date', 'Payment Date', ...COLS.map(c => c.label)]
+    const headers = ['Order ID', 'SKU', 'Platform', ...COLS.map(c => c.label)]
     const lines = [headers.join(',')]
     for (const r of filtered) {
-      const cells: (string | number)[] = [r.order_id, r.sku || '', r.platform, r.order_date || '', r.payment_date || '',
+      const cells: (string | number)[] = [r.order_id, r.sku || '', r.platform,
         ...COLS.map(c => { const v = c.get(r); return (c.key === 'commissionPct' && (v as number) < 0) ? '' : v })]
       lines.push(cells.map(esc).join(','))
     }
