@@ -726,12 +726,17 @@ function ChargesView() {
     const oids = Array.from(new Set((orders || []).map(o => o.order_id).filter(Boolean)))
     const byOrder: Record<string, SettleLine[]> = {}
     const payDate: Record<string, string> = {}
-    const CH = 50
-    for (let i = 0; i < oids.length; i += CH) {
-      const slice = oids.slice(i, i + CH)
-      const chunk = await fetchAllRows<{ order_id: string | null; amount: number | null; transaction_type: string | null; amount_description: string | null; settlement_date: string | null; raw: Record<string, unknown> | null }>((from, to) =>
-        supabase.from('settlements').select('order_id, amount, transaction_type, amount_description, settlement_date, raw').in('order_id', slice).order('id', { ascending: true }).range(from, to))
-      for (const r of chunk) {
+    type SettleRow = { order_id: string | null; amount: number | null; transaction_type: string | null; amount_description: string | null; settlement_date: string | null; raw: Record<string, unknown> | null }
+    const CH = 100, LIMIT = 8   // 100 order_ids per query; up to 8 queries in flight at once
+    const slices: string[][] = []
+    for (let i = 0; i < oids.length; i += CH) slices.push(oids.slice(i, i + CH))
+    // Fetch settlement chunks in parallel (bounded concurrency) instead of sequentially —
+    // the sequential loop was the Charges tab's main load cost on large windows.
+    for (let i = 0; i < slices.length; i += LIMIT) {
+      const results = await Promise.all(slices.slice(i, i + LIMIT).map(slice =>
+        fetchAllRows<SettleRow>((from, to) =>
+          supabase.from('settlements').select('order_id, amount, transaction_type, amount_description, settlement_date, raw').in('order_id', slice).order('id', { ascending: true }).range(from, to))))
+      for (const chunk of results) for (const r of chunk) {
         const oid = (r.order_id || '').trim(); if (!oid) continue
         ;(byOrder[oid] ??= []).push({ amount: r.amount, transaction_type: r.transaction_type, amount_description: r.amount_description, raw: r.raw })
         if (r.settlement_date && !payDate[oid]) payDate[oid] = r.settlement_date
