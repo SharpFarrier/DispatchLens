@@ -582,7 +582,8 @@ interface ChargeRow {
   qty: number
   order_id: string; sku: string | null; platform: string; order_date: string | null
   payment_date: string | null; agg: ChargeAgg | null
-  bau: number | null   // listing price I set (recon_prices), effective on the order date
+  bau: number | null       // listing price (New Price from master sheet, else recon_prices)
+  category: string | null  // from master sheet, for the rate card
 }
 type ChgCol = { key: string; label: string; type: 'text' | 'category' | 'number' | 'date'; align?: 'right'; get: (r: ChargeRow) => string | number; render?: (r: ChargeRow) => ReactNode }
 
@@ -746,6 +747,13 @@ function ChargesView() {
       return pick ? pick.price : null
     }
 
+    // Master sheet (live): SKU → { category, newPrice }, keyed by every sku alias.
+    // Non-fatal — if it fails, category/BAU-from-sheet just stay empty.
+    let sheetSkus: Record<string, { category: string; newPrice: number | null }> = {}
+    try { const res = await fetch('/api/recon/master'); if (res.ok) { const j = await res.json(); sheetSkus = j.skus || {} } } catch { /* ignore */ }
+    const normSku = (s: string | null) => (s || '').replace(/\s+/g, '').toUpperCase()
+    const sheetFor = (sku: string | null) => sheetSkus[normSku(sku)] || null
+
     const seenOids = new Set<string>()
     const out: ChargeRow[] = []
     for (const o of (orders || [])) {
@@ -754,7 +762,8 @@ function ChargesView() {
       if (seenOids.has(oid)) continue
       seenOids.add(oid)
       const plat = platformOf(oid); const lines = byOrder[oid]
-      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null, bau: bauFor(o.barcode_sku || o.sku, o.order_date) })
+      const sp = sheetFor(o.barcode_sku || o.sku)
+      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null, bau: (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date), category: sp?.category ?? null })
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
@@ -770,6 +779,7 @@ function ChargesView() {
   const pctCell = (v: number | null) => v == null ? <span style={{ color: 'var(--text3)' }}>—</span> : <span style={{ fontFamily: 'var(--font-mono)' }}>{v.toFixed(1)}%</span>
   const COLS: ChgCol[] = useMemo(() => [
     { key: 'qty', label: 'Qty', type: 'number', align: 'right', get: r => r.qty, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{r.qty}</span> },
+    { key: 'category', label: 'Category', type: 'text', get: r => r.category || '', render: r => <span style={{ fontSize: 11, color: r.category ? 'var(--text2)' : 'var(--text3)' }}>{r.category || '—'}</span> },
     { key: 'bau', label: 'BAU (Listing Price)', type: 'number', align: 'right', get: r => r.bau ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.bau)}</span> },
     { key: 'invoice', label: 'Invoice Amount', type: 'number', align: 'right', get: r => invoiceOf(r), render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(invoiceOf(r))}</span> },
     { key: 'sale', label: 'Principal', type: 'number', align: 'right', get: r => r.agg?.sale ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.sale)}</span> },
