@@ -786,6 +786,7 @@ function ChargesView() {
 
     const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null): Expected | null => {
       if (!agg) return null
+      if (agg.returned) return null   // refunded/returned order — we don't expect a payout, so no expected net / gap
       const card = rateCard[platform]?.[category || 'Uncategorized'] || rateCard[platform]?.['Uncategorized']
       if (!card) return null
       const principal = agg.sale || 0
