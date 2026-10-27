@@ -7,7 +7,7 @@ import { Plus, Trash2, ChevronRight, Tag, Check, Square, CheckSquare } from 'luc
 // Phase C — time-boxed promotions. During an event, a SKU's expected price is
 // base × (1 − discount%), and (if set) the platform charges a REDUCED commission
 // rate. The reward is the commission saved = (normal rate − reduced rate) × principal.
-interface EventSku { id: string; sku: string; discount_pct: number; commission_rate: number | null }
+interface EventSku { id: string; sku: string; discount_pct: number; off_amazon: number | null; off_flipkart: number | null }
 interface DiscEvent { id: string; name: string; platform: string; start_date: string; end_date: string; skus: EventSku[] }
 interface MasterSku { sku: string; name: string }
 const PLATFORMS = ['Amazon', 'Flipkart', 'Website', 'Both'] as const
@@ -17,7 +17,7 @@ const input = { padding: '7px 9px', borderRadius: 6, border: '1px solid var(--bo
 const fmtDate = (s: string) => s ? new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
 const platColor = (p: string) => p === 'Amazon' ? { fg: '#b45309', bg: '#fef3c7' } : p === 'Flipkart' ? { fg: '#2563eb', bg: '#eff6ff' } : p === 'Website' ? { fg: '#7c3aed', bg: '#f5f3ff' } : { fg: 'var(--text2)', bg: 'var(--bg2)' }
 
-interface BulkState { disc: string; comm: string; filter: string; sel: Record<string, boolean>; init: boolean }
+interface BulkState { disc: string; commA: string; commF: string; filter: string; sel: Record<string, boolean>; init: boolean }
 
 export default function DiscountEvents() {
   const supabase = createClient()
@@ -38,7 +38,8 @@ export default function DiscountEvents() {
       const byEvent: Record<string, EventSku[]> = {}
       for (const s of (sks || []) as Record<string, unknown>[]) {
         const eid = String(s.event_id)
-        ;(byEvent[eid] ??= []).push({ id: String(s.id), sku: String(s.sku ?? ''), discount_pct: Number(s.discount_pct ?? 0), commission_rate: s.commission_rate == null ? null : Number(s.commission_rate) })
+        const legacy = s.commission_rate == null ? null : Number(s.commission_rate)
+        ;(byEvent[eid] ??= []).push({ id: String(s.id), sku: String(s.sku ?? ''), discount_pct: Number(s.discount_pct ?? 0), off_amazon: s.commission_off_amazon == null ? legacy : Number(s.commission_off_amazon), off_flipkart: s.commission_off_flipkart == null ? legacy : Number(s.commission_off_flipkart) })
       }
       setEvents((evs || []).map((e: Record<string, unknown>) => ({
         id: String(e.id), name: String(e.name ?? ''), platform: String(e.platform ?? 'Both'),
@@ -92,14 +93,16 @@ export default function DiscountEvents() {
     setEvents(prev => prev.map(e => e.id === eventId ? { ...e, skus: e.skus.filter(s => s.id !== id) } : e))
   }
 
-  const getBulk = (eid: string): BulkState => bulk[eid] || { disc: '', comm: '', filter: '', sel: {}, init: false }
+  const getBulk = (eid: string): BulkState => bulk[eid] || { disc: '', commA: '', commF: '', filter: '', sel: {}, init: false }
   const setBulkFor = (eid: string, patch: Partial<BulkState>) => setBulk(prev => ({ ...prev, [eid]: { ...getBulk(eid), ...patch } }))
   // Lazily default-select every master SKU the first time the panel opens.
   const ensureInit = (eid: string) => { const b = getBulk(eid); if (!b.init) { const sel: Record<string, boolean> = {}; for (const m of masterSkus) sel[m.sku] = true; setBulkFor(eid, { sel, init: true }) } }
 
   const applyBulk = async (eventId: string) => {
     const b = getBulk(eventId)
-    const disc = parseFloat(b.disc), comm = b.comm.trim() === '' ? null : parseFloat(b.comm)
+    const disc = parseFloat(b.disc)
+    const commA = b.commA.trim() === '' ? null : parseFloat(b.commA)
+    const commF = b.commF.trim() === '' ? null : parseFloat(b.commF)
     if (isNaN(disc)) { setMsg({ ok: false, text: 'Enter a discount %.' }); return }
     const chosen = masterSkus.filter(m => b.sel[m.sku]).map(m => m.sku)
     if (!chosen.length) { setMsg({ ok: false, text: 'No SKUs selected.' }); return }
@@ -107,23 +110,24 @@ export default function DiscountEvents() {
     try {
       // Replace any existing rows for these SKUs in this event, then insert fresh.
       await supabase.from('recon_discount_event_skus').delete().eq('event_id', eventId).in('sku', chosen)
-      const rows = chosen.map(sku => ({ event_id: eventId, sku, discount_pct: disc, commission_rate: comm }))
+      const rows = chosen.map(sku => ({ event_id: eventId, sku, discount_pct: disc, commission_off_amazon: commA, commission_off_flipkart: commF }))
       const { error } = await supabase.from('recon_discount_event_skus').insert(rows)
       if (error) throw error
-      setMsg({ ok: true, text: `Applied ${disc}% off${comm != null ? ` · ${comm}% commission off` : ''} to ${chosen.length} SKU(s).` })
+      setMsg({ ok: true, text: `Applied ${disc}% off to ${chosen.length} SKU(s)${commA != null ? ` · AMZ −${commA}%` : ''}${commF != null ? ` · FK −${commF}%` : ''}.` })
       void load()
     } catch (e) { setMsg({ ok: false, text: 'Apply failed: ' + (e as Error).message }) }
     setSaving(false)
   }
 
   // Quick single add — supports __ALL__ for a blanket.
-  const addOne = async (eventId: string, sku: string, disc: string, comm: string) => {
-    const s = sku.trim(), d = parseFloat(disc), c = comm.trim() === '' ? null : parseFloat(comm)
+  const addOne = async (eventId: string, sku: string, disc: string, commA: string, commF: string) => {
+    const s = sku.trim(), d = parseFloat(disc)
+    const cA = commA.trim() === '' ? null : parseFloat(commA), cF = commF.trim() === '' ? null : parseFloat(commF)
     if (!s) { setMsg({ ok: false, text: 'Enter a SKU (or __ALL__).' }); return }
     if (isNaN(d)) { setMsg({ ok: false, text: 'Enter a discount %.' }); return }
     setMsg(null)
     await supabase.from('recon_discount_event_skus').delete().eq('event_id', eventId).eq('sku', s)
-    const { error } = await supabase.from('recon_discount_event_skus').insert({ event_id: eventId, sku: s, discount_pct: d, commission_rate: c })
+    const { error } = await supabase.from('recon_discount_event_skus').insert({ event_id: eventId, sku: s, discount_pct: d, commission_off_amazon: cA, commission_off_flipkart: cF })
     if (error) { setMsg({ ok: false, text: 'Add failed: ' + error.message }); return }
     void load()
   }
@@ -177,7 +181,7 @@ export default function DiscountEvents() {
                       <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg2)', borderRadius: 6, padding: '6px 10px' }}>
                         <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: s.sku === '__ALL__' ? 'var(--accent)' : 'var(--text)', fontWeight: s.sku === '__ALL__' ? 700 : 400, minWidth: 160 }}>{s.sku === '__ALL__' ? 'All SKUs' : s.sku}</span>
                         <span style={{ fontFamily: 'DM Mono', fontSize: 12, fontWeight: 700, color: 'var(--today)' }}>{s.discount_pct}% off</span>
-                        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: s.commission_rate != null ? 'var(--accent)' : 'var(--text3)' }}>{s.commission_rate != null ? `−${s.commission_rate}% comm off` : 'comm unchanged'}</span>
+                        <span style={{ fontFamily: 'DM Mono', fontSize: 12, color: (s.off_amazon != null || s.off_flipkart != null) ? 'var(--accent)' : 'var(--text3)' }}>{(s.off_amazon != null || s.off_flipkart != null) ? `comm off ${s.off_amazon != null ? `AMZ −${s.off_amazon}%` : ''}${s.off_amazon != null && s.off_flipkart != null ? ' · ' : ''}${s.off_flipkart != null ? `FK −${s.off_flipkart}%` : ''}` : 'comm unchanged'}</span>
                         <button onClick={() => deleteSku(s.id, e.id)} title="Remove" style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 2, display: 'inline-flex' }}><Trash2 size={13} /></button>
                       </div>
                     ))}
@@ -189,7 +193,8 @@ export default function DiscountEvents() {
                   <div style={{ fontSize: 12, fontWeight: 700 }}>Add discount to many SKUs — deselect the ones not participating</div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' as const, alignItems: 'center' }}>
                     <input value={b.disc} onChange={ch => setBulkFor(e.id, { disc: ch.target.value })} inputMode="decimal" placeholder="Discount %" style={{ ...input, width: 110, fontFamily: 'DM Mono' }} />
-                    <input value={b.comm} onChange={ch => setBulkFor(e.id, { comm: ch.target.value })} inputMode="decimal" placeholder="Commission off % — deducted from rate card (optional)" style={{ ...input, width: 300, fontFamily: 'DM Mono' }} />
+                    <input value={b.commA} onChange={ch => setBulkFor(e.id, { commA: ch.target.value })} inputMode="decimal" placeholder="Amazon comm off %" style={{ ...input, width: 160, fontFamily: 'DM Mono' }} />
+                    <input value={b.commF} onChange={ch => setBulkFor(e.id, { commF: ch.target.value })} inputMode="decimal" placeholder="Flipkart comm off %" style={{ ...input, width: 160, fontFamily: 'DM Mono' }} />
                     <input value={b.filter} onChange={ch => setBulkFor(e.id, { filter: ch.target.value })} placeholder="Filter SKUs…" style={{ ...input, width: 180 }} />
                     <button onClick={() => { ensureInit(e.id); const sel = { ...b.sel }; for (const m of filtered) sel[m.sku] = true; setBulkFor(e.id, { sel }) }} style={{ ...chipBtn }}>Select all</button>
                     <button onClick={() => { const sel = { ...b.sel }; for (const m of filtered) sel[m.sku] = false; setBulkFor(e.id, { sel }) }} style={{ ...chipBtn }}>Clear</button>
@@ -209,7 +214,7 @@ export default function DiscountEvents() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <button onClick={() => applyBulk(e.id)} disabled={saving} style={{ padding: '8px 16px', borderRadius: 7, border: 'none', background: saving ? 'var(--bg2)' : 'var(--accent)', color: saving ? 'var(--text3)' : '#fff', fontSize: 12.5, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Check size={14} /> Apply to {selCount} selected SKU{selCount === 1 ? '' : 's'}</button>
-                    <SingleAdd onAdd={(sku, disc, comm) => addOne(e.id, sku, disc, comm)} />
+                    <SingleAdd onAdd={(sku, disc, cA, cF) => addOne(e.id, sku, disc, cA, cF)} />
                   </div>
                 </div>
               </div>
@@ -221,14 +226,15 @@ export default function DiscountEvents() {
   )
 }
 
-function SingleAdd({ onAdd }: { onAdd: (sku: string, disc: string, comm: string) => void }) {
-  const [sku, setSku] = useState(''); const [disc, setDisc] = useState(''); const [comm, setComm] = useState('')
+function SingleAdd({ onAdd }: { onAdd: (sku: string, disc: string, commA: string, commF: string) => void }) {
+  const [sku, setSku] = useState(''); const [disc, setDisc] = useState(''); const [commA, setCommA] = useState(''); const [commF, setCommF] = useState('')
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const, marginLeft: 'auto' }}>
-      <input value={sku} onChange={e => setSku(e.target.value)} placeholder="SKU or __ALL__" style={{ ...input, width: 150, fontFamily: 'DM Mono' }} />
-      <input value={disc} onChange={e => setDisc(e.target.value)} inputMode="decimal" placeholder="Disc %" style={{ ...input, width: 80, fontFamily: 'DM Mono' }} />
-      <input value={comm} onChange={e => setComm(e.target.value)} inputMode="decimal" placeholder="Comm off %" style={{ ...input, width: 90, fontFamily: 'DM Mono' }} />
-      <button onClick={() => { onAdd(sku, disc, comm); setSku(''); setDisc(''); setComm('') }} style={{ ...chipBtn }}><Plus size={13} /> Add one</button>
+      <input value={sku} onChange={e => setSku(e.target.value)} placeholder="SKU or __ALL__" style={{ ...input, width: 140, fontFamily: 'DM Mono' }} />
+      <input value={disc} onChange={e => setDisc(e.target.value)} inputMode="decimal" placeholder="Disc %" style={{ ...input, width: 70, fontFamily: 'DM Mono' }} />
+      <input value={commA} onChange={e => setCommA(e.target.value)} inputMode="decimal" placeholder="AMZ off %" style={{ ...input, width: 85, fontFamily: 'DM Mono' }} />
+      <input value={commF} onChange={e => setCommF(e.target.value)} inputMode="decimal" placeholder="FK off %" style={{ ...input, width: 80, fontFamily: 'DM Mono' }} />
+      <button onClick={() => { onAdd(sku, disc, commA, commF); setSku(''); setDisc(''); setCommA(''); setCommF('') }} style={{ ...chipBtn }}><Plus size={13} /> Add one</button>
     </div>
   )
 }

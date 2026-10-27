@@ -797,18 +797,24 @@ function ChargesView() {
     // commission rate; the reward is the commission saved vs the normal rate.
     const { data: evData } = await supabase.from('recon_discount_events').select('*')
     const { data: evSkuData } = await supabase.from('recon_discount_event_skus').select('*')
-    type Ev = { platform: string; start: string; end: string; skus: Record<string, { discount: number; commission: number | null }> }
+    type EvSku = { discount: number; offA: number | null; offF: number | null }
+    type Ev = { platform: string; start: string; end: string; skus: Record<string, EvSku> }
     const evList: Ev[] = []; const evById: Record<string, Ev> = {}
     for (const e of (evData || []) as Record<string, unknown>[]) { const x: Ev = { platform: String(e.platform ?? 'Both'), start: String(e.start_date ?? ''), end: String(e.end_date ?? ''), skus: {} }; evById[String(e.id)] = x; evList.push(x) }
-    for (const s of (evSkuData || []) as Record<string, unknown>[]) { const e = evById[String(s.event_id)]; if (!e) continue; e.skus[String(s.sku ?? '')] = { discount: Number(s.discount_pct) || 0, commission: s.commission_rate == null ? null : Number(s.commission_rate) } }
-    const eventFor = (platform: string, sku: string | null, date: string | null): { discount: number; commission: number | null } | null => {
+    for (const s of (evSkuData || []) as Record<string, unknown>[]) {
+      const e = evById[String(s.event_id)]; if (!e) continue
+      const legacy = s.commission_rate == null ? null : Number(s.commission_rate)   // pre-C.2 single value
+      e.skus[String(s.sku ?? '')] = { discount: Number(s.discount_pct) || 0, offA: s.commission_off_amazon == null ? legacy : Number(s.commission_off_amazon), offF: s.commission_off_flipkart == null ? legacy : Number(s.commission_off_flipkart) }
+    }
+    const eventFor = (platform: string, sku: string | null, date: string | null): { discount: number; off: number | null } | null => {
       const k = (sku || '').trim(), d = date || ''
+      const resolve = (es: EvSku) => ({ discount: es.discount, off: platform === 'Amazon' ? es.offA : platform === 'Flipkart' ? es.offF : null })
       for (const e of evList) {
         if (e.platform !== 'Both' && e.platform !== platform) continue
         if (e.start && d < e.start) continue
         if (e.end && d > e.end) continue
-        if (k && e.skus[k]) return e.skus[k]
-        if (e.skus['__ALL__']) return e.skus['__ALL__']
+        if (k && e.skus[k]) return resolve(e.skus[k])
+        if (e.skus['__ALL__']) return resolve(e.skus['__ALL__'])
       }
       return null
     }
@@ -826,11 +832,11 @@ function ChargesView() {
       // The event "commission off" is DEDUCTED (in percentage points) from the rate-card
       // rate, so it applies correctly across tiers (above/below the threshold have different
       // base rates). e.g. normal 15.5 with 8 off -> 7.5; a ₹15k+ order at 11 -> 3.
-      const reduction = (ev && ev.commission != null) ? ev.commission : 0
+      const reduction = (ev && ev.off != null) ? ev.off : 0
       const effRate = Math.max(0, normalRate - reduction)
       const gstFactor = platform === 'Amazon' ? 1.18 : 1
       const toBeChargedPct = effRate * gstFactor
-      const reward = (ev && ev.commission != null) ? ((normalRate - effRate) * gstFactor / 100) * principal : null
+      const reward = (ev && ev.off != null) ? ((normalRate - effRate) * gstFactor / 100) * principal : null
       const expComm = (toBeChargedPct / 100) * principal
       const expClosing = card.closing_fee * (qty || 1) + (card.closing_fee_pct / 100) * gross   // flat closing/fixed fee is per piece
       const expGst = gstR * (expComm + expClosing)
