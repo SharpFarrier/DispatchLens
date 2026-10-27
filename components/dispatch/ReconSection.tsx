@@ -578,12 +578,22 @@ function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
   return { ...b, reverseResidual, returned, commissionPct, detail }
 }
 
+// Expected settlement from the rate card (B2). All ₹ amounts are positive fees.
+interface Expected {
+  toBeChargedPct: number | null   // expected commission % (Amazon rate×1.18, Flipkart rate)
+  expComm: number; expClosing: number; closingPctOfSale: number
+  expGst: number; expTcs: number; expTds: number
+  expNet: number | null           // "To be received"
+  gap: number | null              // actual net − expected net
+  flagged: boolean; reason: string | null
+}
 interface ChargeRow {
   qty: number
   order_id: string; sku: string | null; platform: string; order_date: string | null
   payment_date: string | null; agg: ChargeAgg | null
   bau: number | null       // listing price (New Price from master sheet, else recon_prices)
   category: string | null  // from master sheet, for the rate card
+  exp: Expected | null     // expected charges + gap (B2)
 }
 type ChgCol = { key: string; label: string; type: 'text' | 'category' | 'number' | 'date'; align?: 'right'; get: (r: ChargeRow) => string | number; render?: (r: ChargeRow) => ReactNode }
 
@@ -754,6 +764,46 @@ function ChargesView() {
     const normSku = (s: string | null) => (s || '').replace(/\s+/g, '').toUpperCase()
     const sheetFor = (sku: string | null) => sheetSkus[normSku(sku)] || null
 
+    // Rate card (per platform/category) + global tax/tolerance config → expected charges.
+    type Card = { rate_below: number; rate_above: number; threshold: number; closing_fee: number; closing_fee_pct: number }
+    const rateCard: Record<string, Record<string, Card>> = {}
+    const { data: rcData } = await supabase.from('recon_rate_card_categories').select('*')
+    for (const c of (rcData || []) as Record<string, unknown>[]) {
+      const p = String(c.platform ?? 'Amazon'), cat = String(c.category ?? '')
+      ;(rateCard[p] ??= {})[cat] = { rate_below: Number(c.rate_below) || 0, rate_above: Number(c.rate_above) || 0, threshold: Number(c.threshold) || 0, closing_fee: Number(c.closing_fee) || 0, closing_fee_pct: Number(c.closing_fee_pct) || 0 }
+    }
+    const { data: cfgData } = await supabase.from('app_config').select('key, value').in('key', ['recon_tcs_rate', 'recon_tds_rate', 'recon_gst_on_fees_rate', 'recon_accuracy_threshold'])
+    const cfg: Record<string, number> = {}
+    for (const r of (cfgData || []) as { key: string; value: unknown }[]) cfg[r.key] = Number(r.value) || 0
+    const tcsR = (cfg['recon_tcs_rate'] || 0) / 100, tdsR = (cfg['recon_tds_rate'] || 0) / 100
+    const gstR = (cfg['recon_gst_on_fees_rate'] || 18) / 100, accR = (cfg['recon_accuracy_threshold'] || 2) / 100
+
+    const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null): Expected | null => {
+      if (!agg) return null
+      const card = rateCard[platform]?.[category || 'Uncategorized'] || rateCard[platform]?.['Uncategorized']
+      if (!card) return null
+      const principal = agg.sale || 0
+      const invoice = principal * 1.18
+      const gross = platform === 'Amazon' ? invoice : principal   // customer-paid price
+      const rate = gross <= card.threshold ? card.rate_below : card.rate_above
+      const toBeChargedPct = platform === 'Amazon' ? rate * 1.18 : rate
+      const expComm = (toBeChargedPct / 100) * principal
+      const expClosing = card.closing_fee + (card.closing_fee_pct / 100) * gross
+      const expGst = gstR * (expComm + expClosing)
+      const expTcs = tcsR * gross, expTds = tdsR * gross
+      const expNet = gross + (agg.shipping || 0) + (agg.fba || 0) + (agg.other || 0) - (expComm + expClosing + expGst + expTcs + expTds)
+      const actualNet = agg.returned ? agg.net + agg.reverseResidual : agg.net
+      const gap = actualNet - expNet
+      const comps: [string, number][] = [
+        ['commission', Math.abs(agg.commission) - expComm], ['closing', Math.abs(agg.closing) - expClosing],
+        ['GST on fees', Math.abs(agg.gstOnFees) - expGst], ['TCS', Math.abs(agg.tcs) - expTcs], ['TDS', Math.abs(agg.tds) - expTds],
+      ]
+      const flagged = Math.abs(gap) > Math.max(1, accR * gross)
+      let reason: string | null = null
+      if (flagged) { const w = comps.slice().sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0]; reason = `${w[0]} ${w[1] > 0 ? 'over' : 'under'}charged ₹${Math.abs(Math.round(w[1]))}` }
+      return { toBeChargedPct, expComm, expClosing, closingPctOfSale: principal ? (expClosing / principal) * 100 : 0, expGst, expTcs, expTds, expNet, gap, flagged, reason }
+    }
+
     const seenOids = new Set<string>()
     const out: ChargeRow[] = []
     for (const o of (orders || [])) {
@@ -763,7 +813,9 @@ function ChargesView() {
       seenOids.add(oid)
       const plat = platformOf(oid); const lines = byOrder[oid]
       const sp = sheetFor(o.barcode_sku || o.sku)
-      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg: lines ? aggregateCharges(plat, lines) : null, bau: (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date), category: sp?.category ?? null })
+      const agg = lines ? aggregateCharges(plat, lines) : null
+      const category = sp?.category ?? null
+      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date), category, exp: computeExpected(plat, category, agg) })
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
@@ -786,8 +838,11 @@ function ChargesView() {
     { key: 'discountPct', label: 'Discount %', type: 'number', align: 'right', get: r => r.bau ? ((r.bau - invoiceOf(r)) / r.bau * 100) : 0, render: r => pctCell(r.bau ? ((r.bau - invoiceOf(r)) / r.bau * 100) : null) },
     { key: 'commission', label: 'Commission', type: 'number', align: 'right', get: r => r.agg?.commission ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.commission)}</span> },
     { key: 'commissionPct', label: 'Comm %', type: 'number', align: 'right', get: r => r.agg?.commissionPct ?? -1, render: r => r.agg?.commissionPct != null ? <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--accent)' }}>{r.agg.commissionPct.toFixed(1)}%</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
+    { key: 'toBeChargedPct', label: 'To be charged %', type: 'number', align: 'right', get: r => r.exp?.toBeChargedPct ?? -1, render: r => pctCell(r.exp?.toBeChargedPct ?? null) },
     { key: 'closing', label: 'Closing', type: 'number', align: 'right', get: r => r.agg?.closing ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.closing)}</span> },
     { key: 'closingPct', label: 'Closing %', type: 'number', align: 'right', get: r => r.agg?.sale ? Math.abs(r.agg.closing) / r.agg.sale * 100 : 0, render: r => pctCell(r.agg?.sale ? Math.abs(r.agg.closing) / r.agg.sale * 100 : null) },
+    { key: 'expClosing', label: 'To be charged Closing ₹', type: 'number', align: 'right', get: r => r.exp?.expClosing ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.exp?.expClosing)}</span> },
+    { key: 'expClosingPct', label: 'To be charged Closing %', type: 'number', align: 'right', get: r => r.exp?.closingPctOfSale ?? 0, render: r => pctCell(r.exp ? r.exp.closingPctOfSale : null) },
     { key: 'shipping', label: 'Shipping', type: 'number', align: 'right', get: r => r.agg?.shipping ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.shipping)}{pctSub(r.agg?.shipping, r.agg?.sale)}</span> },
     { key: 'fba', label: 'FBA', type: 'number', align: 'right', get: r => r.agg?.fba ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.fba)}{pctSub(r.agg?.fba, r.agg?.sale)}</span> },
     { key: 'productTax', label: 'Tax', type: 'number', align: 'right', get: r => r.agg?.productTax ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.productTax)}</span> },
@@ -796,6 +851,8 @@ function ChargesView() {
     { key: 'gstOnFees', label: 'GST on fees', type: 'number', align: 'right', get: r => r.agg?.gstOnFees ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{money(r.agg?.gstOnFees)}</span> },
     { key: 'other', label: 'Other charges', type: 'number', align: 'right', get: r => r.agg?.other ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.agg?.other)}</span> },
     { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
+    { key: 'expNet', label: 'To be received', type: 'number', align: 'right', get: r => r.exp?.expNet ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.exp?.expNet)}</span> },
+    { key: 'gap', label: 'Gap (actual − expected)', type: 'number', align: 'right', get: r => r.exp?.gap ?? 0, render: r => { if (!r.exp || r.exp.gap == null) return <span style={{ color: 'var(--text3)' }}>—</span>; const f = r.exp.flagged; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: f ? 700 : 400, color: f ? 'var(--critical)' : 'var(--text3)' }}>{money(r.exp.gap)}{f && r.exp.reason ? <span style={{ display: 'block', fontSize: 10, color: 'var(--critical)' }}>{r.exp.reason}</span> : null}</span> } },
   ], [])
 
   // Rows filtered by platform/returned/text — but NOT by the commission-% filter. The %
