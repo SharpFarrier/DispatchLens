@@ -819,7 +819,7 @@ function ChargesView() {
       return null
     }
 
-    const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null, sku: string | null, orderDate: string | null, qty: number): Expected | null => {
+    const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null, sku: string | null, orderDate: string | null, qty: number, listingPrice: number | null): Expected | null => {
       if (!agg) return null
       if (agg.returned) return null   // refunded/returned order — we don't expect a payout, so no expected net / gap
       const card = rateCard[platform]?.[category || 'Uncategorized'] || rateCard[platform]?.['Uncategorized']
@@ -827,7 +827,11 @@ function ChargesView() {
       const principal = agg.sale || 0
       const invoice = principal * 1.18
       const gross = platform === 'Amazon' ? invoice : principal   // customer-paid price
-      const normalRate = gross <= card.threshold ? card.rate_below : card.rate_above
+      // Commission tier (below/above threshold) is by the product's LISTING PRICE per unit
+      // (BAU), not the order total — e.g. Amazon's 11% slab applies when the listing price is
+      // above ₹15k. Fall back to the per-piece customer price when no listing price is set.
+      const tierBase = listingPrice != null ? listingPrice : gross / (qty || 1)
+      const normalRate = tierBase <= card.threshold ? card.rate_below : card.rate_above
       const ev = eventFor(platform, sku, orderDate)
       // The event "commission off" is DEDUCTED (in percentage points) from the rate-card
       // rate, so it applies correctly across tiers (above/below the threshold have different
@@ -868,7 +872,7 @@ function ChargesView() {
       const qty = qtyByOid[oid] || 1
       const perPieceBau = (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date)
       const om = ometa[oid]
-      out.push({ order_id: o.order_id, qty, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: perPieceBau != null ? perPieceBau * qty : null, category, dispatch_date: om?.dispatched_at ?? null, delivery_date: om?.delivered_at ?? null, tracking_number: om?.tracking_number ?? null, tracking_status: om?.tracking_status ?? null, exp: computeExpected(plat, category, agg, o.barcode_sku || o.sku, o.order_date, qty) })
+      out.push({ order_id: o.order_id, qty, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: perPieceBau != null ? perPieceBau * qty : null, category, dispatch_date: om?.dispatched_at ?? null, delivery_date: om?.delivered_at ?? null, tracking_number: om?.tracking_number ?? null, tracking_status: om?.tracking_status ?? null, exp: computeExpected(plat, category, agg, o.barcode_sku || o.sku, o.order_date, qty, perPieceBau) })
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
