@@ -5,20 +5,21 @@ import { computeMatch, type MatchResult } from '@/lib/packMatch'
 import { AlertTriangle, Camera, Undo2 } from 'lucide-react'
 import BarcodeScanner from './BarcodeScanner'
 
-// Pack & Map (barcoding phase 3). Scan a picked frame, then the SW box barcode.
+// Pack & Map (barcoding phase 3). Scan a coated frame (or a legacy picked one),
+// then the SW box barcode.
 // On a frame-identity match it COMMITS immediately and lists it with an Undo;
 // mismatches block and don't commit.
 //
 //  - SW path (preferred): the scanned code is an SW box barcode (a packed_units
 //    row). We verify the frame against that unit's SKU, then link both sides of
-//    the leg — pieces.packed_barcode = the SW serial, status picked -> packed,
+//    the leg — pieces.packed_barcode = the SW serial, status coated/picked -> packed,
 //    and packed_units.piece_id = the frame id (the frame<->box genealogy).
 //  - SKU fallback (changeover): if the scanned code isn't a packed_units box
 //    barcode, we treat it as the old non-serial SKU sticker (map to the SKU, no
 //    piece_id link) so leftover old-flow boxes still map during the transition.
 //
-// Undo reverts packed -> picked (picked_at is untouched, so the frame returns to
-// the Picking "picked today" log) and clears the box's piece_id link.
+// Undo reverts packed -> coated (the frame returns to the coated pool, ready to pack
+// again) and clears the box's piece_id link.
 
 interface Frame {
   id: string; barcode: string; shape: string | null; size: string | null
@@ -145,14 +146,14 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     setBusy(true); setFlash('')
     try {
       const { error } = await supabase.from('pieces')
-        .update({ status: 'picked', packed_barcode: null, packed_at: null })
+        .update({ status: 'coated', packed_barcode: null, packed_at: null })
         .eq('id', item.frameId).eq('status', 'packed')
       if (error) throw error
       if (item.swUnitId) {
         await supabase.from('packed_units').update({ piece_id: null }).eq('id', item.swUnitId)
       }
       setDone(prev => prev.filter(d => d.frameId !== item.frameId))
-      setFlash(`Undone — ${item.frameBarcode} back to picked`)
+      setFlash(`Undone — ${item.frameBarcode} back to coated`)
       loadCounts()
     } catch (e) {
       setFlash('Undo failed: ' + (e as Error).message)
@@ -187,7 +188,7 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
           </div>
         )}
 
-        <Label n={1} text="Scan frame barcode (picked piece)" />
+        <Label n={1} text="Scan frame barcode (coated piece)" />
         <input ref={frameRef} autoFocus onKeyDown={onKey(scanFrame)} placeholder="Scan or type frame barcode" style={input} />
         {frameErr && <Msg>{frameErr}</Msg>}
         {frame && (

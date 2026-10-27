@@ -356,7 +356,6 @@ export default function InventoryProdTab() {
   const cardDefs = [
     { key: 'raw', label: 'Raw', val: rawStock, col: '#9333ea' },
     { key: 'coated', label: 'Coated', val: coatedStock, col: 'var(--accent)' },
-    { key: 'picked', label: 'Picked', val: pickedStock, col: '#2563eb' },
     { key: 'finished', label: 'Finished', val: finishedStock, col: 'var(--dispatched)' },
   ]
 
@@ -407,7 +406,7 @@ export default function InventoryProdTab() {
 
       <div>
         <div style={sectionTitle}>Current Stock</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
           {cardDefs.map(c => (
             <div key={c.key} onClick={() => setActiveCard(activeCard === c.key ? null : c.key)}
               style={{ ...cardBase, border: activeCard === c.key ? '2px solid var(--accent)' : '2px solid var(--border)', padding: 12, textAlign: 'center', cursor: 'pointer' }}>

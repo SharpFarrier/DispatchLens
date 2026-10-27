@@ -2598,7 +2598,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'delays', label: 'Delays', section: 'orders', show: effectiveAccess.can_delays },
     { key: 'wh:stock', label: 'Stock', section: 'warehouse', show: effectiveAccess.can_wh_stock },
     { key: 'wh:coating', label: 'Coating', section: 'warehouse', show: effectiveAccess.can_wh_coating },
-    { key: 'wh:picking', label: 'Picking', section: 'warehouse', show: effectiveAccess.can_wh_picking },
+    { key: 'wh:picking', label: 'Pack Schedule', section: 'warehouse', show: effectiveAccess.can_wh_picking },
     { key: 'wh:inventory', label: 'Inventory', section: 'warehouse', show: effectiveAccess.can_wh_inventory },
     { key: 'wh:barcodes', label: 'Barcodes', section: 'warehouse', show: effectiveAccess.can_wh_barcodes },
     { key: 'wh:products', label: 'Products', section: 'warehouse', show: effectiveAccess.can_wh_inventory },
