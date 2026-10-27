@@ -592,6 +592,7 @@ interface Expected {
   expNet: number | null           // "To be received"
   gap: number | null              // actual net − expected net
   flagged: boolean; reason: string | null
+  reward: number | null           // commission saved during a discount event = (normal − reduced) × principal
 }
 interface ChargeRow {
   qty: number
@@ -789,7 +790,27 @@ function ChargesView() {
     const tcsR = (cfg['recon_tcs_rate'] || 0) / 100, tdsR = (cfg['recon_tds_rate'] || 0) / 100
     const gstR = (cfg['recon_gst_on_fees_rate'] || 18) / 100, accR = (cfg['recon_accuracy_threshold'] || 2) / 100
 
-    const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null): Expected | null => {
+    // Discount events (Phase C): during an event window a SKU may carry a reduced
+    // commission rate; the reward is the commission saved vs the normal rate.
+    const { data: evData } = await supabase.from('recon_discount_events').select('*')
+    const { data: evSkuData } = await supabase.from('recon_discount_event_skus').select('*')
+    type Ev = { platform: string; start: string; end: string; skus: Record<string, { discount: number; commission: number | null }> }
+    const evList: Ev[] = []; const evById: Record<string, Ev> = {}
+    for (const e of (evData || []) as Record<string, unknown>[]) { const x: Ev = { platform: String(e.platform ?? 'Both'), start: String(e.start_date ?? ''), end: String(e.end_date ?? ''), skus: {} }; evById[String(e.id)] = x; evList.push(x) }
+    for (const s of (evSkuData || []) as Record<string, unknown>[]) { const e = evById[String(s.event_id)]; if (!e) continue; e.skus[String(s.sku ?? '')] = { discount: Number(s.discount_pct) || 0, commission: s.commission_rate == null ? null : Number(s.commission_rate) } }
+    const eventFor = (platform: string, sku: string | null, date: string | null): { discount: number; commission: number | null } | null => {
+      const k = (sku || '').trim(), d = date || ''
+      for (const e of evList) {
+        if (e.platform !== 'Both' && e.platform !== platform) continue
+        if (e.start && d < e.start) continue
+        if (e.end && d > e.end) continue
+        if (k && e.skus[k]) return e.skus[k]
+        if (e.skus['__ALL__']) return e.skus['__ALL__']
+      }
+      return null
+    }
+
+    const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null, sku: string | null, orderDate: string | null): Expected | null => {
       if (!agg) return null
       if (agg.returned) return null   // refunded/returned order — we don't expect a payout, so no expected net / gap
       const card = rateCard[platform]?.[category || 'Uncategorized'] || rateCard[platform]?.['Uncategorized']
@@ -797,8 +818,12 @@ function ChargesView() {
       const principal = agg.sale || 0
       const invoice = principal * 1.18
       const gross = platform === 'Amazon' ? invoice : principal   // customer-paid price
-      const rate = gross <= card.threshold ? card.rate_below : card.rate_above
-      const toBeChargedPct = platform === 'Amazon' ? rate * 1.18 : rate
+      const normalRate = gross <= card.threshold ? card.rate_below : card.rate_above
+      const ev = eventFor(platform, sku, orderDate)
+      const effRate = (ev && ev.commission != null) ? ev.commission : normalRate   // reduced during an event
+      const gstFactor = platform === 'Amazon' ? 1.18 : 1
+      const toBeChargedPct = effRate * gstFactor
+      const reward = (ev && ev.commission != null) ? ((normalRate - ev.commission) * gstFactor / 100) * principal : null
       const expComm = (toBeChargedPct / 100) * principal
       const expClosing = card.closing_fee + (card.closing_fee_pct / 100) * gross
       const expGst = gstR * (expComm + expClosing)
@@ -813,7 +838,7 @@ function ChargesView() {
       const flagged = Math.abs(gap) > Math.max(1, accR * gross)
       let reason: string | null = null
       if (flagged) { const w = comps.slice().sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0]; reason = `${w[0]} ${w[1] > 0 ? 'over' : 'under'}charged ₹${Math.abs(Math.round(w[1]))}` }
-      return { toBeChargedPct, expComm, expClosing, closingPctOfSale: principal ? (expClosing / principal) * 100 : 0, expGst, expTcs, expTds, expNet, gap, flagged, reason }
+      return { toBeChargedPct, expComm, expClosing, closingPctOfSale: principal ? (expClosing / principal) * 100 : 0, expGst, expTcs, expTds, expNet, gap, flagged, reason, reward }
     }
 
     const seenOids = new Set<string>()
@@ -827,7 +852,7 @@ function ChargesView() {
       const sp = sheetFor(o.barcode_sku || o.sku)
       const agg = lines ? aggregateCharges(plat, lines) : null
       const category = sp?.category ?? null
-      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date), category, exp: computeExpected(plat, category, agg) })
+      out.push({ order_id: o.order_id, qty: qtyByOid[oid] || 1, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date), category, exp: computeExpected(plat, category, agg, o.barcode_sku || o.sku, o.order_date) })
     }
     setRows(out); setLoading(false)
   }, [supabase, win, customFrom, customTo, range])
@@ -865,6 +890,7 @@ function ChargesView() {
     { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
     { key: 'expNet', label: 'To be received', type: 'number', align: 'right', get: r => r.exp?.expNet ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.exp?.expNet)}</span> },
     { key: 'gap', label: 'Gap (actual − expected)', type: 'number', align: 'right', get: r => r.exp?.gap ?? 0, render: r => { if (!r.exp || r.exp.gap == null) return <span style={{ color: 'var(--text3)' }}>—</span>; const f = r.exp.flagged; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: f ? 700 : 400, color: f ? 'var(--critical)' : 'var(--text3)' }}>{money(r.exp.gap)}{f && r.exp.reason ? <span style={{ display: 'block', fontSize: 10, color: 'var(--critical)' }}>{r.exp.reason}</span> : null}</span> } },
+    { key: 'reward', label: 'Reward received', type: 'number', align: 'right', get: r => r.exp?.reward ?? 0, render: r => r.exp?.reward != null ? <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--green)' }}>{money(r.exp.reward)}</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
   ], [])
 
   // Rows filtered by platform/returned/text — but NOT by the commission-% filter. The %
