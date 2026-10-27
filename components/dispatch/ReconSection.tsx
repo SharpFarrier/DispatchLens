@@ -542,17 +542,22 @@ function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
       }
     }
   } else if (platform === 'Flipkart') {
+    let returnNet = 0
     for (const l of lines) {
       const tt = l.transaction_type || ''
       const isReturn = /return/i.test(tt)
       const amt = l.amount || 0
       const raw = l.raw || {}
       const fwd = !isReturn || amt >= 0
-      if (isReturn) returned = true
+      if (isReturn) returnNet += amt
       detail.push({ label: `${isReturn ? 'Return ' : ''}${amt >= 0 ? 'forward' : 'reverse'} · settlement`, amount: FKCOL.net(raw) })
       if (!fwd) { reverseResidual += FKCOL.net(raw); continue }
       for (const k of Object.keys(FKCOL) as (keyof typeof b)[]) b[k] += FKCOL[k](raw)
     }
+    // Decide by the NET of all return lines, not per line. A return request raised
+    // then cancelled posts a reversal that nets back to >= 0 (payment kept) — not a
+    // real return. Only a net that took money back (< 0) is a genuine return.
+    if (returnNet < 0) returned = true
   } else if (platform === 'Website') {
     // D2C: online prepaid via Razorpay / Cashfree. sale = gross the customer paid; commission =
     // payment-gateway fee; gstOnFees = GST on that fee; net = amount actually settled to us.
@@ -822,6 +827,7 @@ function ChargesView() {
     const computeExpected = (platform: string, category: string | null, agg: ChargeAgg | null, sku: string | null, orderDate: string | null, qty: number, listingPrice: number | null): Expected | null => {
       if (!agg) return null
       if (agg.returned) return null   // refunded/returned order — we don't expect a payout, so no expected net / gap
+      if (!(agg.sale > 0)) return null   // no positive sale (reimbursed return / pure adjustment) — no rate-card expectation
       const card = rateCard[platform]?.[category || 'Uncategorized'] || rateCard[platform]?.['Uncategorized']
       if (!card) return null
       const principal = agg.sale || 0
