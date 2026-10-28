@@ -3,8 +3,47 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { SkuMap } from '@/types'
 import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
-import { Search, Plus, X, Pencil, Trash2, Upload, Package, CheckCircle, AlertCircle } from 'lucide-react'
+import { Search, Plus, X, Pencil, Trash2, Upload, Package, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react'
 import AddProductWizard from './AddProductWizard'
+import { packedSize, PM_SIZES, COLOURS } from '@/lib/catalogueMap'
+
+// Frame-attribute vocab for the Product Sync pre-fill + datalists.
+const MATTRESS_TYPES = ['Without Mattress', 'Single Layer', 'Double Layer', 'Ortho Tri', 'Ortho']
+const FINISH_TYPES = ['American Oak', 'Stone Grain', 'Wenge Black', 'Natural Ash', 'Frosty White', 'Walnut', 'Oak', 'Teak']
+const MATTRESS_VOCAB: [RegExp, string][] = [
+  [/ortho\s*tri(\s*layer)?/i, 'Ortho Tri'],
+  [/double\s*layer/i, 'Double Layer'],
+  [/single\s*layer/i, 'Single Layer'],
+  [/without\s*mattress|(^|[-\s])metal([-\s]|$)/i, 'Without Mattress'],
+  [/with\s*mattress/i, 'With Mattress'],
+  [/ortho/i, 'Ortho'],
+]
+const COLOUR_VOCAB = ['Black', 'White', 'Grey', 'Gray', 'Brown', 'Golden', 'Ivory', 'Silver']
+const SIZE_VOCAB: [RegExp, string][] = [
+  [/2\.5\s*[x×]\s*6/i, 'Single 2.5ft'],
+  [/(^|[^.\d])3\s*[x×]\s*6/i, 'Single 3ft'],
+  [/(^|[^.\d])4\s*[x×]\s*6/i, 'Double 4ft'],
+  [/(^|[^.\d])5\s*[x×]\s*6/i, 'Queen 5ft'],
+  [/(^|[^.\d])6\s*[x×]\s*6/i, 'King 6ft'],
+]
+// Best-effort parse of a structured description ("Luvo-Ortho Tri-American Oak-Black-5x6.5")
+// into the four frame attributes. Anything it can't match is left blank for manual entry.
+function parseDescription(desc: string): { size: string; mattress: string; finish: string; colour: string } {
+  const d = desc || ''
+  let mattress = ''; for (const [re, v] of MATTRESS_VOCAB) { if (re.test(d)) { mattress = v; break } }
+  let finish = ''; for (const f of FINISH_TYPES) { if (new RegExp(f.replace(/\s+/g, '\\s*'), 'i').test(d)) { finish = f; break } }
+  let colour = ''; for (const c of COLOUR_VOCAB) { if (new RegExp('(^|[-\\s])' + c + '([-\\s]|$)', 'i').test(d)) { colour = c === 'Gray' ? 'Grey' : c; break } }
+  let size = ''; for (const [re, v] of SIZE_VOCAB) { if (re.test(d)) { size = v; break } }
+  return { size, mattress, finish, colour }
+}
+const skuNorm = (s: string | null) => (s || '').replace(/\s+/g, '').toUpperCase()
+const slugify = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
+interface SyncRow {
+  masterSku: string; family: string; category: string; description: string
+  amazonSku: string; amazonAsin: string; flipkartSku: string; websiteSku: string
+  size: string; mattress: string; finish: string; colour: string
+}
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -28,6 +67,14 @@ export default function SkuMapTab() {
   const [bulkResult, setBulkResult] = useState<{ added: number; updated: number; errors: number } | null>(null)
   const [bulkRunning, setBulkRunning] = useState(false)
   const [showWizard, setShowWizard] = useState(false)
+
+  // Product Sync — pull new SKUs from the master sheet, complete their frame
+  // attributes, import to the full catalogue.
+  const [showSync, setShowSync] = useState(false)
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [syncRows, setSyncRows] = useState<SyncRow[]>([])
+  const [syncErr, setSyncErr] = useState('')
+  const [importing, setImporting] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -169,6 +216,69 @@ export default function SkuMapTab() {
     if (mapped > 0) setTimeout(() => setBackfill(null), 6000)
   }
 
+  // Fetch the sheet rows and show only the Master SKUs not yet in dispatch_sku_map.
+  const openSync = async () => {
+    setShowSync(true); setSyncErr(''); setSyncLoading(true); setSyncRows([])
+    try {
+      const res = await fetch('/api/products/sheet')
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || 'Could not read the master sheet')
+      const have = new Set(maps.map(m => skuNorm(m.master_sku)))
+      type Row = { masterSku: string; productName: string; category: string; description: string; amazonSku: string; amazonAsin: string; flipkartSku: string; websiteSku: string }
+      const fresh = ((j.rows as Row[]) || []).filter(r => r.masterSku && !have.has(skuNorm(r.masterSku)))
+      const rows: SyncRow[] = fresh.map(r => {
+        const p = parseDescription(r.description)
+        return { masterSku: r.masterSku, family: r.productName, category: r.category, description: r.description, amazonSku: r.amazonSku, amazonAsin: r.amazonAsin, flipkartSku: r.flipkartSku, websiteSku: r.websiteSku, size: p.size, mattress: p.mattress, finish: p.finish, colour: p.colour }
+      })
+      rows.sort((a, b) => (a.family || '').localeCompare(b.family || '') || a.masterSku.localeCompare(b.masterSku))
+      setSyncRows(rows)
+    } catch (e) { setSyncErr((e as Error).message) }
+    setSyncLoading(false)
+  }
+
+  const setSyncRow = (i: number, patch: Partial<SyncRow>) => setSyncRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r))
+
+  // Import: group the completed rows by family, write each via create_product_full.
+  const importSync = async () => {
+    if (!syncRows.length) return
+    setImporting(true); setSyncErr('')
+    try {
+      const byFamily = new Map<string, SyncRow[]>()
+      for (const r of syncRows) { const k = r.family || '(no family)'; (byFamily.get(k) || byFamily.set(k, []).get(k)!).push(r) }
+      let imported = 0
+      for (const [family, rows] of byFamily) {
+        const variantKeys = new Set<string>()
+        const variants: Array<Record<string, unknown>> = []
+        for (const r of rows) {
+          const vk = `${r.size}|${r.mattress}`
+          if (variantKeys.has(vk)) continue
+          variantKeys.add(vk)
+          variants.push({ size: r.size || null, mattress: r.mattress || null, has_colour: true, is_assembly: false })
+        }
+        const finished = rows.map(r => ({
+          master_sku: r.masterSku.trim(), product_name: family,
+          amazon_sku: r.amazonSku || null, amazon_asin: r.amazonAsin || null, flipkart_sku: r.flipkartSku || null, website_sku: r.websiteSku || null,
+          other_sku: null, other_sku_2: null,
+          packed: { product: family, size: packedSize(r.size || null), fcolor: r.colour || null, wood: r.finish || null, mattress: r.mattress || null, clothcolor: null, descr: [family, r.finish, r.colour, packedSize(r.size || null)].filter(Boolean).join(' ') },
+        }))
+        const category = rows.find(r => r.category)?.category || null
+        const payload = {
+          family: { category, shape_name: family, shape_slug: slugify(family), shape_image_url: null },
+          product: { name: family, has_size: rows.some(r => r.size), has_mattress: rows.some(r => r.mattress), colour: null, notes: null },
+          variants, finished,
+        }
+        const { error } = await supabase.rpc('create_product_full', { payload })
+        if (error) throw new Error(`${family}: ${error.message}`)
+        imported += finished.length
+      }
+      setShowSync(false)
+      await load()
+      setBackfill(`Imported ${imported} SKU(s) from the master sheet ✓`)
+      setTimeout(() => setBackfill(null), 6000)
+    } catch (e) { setSyncErr((e as Error).message) }
+    setImporting(false)
+  }
+
   const field = (label: string, key: keyof SkuMap, placeholder: string, required = false) => (
     <div style={{ marginBottom: 14 }}>
       <label style={{ display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 6, fontWeight: 500 }}>
@@ -202,6 +312,9 @@ export default function SkuMapTab() {
           </button>
           <button onClick={openNew} style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
             <Plus size={14} /> Add Mapping
+          </button>
+          <button onClick={openSync} style={{ padding: '7px 14px', borderRadius: 7, border: '1px solid var(--accent)', background: 'var(--surface)', color: 'var(--accent)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+            <RefreshCw size={13} /> Sync from sheet
           </button>
           <button onClick={() => setShowWizard(true)} style={{ padding: '7px 14px', borderRadius: 7, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
             <Package size={14} /> New Product
@@ -327,6 +440,74 @@ export default function SkuMapTab() {
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: '24px 12px' }} onClick={() => setShowWizard(false)}>
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, width: 800, maxWidth: '96vw', boxShadow: '0 20px 40px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
             <AddProductWizard onClose={() => setShowWizard(false)} onSaved={() => { setShowWizard(false); void load() }} />
+          </div>
+        </div>
+      )}
+
+      {/* Product Sync — new SKUs from the master sheet */}
+      {showSync && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.25)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: '24px 12px' }} onClick={() => setShowSync(false)}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, width: 1040, maxWidth: '97vw', boxShadow: '0 20px 40px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+            <datalist id="ps-sizes">{PM_SIZES.map(s => <option key={s} value={s} />)}</datalist>
+            <datalist id="ps-mattress">{MATTRESS_TYPES.map(s => <option key={s} value={s} />)}</datalist>
+            <datalist id="ps-finish">{FINISH_TYPES.map(s => <option key={s} value={s} />)}</datalist>
+            <datalist id="ps-colour">{COLOURS.map(s => <option key={s} value={s} />)}</datalist>
+
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>Sync from master sheet</div>
+                <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 3 }}>SKUs in the sheet not yet connected. Fill Size · Mattress · Finish · Colour (pre-filled from the description — correct where needed), then import.</div>
+              </div>
+              <button onClick={() => setShowSync(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', padding: 4 }}><X size={18} /></button>
+            </div>
+
+            {syncErr && <div style={{ fontSize: 12.5, color: 'var(--critical)', background: 'var(--critical-bg)', padding: '9px 12px', borderRadius: 8, margin: '8px 0' }}>{syncErr}</div>}
+
+            {syncLoading ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>Reading the sheet…</div>
+            ) : !syncRows.length ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text2)', fontSize: 13 }}>Every sheet SKU is already connected. Nothing new to import.</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: 'var(--text2)', margin: '10px 0' }}><b>{syncRows.length}</b> new SKU{syncRows.length !== 1 ? 's' : ''} across {new Set(syncRows.map(r => r.family)).size} famil{new Set(syncRows.map(r => r.family)).size !== 1 ? 'ies' : 'y'}.</div>
+                <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10, maxHeight: '58vh', overflowY: 'auto' }}>
+                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12, minWidth: 960 }}>
+                    <thead><tr style={{ background: 'var(--bg2)' }}>
+                      {['Master SKU', 'Family', 'Category', 'Amazon', 'Flipkart', 'Size *', 'Mattress *', 'Finish', 'Colour'].map(h => (
+                        <th key={h} style={{ textAlign: 'left', padding: '8px 10px', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text3)', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--bg2)' }}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {syncRows.map((r, i) => {
+                        const cell = (key: 'size' | 'mattress' | 'finish' | 'colour', list: string) => (
+                          <input value={r[key]} list={list} onChange={e => setSyncRow(i, { [key]: e.target.value })}
+                            style={{ width: '100%', minWidth: 96, padding: '5px 7px', border: '1px solid var(--border2)', borderRadius: 6, background: r[key] ? 'var(--accent-bg)' : '#fff', color: 'var(--text)', fontSize: 12, outline: 'none' }} />
+                        )
+                        return (
+                          <tr key={r.masterSku} style={{ borderTop: '1px solid var(--border)' }}>
+                            <td style={{ padding: '5px 10px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.masterSku}</td>
+                            <td style={{ padding: '5px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{r.family || '—'}</td>
+                            <td style={{ padding: '5px 10px', color: 'var(--text2)' }}>{r.category || '—'}</td>
+                            <td style={{ padding: '5px 10px', fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text3)', whiteSpace: 'nowrap' }}>{r.amazonSku || '—'}</td>
+                            <td style={{ padding: '5px 10px', fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text3)', whiteSpace: 'nowrap' }}>{r.flipkartSku || '—'}</td>
+                            <td style={{ padding: '4px 6px' }}>{cell('size', 'ps-sizes')}</td>
+                            <td style={{ padding: '4px 6px' }}>{cell('mattress', 'ps-mattress')}</td>
+                            <td style={{ padding: '4px 6px' }}>{cell('finish', 'ps-finish')}</td>
+                            <td style={{ padding: '4px 6px' }}>{cell('colour', 'ps-colour')}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 14 }}>
+                  <button onClick={importSync} disabled={importing} style={{ padding: '9px 18px', borderRadius: 8, background: importing ? 'var(--bg2)' : 'var(--accent)', border: 'none', color: importing ? 'var(--text3)' : '#fff', fontWeight: 700, fontSize: 13, cursor: importing ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <CheckCircle size={14} /> {importing ? 'Importing…' : `Import ${syncRows.length} SKU${syncRows.length !== 1 ? 's' : ''} → connect to frames & barcodes`}
+                  </button>
+                  <span style={{ fontSize: 11.5, color: 'var(--text3)' }}>Writes products · variants · packed SKUs · SKU map. Already-connected SKUs are skipped.</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

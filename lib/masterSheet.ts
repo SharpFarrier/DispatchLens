@@ -54,3 +54,30 @@ export async function fetchSheetSkus(): Promise<Record<string, SheetProd>> {
   }
   return skus
 }
+
+// Full per-row read of the sheet (one entry per finished SKU), for the Product Sync —
+// upserting new SKUs into the catalogue. Rows without a Master SKU are skipped.
+export interface SheetRow {
+  productName: string; description: string; category: string; masterSku: string
+  amazonSku: string; amazonAsin: string; flipkartSku: string; websiteSku: string; status: string
+}
+export async function fetchSheetRows(): Promise<SheetRow[]> {
+  const res = await fetch(CSV_URL, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`sheet fetch failed: ${res.status}`)
+  const rows = parseCsv(await res.text())
+  if (rows.length < 2) return []
+  const header = rows[0].map(h => h.trim().toLowerCase())
+  const col = (names: string[]) => { for (let i = 0; i < header.length; i++) if (names.includes(header[i])) return i; return -1 }
+  const ni = col(['product name']), di = col(['product description', 'description']), ci = col(['catogory', 'category']), mi = col(['master sku'])
+  const ai = col(['amazon sku']), xi = col(['amazon asin']), fi = col(['flipkart sku']), wi = col(['website sku']), si = col(['status'])
+  const out: SheetRow[] = []
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]
+    if (!row.some(c => (c || '').trim())) continue
+    const get = (i: number) => (i >= 0 && i < row.length) ? (row[i] || '').trim() : ''
+    const masterSku = get(mi)
+    if (!masterSku) continue
+    out.push({ productName: get(ni), description: get(di), category: get(ci), masterSku, amazonSku: get(ai), amazonAsin: get(xi), flipkartSku: get(fi), websiteSku: get(wi), status: get(si) })
+  }
+  return out
+}
