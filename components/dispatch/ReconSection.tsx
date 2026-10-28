@@ -834,10 +834,12 @@ function ChargesView() {
       const principal = agg.sale || 0
       const invoice = principal * 1.18
       const gross = platform === 'Amazon' ? invoice : principal   // customer-paid price
-      // Commission tier (below/above threshold) is by the product's LISTING PRICE per unit
-      // (BAU), not the order total — e.g. Amazon's 11% slab applies when the listing price is
-      // above ₹15k. Fall back to the per-piece customer price when no listing price is set.
-      const tierBase = listingPrice != null ? listingPrice : gross / (qty || 1)
+      // Commission tier (below/above threshold) is by the actual per-unit SELLING price the
+      // customer paid AFTER discount (gross ÷ qty) — not the listing price. e.g. a ₹15,799
+      // listing at 16% off sells for ₹13,271, under Amazon's ₹15k slab, so the 15.5% rate
+      // applies (not 11%). The event "commission off" is then deducted from that base rate.
+      // Listing price (BAU) is only a last-resort fallback if there's somehow no sale value.
+      const tierBase = gross > 0 ? gross / (qty || 1) : (listingPrice ?? 0)
       const normalRate = tierBase <= card.threshold ? card.rate_below : card.rate_above
       const ev = eventFor(platform, sku, orderDate)
       // The event "commission off" is DEDUCTED (in percentage points) from the rate-card
