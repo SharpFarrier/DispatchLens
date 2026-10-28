@@ -117,20 +117,16 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     // serial and the box is linked back to the frame via piece_id.
     setBusy(true)
     try {
-      const now = new Date().toISOString()
       const mappedTo = swUnitId ? scanned : m.sku
-      const { data: upd, error } = await supabase.from('pieces')
-        .update({ status: 'packed', packed_barcode: mappedTo, packed_at: now })
-        .eq('id', frame.id).in('status', ['picked', 'coated']).select('id')
-      if (error) throw error
-      if (!upd || !upd.length) { setBoxErr(`${frame.barcode} was no longer pickable (already packed?)`); return }
-      if (swUnitId) {
-        // Link the box to the frame. Guard on piece_id still null so two frames
-        // can't race onto one box.
-        const { error: linkErr } = await supabase.from('packed_units')
-          .update({ piece_id: frame.id }).eq('id', swUnitId).is('piece_id', null)
-        if (linkErr) throw linkErr
+      // Atomic: pack the frame AND link the box in one transaction (RPC), so a dropped
+      // connection can't leave a packed frame with an unlinked box.
+      const { data: res, error } = await supabase.rpc('map_frame_to_box', { p_frame_id: frame.id, p_box_id: swUnitId, p_mapped_to: mappedTo })
+      if (error) {
+        if (/box_already_linked/.test(error.message)) { setBoxErr(`${scanned} was just linked to another frame — rescan the box`); return }
+        throw error
       }
+      const r = (res || {}) as { ok: boolean; error?: string }
+      if (!r.ok) { setBoxErr(`${frame.barcode} was no longer pickable (already packed?)`); return }
       setDone(prev => [{ frameId: frame.id, frameBarcode: frame.barcode, mappedTo, swUnitId, at: Date.now() }, ...prev].slice(0, 60))
       setFlash(`Mapped ${frame.barcode} → ${mappedTo}`)
       clearCurrent()

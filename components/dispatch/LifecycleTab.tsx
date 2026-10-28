@@ -120,9 +120,23 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
     const allBoxes = [...boxes]
     for (const b of moreBoxes) if (!allBoxes.some(x => x.id === b.id)) allBoxes.push(b)
     const boxByPiece = new Map(allBoxes.filter(b => b.piece_id).map(b => [b.piece_id as string, b]))
+    // Fallback: a frame packed to an SW box whose back-link (piece_id) never landed
+    // (e.g. a dropped connection mid-map) — resolve the box by the frame's
+    // packed_barcode so it still shows as packed instead of "not yet packed".
+    const haveBarcodes = new Set(allBoxes.map(b => b.barcode))
+    const orphanCodes = [...new Set([...frameById.values()]
+      .filter(f => f.packed_barcode && /^SW-/i.test(f.packed_barcode) && !boxByPiece.get(f.id) && !haveBarcodes.has(f.packed_barcode))
+      .map(f => f.packed_barcode as string))]
+    for (const b of await chunkIn<Box>('packed_units', 'barcode', orphanCodes)) if (!allBoxes.some(x => x.id === b.id)) allBoxes.push(b)
+    const boxByBarcode = new Map(allBoxes.map(b => [b.barcode, b]))
     const recs: Rec[] = []
-    for (const f of frameById.values()) recs.push({ key: 'f-' + f.id, frame: f, box: boxByPiece.get(f.id) || null })
-    for (const b of allBoxes) if (!b.piece_id) recs.push({ key: 'b-' + b.id, frame: null, box: b })
+    const usedBoxIds = new Set<string>()
+    for (const f of frameById.values()) {
+      const box = boxByPiece.get(f.id) || (f.packed_barcode ? boxByBarcode.get(f.packed_barcode) || null : null)
+      if (box) usedBoxIds.add(box.id)
+      recs.push({ key: 'f-' + f.id, frame: f, box })
+    }
+    for (const b of allBoxes) if (!b.piece_id && !usedBoxIds.has(b.id)) recs.push({ key: 'b-' + b.id, frame: null, box: b })
     return recs
   }, [chunkIn])
 
