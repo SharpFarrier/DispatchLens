@@ -761,15 +761,17 @@ function ChargesView() {
 
     // Listing price (BAU) per SKU, effective-dated, from recon_prices. A SKU can have
     // several dated rows (e.g. a discounted price for an event window); pick the one in
-    // effect on the order's date, else the most recent.
+    // effect on the order's date, else the most recent. Keyed by the normalised SKU
+    // (strip spaces, uppercase) so it matches order SKUs and the sheet the same way.
+    const normSku = (s: string | null) => (s || '').replace(/\s+/g, '').toUpperCase()
     const { data: priceRows } = await supabase.from('recon_prices').select('sku, price, effective_from, effective_to')
     const priceBySku: Record<string, { price: number; from: string | null; to: string | null }[]> = {}
     for (const p of (priceRows || [])) {
-      const k = (p.sku || '').trim(); if (!k) continue
+      const k = normSku(p.sku); if (!k) continue
       ;(priceBySku[k] ??= []).push({ price: Number(p.price) || 0, from: p.effective_from ?? null, to: p.effective_to ?? null })
     }
     const bauFor = (sku: string | null, date: string | null): number | null => {
-      const k = (sku || '').trim(); if (!k) return null
+      const k = normSku(sku); if (!k) return null
       const list = priceBySku[k]; if (!list || !list.length) return null
       const d = date || ''
       const inRange = list.filter(p => (!p.from || p.from <= d) && (!p.to || p.to >= d))
@@ -781,7 +783,6 @@ function ChargesView() {
     // Non-fatal — if it fails, category/BAU-from-sheet just stay empty.
     let sheetSkus: Record<string, { category: string; newPrice: number | null }> = {}
     try { const res = await fetch('/api/recon/master'); if (res.ok) { const j = await res.json(); sheetSkus = j.skus || {} } } catch { /* ignore */ }
-    const normSku = (s: string | null) => (s || '').replace(/\s+/g, '').toUpperCase()
     const sheetFor = (sku: string | null) => sheetSkus[normSku(sku)] || null
 
     // Rate card (per platform/category) + global tax/tolerance config → expected charges.
@@ -876,7 +877,9 @@ function ChargesView() {
       const agg = lines ? aggregateCharges(plat, lines) : null
       const category = sp?.category ?? null
       const qty = qtyByOid[oid] || 1
-      const perPieceBau = (sp?.newPrice ?? null) ?? bauFor(o.barcode_sku || o.sku, o.order_date)
+      // Dated price history is authoritative — reconcile on the base in effect on the
+      // order date; the live sheet price only fills SKUs with no recorded history yet.
+      const perPieceBau = bauFor(o.barcode_sku || o.sku, o.order_date) ?? (sp?.newPrice ?? null)
       const om = ometa[oid]
       out.push({ order_id: o.order_id, qty, sku: o.barcode_sku || o.sku, platform: plat, order_date: o.order_date, payment_date: payDate[oid] ?? null, agg, bau: perPieceBau != null ? perPieceBau * qty : null, category, dispatch_date: om?.dispatched_at ?? null, delivery_date: om?.delivered_at ?? null, tracking_number: om?.tracking_number ?? null, tracking_status: om?.tracking_status ?? null, exp: computeExpected(plat, category, agg, o.barcode_sku || o.sku, o.order_date, qty, perPieceBau) })
     }

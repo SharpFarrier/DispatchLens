@@ -4,6 +4,7 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "crons": [
-    { "path": "/api/cron/ops-snapshot", "schedule": "25 18 * * *" }
+    { "path": "/api/cron/ops-snapshot", "schedule": "25 18 * * *" },
+    { "path": "/api/recon/price-sync", "schedule": "0 2 * * *" }
   ]
 }

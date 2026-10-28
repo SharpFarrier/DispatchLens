@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Trash2, Search, X } from 'lucide-react'
+import { Plus, Trash2, Search, X, RefreshCw } from 'lucide-react'
+import DrumDatePicker from './DrumDatePicker'
 
 interface PriceRow { id: string; sku: string; price: number; effective_from: string; effective_to: string | null }
 
@@ -20,6 +21,8 @@ export default function PriceMaster() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [form, setForm] = useState({ sku: '', price: '', from: '', to: '' })
   const [closePrev, setClosePrev] = useState(true)
+  const [hasEnd, setHasEnd] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -56,10 +59,24 @@ export default function PriceMaster() {
       const { error } = await supabase.from('recon_prices').insert({ sku, price, effective_from: form.from, effective_to: form.to || null })
       if (error) throw error
       setMsg({ ok: true, text: `Added ${money(price)} for ${sku}.` })
-      setForm({ sku: '', price: '', from: '', to: '' })
+      setForm({ sku: '', price: '', from: '', to: '' }); setHasEnd(false)
       void load()
     } catch (e) { setMsg({ ok: false, text: 'Add failed: ' + (e as Error).message }) }
     setSaving(false)
+  }
+
+  // Pull current prices from the master sheet into the dated history. Only SKUs whose
+  // sheet price differs from their current recorded price get a new dated row.
+  const syncSheet = async () => {
+    setSyncing(true); setMsg(null)
+    try {
+      const res = await fetch('/api/recon/price-sync', { method: 'POST' })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || 'Sync failed')
+      setMsg({ ok: true, text: `Synced from sheet — ${j.created} new, ${j.changed} changed price${j.changed === 1 ? '' : 's'} (${j.scanned} SKUs scanned).` })
+      void load()
+    } catch (e) { setMsg({ ok: false, text: 'Sync failed: ' + (e as Error).message }) }
+    setSyncing(false)
   }
 
   const remove = async (id: string) => {
@@ -73,9 +90,15 @@ export default function PriceMaster() {
 
   return (
     <div style={{ maxWidth: 1000, display: 'flex', flexDirection: 'column' as const, gap: 18 }}>
-      <div>
-        <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px' }}>Price master</h2>
-        <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0 }}>The base selling price per SKU, with dated history. The expected price for an order uses whichever price was in effect on its order date. Leave &ldquo;effective to&rdquo; blank for the current price.</p>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' as const }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 4px' }}>Price master</h2>
+          <p style={{ fontSize: 12, color: 'var(--text3)', margin: 0 }}>The base selling price per SKU, with dated history. The expected price for an order uses whichever price was in effect on its order date. Leave &ldquo;effective to&rdquo; blank for the current price.</p>
+        </div>
+        <button onClick={syncSheet} disabled={syncing} title="Pull current prices from the master sheet into the dated history"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 7, border: '1px solid var(--accent)', background: 'var(--surface)', color: 'var(--accent)', fontSize: 13, fontWeight: 700, cursor: syncing ? 'not-allowed' : 'pointer', opacity: syncing ? 0.6 : 1, whiteSpace: 'nowrap' as const }}>
+          <RefreshCw size={14} /> {syncing ? 'Syncing…' : 'Sync prices from sheet'}
+        </button>
       </div>
 
       {msg && <div style={{ borderRadius: 8, padding: '10px 14px', fontSize: 13, fontWeight: 600, border: `1px solid ${msg.ok ? '#bbf7d0' : '#fecaca'}`, background: msg.ok ? 'var(--dispatched-bg)' : 'var(--critical-bg)', color: msg.ok ? 'var(--dispatched)' : 'var(--critical)' }}>{msg.text}</div>}
@@ -86,8 +109,17 @@ export default function PriceMaster() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' as const, alignItems: 'flex-end' }}>
           <label style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}><span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>SKU</span><input value={form.sku} onChange={e => setForm(f => ({ ...f, sku: e.target.value }))} placeholder="e.g. HT-QB-…" style={{ ...input, width: 200, fontFamily: 'DM Mono' }} /></label>
           <label style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}><span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>Price (₹)</span><input value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} inputMode="decimal" style={{ ...input, width: 120, fontFamily: 'DM Mono' }} /></label>
-          <label style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}><span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>Effective from</span><input type="date" value={form.from} onChange={e => setForm(f => ({ ...f, from: e.target.value }))} style={{ ...input }} /></label>
-          <label style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}><span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>Effective to <span style={{ color: 'var(--text3)' }}>(blank = current)</span></span><input type="date" value={form.to} onChange={e => setForm(f => ({ ...f, to: e.target.value }))} style={{ ...input }} /></label>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}><span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>Effective from</span><DrumDatePicker value={form.from} onChange={v => setForm(f => ({ ...f, from: v }))} placeholder="From" /></div>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}><span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>Effective to <span style={{ color: 'var(--text3)' }}>(blank = current)</span></span>
+            {hasEnd ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <DrumDatePicker value={form.to} min={form.from || undefined} onChange={v => setForm(f => ({ ...f, to: v }))} placeholder="To" />
+                <button type="button" onClick={() => { setHasEnd(false); setForm(f => ({ ...f, to: '' })) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 12, display: 'inline-flex' }} title="Clear end date (make current)"><X size={15} /></button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setHasEnd(true)} style={{ ...input, cursor: 'pointer', color: 'var(--text3)', textAlign: 'left' as const, background: 'var(--bg)' }}>+ set end date</button>
+            )}
+          </div>
           <button onClick={addPrice} disabled={saving} style={{ padding: '8px 16px', borderRadius: 7, border: 'none', background: saving ? 'var(--bg2)' : 'var(--accent)', color: saving ? 'var(--text3)' : '#fff', fontSize: 13, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Plus size={14} /> Add</button>
         </div>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, color: 'var(--text2)', cursor: 'pointer' }}>
