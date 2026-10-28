@@ -3,7 +3,9 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import DrumDatePicker from './DrumDatePicker'
-import { Search, RotateCcw, Ban, History, X, AlertTriangle, Activity, Download } from 'lucide-react'
+import { Search, RotateCcw, Ban, History, X, AlertTriangle, Activity, Download, Printer } from 'lucide-react'
+
+const SW_BLOCK = 400   // linkage-check sheet: SW boxes are checked in blocks of 400 serials
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -97,6 +99,12 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
   const [errorReason, setErrorReason] = useState('')
   const [msg, setMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
 
+  // Linkage-check sheet — SW boxes grouped into blocks of 400 serials.
+  const [swBoxes, setSwBoxes] = useState<{ id: string; seq: number | null; barcode: string; sku: string; piece_id: string | null }[]>([])
+  const [blockSel, setBlockSel] = useState(1)
+  const [sheetMode, setSheetMode] = useState<'full' | 'exceptions'>('full')
+  const [sheetBusy, setSheetBusy] = useState(false)
+
   const flash = (text: string, type: 'success' | 'error' = 'success') => { setMsg({ text, type }); setTimeout(() => setMsg(null), 3500) }
 
   // Fetch rows where `col` is in a possibly-large id list, chunked.
@@ -155,6 +163,15 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
   }, [supabase, from, to, completeAndStitch])
 
   useEffect(() => { loadWindow() }, [loadWindow])
+
+  // Load all SW boxes once for the linkage-check sheet; default to the current block.
+  useEffect(() => { (async () => {
+    const rows = await fetchAllRows<{ id: string; seq: number | null; barcode: string; sku: string; piece_id: string | null }>(
+      (f, t) => supabase.from('packed_units').select('id, seq, barcode, sku, piece_id').like('barcode', 'SW-%').order('seq', { ascending: true }).range(f, t))
+    setSwBoxes(rows || [])
+    const maxSeq = (rows || []).reduce((mx, b) => Math.max(mx, b.seq || 0), 0)
+    setBlockSel(Math.max(1, Math.ceil(maxSeq / SW_BLOCK)))
+  })() }, [supabase])
 
   // Global search — any barcode (frame or box), ignoring the date window.
   const runSearch = useCallback(async (raw: string) => {
@@ -315,6 +332,85 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
     URL.revokeObjectURL(url)
   }
 
+  // Blocks of 400 SW serials, with how many are generated so far in each.
+  const swBlocks = useMemo(() => {
+    const maxSeq = swBoxes.reduce((mx, b) => Math.max(mx, b.seq || 0), 0)
+    const n = Math.max(1, Math.ceil(maxSeq / SW_BLOCK))
+    const arr: { no: number; lo: number; hi: number; count: number }[] = []
+    for (let i = 1; i <= n; i++) {
+      const lo = (i - 1) * SW_BLOCK + 1, hi = i * SW_BLOCK
+      arr.push({ no: i, lo, hi, count: swBoxes.filter(b => (b.seq || 0) >= lo && (b.seq || 0) <= hi).length })
+    }
+    return arr
+  }, [swBoxes])
+  const swCode = (n: number) => 'SW-' + String(n).padStart(5, '0')
+
+  // Build + print the linkage-check sheet for the selected block (full or exceptions).
+  const printLinkageSheet = async () => {
+    const blk = swBlocks.find(b => b.no === blockSel); if (!blk) return
+    setSheetBusy(true)
+    try {
+      const boxes = swBoxes.filter(b => (b.seq || 0) >= blk.lo && (b.seq || 0) <= blk.hi).sort((a, b) => (a.seq || 0) - (b.seq || 0))
+      const pieceIds = [...new Set(boxes.map(b => b.piece_id).filter((x): x is string => !!x))]
+      const frames = await chunkIn<Piece>('pieces', 'id', pieceIds)
+      const frameById = new Map(frames.map(f => [f.id, f]))
+      const claim = new Map<string, number>()
+      for (const b of swBoxes) if (b.piece_id) claim.set(b.piece_id, (claim.get(b.piece_id) || 0) + 1)
+      type SRow = { seq: number; box: string; frame: string; detail: string; status: 'linked' | 'pending' | 'missing' | 'mismatch' | 'double' }
+      const rows: SRow[] = boxes.map(b => {
+        const f = b.piece_id ? frameById.get(b.piece_id) : undefined
+        let status: SRow['status'] = 'linked', frame = '', detail = ''
+        if (!b.piece_id) status = 'pending'
+        else if (!f) { status = 'missing'; detail = 'linked frame not found' }
+        else {
+          frame = f.barcode; detail = [f.shape, f.size, f.colour, f.mattress].filter(Boolean).join(' · ')
+          if ((claim.get(b.piece_id) || 0) > 1) { status = 'double'; detail = `frame linked to more than one box` }
+          else if (f.packed_barcode && f.packed_barcode !== b.barcode) { status = 'mismatch'; detail = `frame says ${f.packed_barcode}` }
+        }
+        return { seq: b.seq || 0, box: b.barcode, frame, detail, status }
+      })
+      const linked = rows.filter(r => r.status === 'linked').length
+      const pending = rows.filter(r => r.status === 'pending').length
+      const problem = rows.length - linked - pending
+      const show = sheetMode === 'exceptions' ? rows.filter(r => r.status !== 'linked') : rows
+      const esc = (s: string) => (s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' } as Record<string, string>)[c])
+      const flag = (st: SRow['status']) => st === 'linked' ? '<span class="ck">&#10003;</span>'
+        : st === 'pending' ? '<span class="pd">&#9679; not packed</span>'
+        : st === 'missing' ? '<span class="xx">&#10007; no frame</span>'
+        : st === 'mismatch' ? '<span class="xx">&#10007; mismatch</span>' : '<span class="xx">&#10007; dup frame</span>'
+      const body = show.map(r => `<tr class="${r.status !== 'linked' ? 'ex' : ''}"><td>${r.seq}</td><td class="mono">${esc(r.box)}</td><td class="mono">${esc(r.frame) || '&mdash;'}</td><td>${esc(r.detail) || '&mdash;'}</td><td>${flag(r.status)}</td><td></td></tr>`).join('')
+      const now = new Date().toLocaleString('en-IN', { timeZone: IST, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Linkage check — Block ${blk.no}</title><style>
+*{box-sizing:border-box}body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1B1917;margin:24px;font-size:12px}
+.head{display:flex;justify-content:space-between;border-bottom:2px solid #1B1917;padding-bottom:8px}
+.brand{font-size:16px;font-weight:800}.brand small{display:block;font-size:10px;color:#6B655D;text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-top:2px}
+.meta{text-align:right;font-size:10.5px;color:#6B655D;line-height:1.6}.meta b{color:#1B1917}
+.sum{display:flex;gap:20px;margin:10px 0 12px;font-size:12px}.sum b{font-size:15px;display:block}
+.ok b{color:#15803D}.pend b{color:#92400E}.bad b{color:#B91C1C}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #C9C4BC;padding:5px 7px;text-align:left;vertical-align:top}
+th{background:#F4F3F1;font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;color:#6B655D}
+td.mono{font-family:ui-monospace,Menlo,monospace;font-weight:600}
+.ck{color:#15803D;font-weight:800}.xx{color:#B91C1C;font-weight:800}.pd{color:#92400E;font-weight:700}
+tr.ex td{background:#FBEDE4}
+.note{font-size:10.5px;color:#B91C1C;margin:10px 0 2px;font-weight:600}
+.sign{display:flex;gap:40px;margin-top:22px;font-size:10.5px;color:#6B655D}.sign .f{flex:1}.sign .ln{border-bottom:1px solid #1B1917;height:24px;margin-bottom:4px}
+@media print{body{margin:0}}
+</style></head><body>
+<div class="head"><div class="brand">Honey Touch<small>SW Box &rarr; Frame Linkage Check</small></div>
+<div class="meta">Block <b>${blk.no}</b> &nbsp; ${swCode(blk.lo)} &rarr; ${swCode(blk.hi)}<br>Generated so far: <b>${blk.count} / ${SW_BLOCK}</b><br>Printed <b>${now}</b> &middot; ${sheetMode === 'exceptions' ? 'exceptions only' : 'full block'}</div></div>
+<div class="sum"><div class="ok"><b>${linked}</b>linked</div><div class="pend"><b>${pending}</b>not yet packed</div><div class="bad"><b>${problem}</b>problem</div></div>
+<table><thead><tr><th style="width:28px">#</th><th>SW box</th><th>Frame</th><th>Frame detail</th><th style="width:72px">Linked</th><th>Remarks / explanation</th></tr></thead><tbody>${body || '<tr><td colspan="6" style="text-align:center;color:#6B655D">No rows</td></tr>'}</tbody></table>
+<div class="note">Every &#10007; box needs a written explanation above, signed by the generating operator.</div>
+<div class="sign"><div class="f"><div class="ln"></div>Checked by (name)</div><div class="f"><div class="ln"></div>Signature</div><div class="f" style="max-width:150px"><div class="ln"></div>Date</div></div>
+</body></html>`
+      const w = window.open('', '_blank', 'width=900,height=720')
+      if (!w) { flash('Allow pop-ups to print the sheet', 'error'); return }
+      w.document.write(html); w.document.close(); w.focus()
+      setTimeout(() => w.print(), 400)
+    } catch (e) { flash('Sheet failed: ' + (e as Error).message, 'error') }
+    setSheetBusy(false)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
       {msg && (
@@ -325,6 +421,26 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
       <div>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', margin: 0 }}>Frame Lifecycle</h2>
         <p style={{ fontSize: 12, color: 'var(--text3)', margin: '4px 0 0' }}>Follow any frame from barcode generated → picked → packed → stocked → dispatched → returned. Browse is a cohort by generation date; search is global.</p>
+      </div>
+
+      {/* Linkage check sheet */}
+      <div style={{ ...card, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' as const }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Linkage check</span>
+        <select value={blockSel} onChange={e => setBlockSel(Number(e.target.value))}
+          style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13 }}>
+          {swBlocks.length === 0 && <option value={1}>No SW boxes yet</option>}
+          {swBlocks.map(b => <option key={b.no} value={b.no}>Block {b.no} · {swCode(b.lo)}–{swCode(b.hi)} · {b.count}/{SW_BLOCK}</option>)}
+        </select>
+        <div style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+          {(['full', 'exceptions'] as const).map(mo => (
+            <button key={mo} onClick={() => setSheetMode(mo)} style={{ padding: '7px 12px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: sheetMode === mo ? 'var(--accent)' : 'var(--surface)', color: sheetMode === mo ? '#fff' : 'var(--text3)' }}>{mo === 'full' ? 'Full block' : 'Exceptions only'}</button>
+          ))}
+        </div>
+        <button onClick={printLinkageSheet} disabled={sheetBusy || !swBlocks.length}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: (sheetBusy || !swBlocks.length) ? 'not-allowed' : 'pointer', opacity: (sheetBusy || !swBlocks.length) ? 0.5 : 1 }}>
+          <Printer size={14} /> {sheetBusy ? 'Preparing…' : 'Print sheet'}
+        </button>
+        <span style={{ fontSize: 11.5, color: 'var(--text3)' }}>Print at every 400 boxes; unlinked rows need a signed explanation.</span>
       </div>
 
       {/* Date range */}
