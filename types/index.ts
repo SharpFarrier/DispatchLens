@@ -29,6 +29,7 @@ export interface UserAccess {
   can_warehouse: boolean
   can_wh_stock: boolean
   can_wh_coating: boolean
+  can_wh_coating_orders: boolean
   can_wh_picking: boolean
   can_wh_inventory: boolean
   can_wh_barcodes: boolean

@@ -27,6 +27,7 @@ const DISPATCH_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[]
 const WAREHOUSE_TOGGLES: { key: keyof UserAccess; label: string; desc: string }[] = [
   { key: 'can_wh_stock',         label: 'Stock',      desc: 'Warehouse: stock inward' },
   { key: 'can_wh_coating',       label: 'Coating',    desc: 'Warehouse: powder coating' },
+  { key: 'can_wh_coating_orders', label: 'Coating Orders', desc: 'Warehouse: coating order board (trolley orders & balance)' },
   { key: 'can_wh_picking',       label: 'Picking',    desc: 'Warehouse: frame picking' },
   { key: 'can_wh_inventory',     label: 'Inventory',  desc: 'Warehouse: production inventory' },
   { key: 'can_wh_barcodes',      label: 'Barcodes',   desc: 'Warehouse: piece barcode registry' },

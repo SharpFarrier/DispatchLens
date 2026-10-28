@@ -229,7 +229,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   // Owner is implicitly full-access — sees every tab regardless of stored toggles,
   // so they can never lock themselves out. Everyone else uses their real permissions.
   const effectiveAccess: UserAccess = isOwner
-    ? { ...access, can_owner: true, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_delays: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_pack_map: true, can_wh_manage_columns: true }
+    ? { ...access, can_owner: true, can_import: true, can_plan: true, can_review: true, can_picklist: true, can_eod: true, can_eod_reconcile: true, can_dispatched: true, can_returns: true, can_allorders: true, can_calllens: true, can_users: true, can_handling: true, can_reports: true, can_delays: true, can_recon: true, can_otdr: true, can_warehouse: true, can_wh_stock: true, can_wh_coating: true, can_wh_coating_orders: true, can_wh_picking: true, can_wh_inventory: true, can_wh_barcodes: true, can_wh_pack_generate: true, can_wh_pack_scan: true, can_wh_pack_inventory: true, can_wh_pack_rto: true, can_wh_pack_units: true, can_wh_pack_stockin: true, can_wh_pack_pick: true, can_wh_pack_columns: true, can_wh_pack_fba: true, can_wh_pack_treatment: true, can_wh_pack_lifecycle: true, can_wh_pack_map: true, can_wh_manage_columns: true }
     : access
   // Keep the Requests badge fresh when the tab changes or something is submitted.
   useEffect(() => {
@@ -2598,7 +2598,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'delays', label: 'Delays', section: 'orders', show: effectiveAccess.can_delays },
     { key: 'wh:stock', label: 'Stock', section: 'warehouse', show: effectiveAccess.can_wh_stock },
     { key: 'wh:coating', label: 'Coating', section: 'warehouse', show: effectiveAccess.can_wh_coating },
-    { key: 'wh:coating-orders', label: 'Coating Orders', section: 'warehouse', show: effectiveAccess.can_wh_coating },
+    { key: 'wh:coating-orders', label: 'Coating Orders', section: 'warehouse', show: effectiveAccess.can_wh_coating_orders },
     { key: 'wh:picking', label: 'Pack Schedule', section: 'warehouse', show: effectiveAccess.can_wh_picking },
     { key: 'wh:inventory', label: 'Inventory', section: 'warehouse', show: effectiveAccess.can_wh_inventory },
     { key: 'wh:barcodes', label: 'Barcodes', section: 'warehouse', show: effectiveAccess.can_wh_barcodes },
@@ -3066,7 +3066,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
             { key: 'calllens', label: 'CallLens', show: effectiveAccess.can_calllens },
             { key: 'skumap', label: 'SKU Map', show: effectiveAccess.can_users },
             { key: 'handling', label: 'Handling Time', show: effectiveAccess.can_handling },
-            { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
+            { key: 'warehouse', label: 'Warehouse', show: effectiveAccess.can_wh_stock || access.can_wh_coating || access.can_wh_coating_orders || access.can_wh_picking || access.can_wh_inventory || access.can_wh_barcodes || access.can_wh_pack_generate || access.can_wh_pack_scan || access.can_wh_pack_inventory || access.can_wh_pack_rto || access.can_wh_pack_units },
             { key: 'recon', label: 'Recon', show: effectiveAccess.can_recon },
             { key: 'otdr', label: 'OTDR', show: effectiveAccess.can_otdr },
             { key: 'reports', label: isOwner && pendingReports > 0 ? `Reports (${pendingReports})` : 'Reports', show: effectiveAccess.can_reports },
@@ -5659,7 +5659,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         )}
 
         {/* ════ WAREHOUSE ════ */}
-        {tab === 'warehouse' && (effectiveAccess.can_wh_stock || effectiveAccess.can_wh_coating || effectiveAccess.can_wh_picking || effectiveAccess.can_wh_inventory || effectiveAccess.can_wh_barcodes || effectiveAccess.can_wh_pack_generate || effectiveAccess.can_wh_pack_scan || effectiveAccess.can_wh_pack_stockin || effectiveAccess.can_wh_pack_pick || effectiveAccess.can_wh_pack_columns || effectiveAccess.can_wh_pack_fba || effectiveAccess.can_wh_pack_inventory || effectiveAccess.can_wh_pack_rto || effectiveAccess.can_wh_pack_treatment || effectiveAccess.can_wh_pack_units || effectiveAccess.can_wh_pack_lifecycle || effectiveAccess.can_wh_pack_map) && (
+        {tab === 'warehouse' && (effectiveAccess.can_wh_stock || effectiveAccess.can_wh_coating || effectiveAccess.can_wh_coating_orders || effectiveAccess.can_wh_picking || effectiveAccess.can_wh_inventory || effectiveAccess.can_wh_barcodes || effectiveAccess.can_wh_pack_generate || effectiveAccess.can_wh_pack_scan || effectiveAccess.can_wh_pack_stockin || effectiveAccess.can_wh_pack_pick || effectiveAccess.can_wh_pack_columns || effectiveAccess.can_wh_pack_fba || effectiveAccess.can_wh_pack_inventory || effectiveAccess.can_wh_pack_rto || effectiveAccess.can_wh_pack_treatment || effectiveAccess.can_wh_pack_units || effectiveAccess.can_wh_pack_lifecycle || effectiveAccess.can_wh_pack_map) && (
           <WarehouseSection userId={user.id} access={effectiveAccess} isOwner={isOwner} userEmail={user.email || undefined} topTab={warehouseTab} onTopTabChange={setWarehouseTab} />
         )}
 
