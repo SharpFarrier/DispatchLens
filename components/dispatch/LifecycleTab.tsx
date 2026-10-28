@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import DrumDatePicker from './DrumDatePicker'
-import { Search, RotateCcw, Ban, History, X, AlertTriangle, Activity } from 'lucide-react'
+import { Search, RotateCcw, Ban, History, X, AlertTriangle, Activity, Download } from 'lucide-react'
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }
 
@@ -270,6 +270,37 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
     return ''
   }
 
+  // Export exactly what's shown (current window / search, plus any stage filter), one row
+  // per frame→box record with every stage timestamp. Dates as IST "YYYY-MM-DD HH:mm".
+  const csvDate = (t: string | null) => t
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: IST, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t)).replace(',', '')
+    : ''
+  const exportCsv = () => {
+    if (!list.length) return
+    const esc = (v: string | null | undefined) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const header = ['Frame barcode', 'Box barcode', 'Type', 'SKU', 'Shape', 'Size', 'Colour', 'Mattress', 'Current stage', 'Generated', 'Picked', 'Packed', 'In stock', 'Dispatched', 'Returned', 'Column', 'Courier', 'Note']
+    const body = list.map(r => {
+      const t = stageTimes(r), f = r.frame, b = r.box
+      const note = b?.void_reason || b?.error_reason || f?.error_reason || ''
+      return [
+        f?.barcode || '', b?.barcode || '', f ? 'frame' : 'frameless box',
+        b?.sku || '', f?.shape || '', f?.size || '', f?.colour || '', f?.mattress || '',
+        badgeFor(currentStage(r)).label,
+        csvDate(t.generated), csvDate(t.picked), csvDate(t.packed), csvDate(t.stocked), csvDate(t.dispatched), csvDate(t.returned),
+        b?.column_code || '', b?.picked_courier || '', note,
+      ].map(esc).join(',')
+    })
+    const csv = [header.join(','), ...body].join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const scope = searchRecs !== null ? 'search' : `${from}_to_${to}`
+    a.href = url
+    a.download = `lifecycle_${scope}${stageFilter ? '_' + stageFilter : ''}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 16 }}>
       {msg && (
@@ -397,8 +428,12 @@ export default function LifecycleTab({ userId, isOwner = false }: { userId: stri
         <div style={{ ...card, padding: 48, textAlign: 'center' as const, color: 'var(--text3)' }}>Loading…</div>
       ) : (
         <div style={{ ...card, overflow: 'hidden' }}>
-          <div style={{ fontSize: 11, color: 'var(--text3)', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            {searchRecs !== null ? `Search · ${list.length} match${list.length === 1 ? '' : 'es'}` : `Showing ${list.length}${list.length === 500 ? '+' : ''} frame${list.length === 1 ? '' : 's'}`}{stageFilter ? ` · reached ${badgeFor(stageFilter).label}` : ''}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 11, color: 'var(--text3)', padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+            <span>{searchRecs !== null ? `Search · ${list.length} match${list.length === 1 ? '' : 'es'}` : `Showing ${list.length}${list.length === 500 ? '+' : ''} frame${list.length === 1 ? '' : 's'}`}{stageFilter ? ` · reached ${badgeFor(stageFilter).label}` : ''}</span>
+            <button onClick={exportCsv} disabled={!list.length} title="Download the rows shown as CSV"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: list.length ? 'var(--accent)' : 'var(--text3)', fontSize: 11, fontWeight: 700, cursor: list.length ? 'pointer' : 'default', opacity: list.length ? 1 : 0.5 }}>
+              <Download size={12} /> Export CSV
+            </button>
           </div>
           <div style={{ maxHeight: 560, overflowY: 'auto' as const }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 }}>
