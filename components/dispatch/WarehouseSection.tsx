@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag, Activity, MapPin, ListChecks, Grid3x3, Link2, History } from 'lucide-react'
+import { Package, ScanLine, PackagePlus, RotateCcw, FileSearch, Boxes, Paintbrush, Hand, Layers, Warehouse, Tag, Activity, MapPin, ListChecks, Grid3x3, Link2, History, ClipboardList } from 'lucide-react'
 import InventoryTab from './InventoryTab'
 import UnitsTab from './UnitsTab'
 import ScanToStockTab from './ScanToStockTab'
@@ -13,6 +13,7 @@ import RtoTreatmentTab from './RtoTreatmentTab'
 import GenerateTab from './GenerateTab'
 import StockTab from './StockTab'
 import CoatingTab from './CoatingTab'
+import CoatingOrdersTab from './CoatingOrdersTab'
 import PicksTab from './PicksTab'
 import InventoryProdTab from './InventoryProdTab'
 import BarcodesTab from './BarcodesTab'
@@ -23,12 +24,13 @@ import BatchesTab from './BatchesTab'
 
 import { UserAccess } from '@/types'
 
-type TopTab = 'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'products' | 'packing'
+type TopTab = 'stock' | 'coating' | 'coating-orders' | 'picking' | 'inventory' | 'barcodes' | 'products' | 'packing'
 type PackingTab = 'generate' | 'packmap' | 'batches' | 'scan' | 'colstockin' | 'colpick' | 'columns' | 'fba' | 'inventory' | 'lifecycle' | 'rto' | 'treatment' | 'units'
 
 const TOP_TABS: { key: TopTab; label: string; icon: React.ReactNode; perm: keyof UserAccess | 'packing' }[] = [
   { key: 'stock',   label: 'Stock',   icon: <Boxes size={14} />, perm: 'can_wh_stock' },
   { key: 'coating', label: 'Coating', icon: <Paintbrush size={14} />, perm: 'can_wh_coating' },
+  { key: 'coating-orders', label: 'Coating Orders', icon: <ClipboardList size={14} />, perm: 'can_wh_coating' },
   { key: 'picking', label: 'Pack Schedule', icon: <ListChecks size={14} />, perm: 'can_wh_picking' },
   { key: 'inventory', label: 'Inventory', icon: <Warehouse size={14} />, perm: 'can_wh_inventory' },
   { key: 'barcodes', label: 'Barcodes', icon: <Tag size={14} />, perm: 'can_wh_barcodes' },
@@ -95,6 +97,7 @@ export default function WarehouseSection({ userId, access, isOwner = false, user
 
       {topTab === 'stock' && <StockTab userId={userId} />}
       {topTab === 'coating' && <CoatingTab userId={userId} />}
+      {topTab === 'coating-orders' && <CoatingOrdersTab userId={userId} />}
       {topTab === 'picking' && <PicksTab userId={userId} />}
       {topTab === 'inventory' && <InventoryProdTab />}
       {topTab === 'barcodes' && <BarcodesTab />}

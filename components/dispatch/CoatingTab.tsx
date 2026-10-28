@@ -40,6 +40,19 @@ export default function CoatingTab({ userId }: { userId: string }) {
   const [trolleys, setTrolleys] = useState<Array<{ id: string; label: string | null; created_at: string; coating_items: CoatingItem[] }>>([])
   const [isFetching, setIsFetching] = useState(false)
 
+  // Coating orders — generation must be tied to an open trolley order.
+  const [orders, setOrders] = useState<Array<{ id: string; order_date: string; trolley_no: string; ordered: number }>>([])
+  const [orderId, setOrderId] = useState('')
+  const loadOrders = useCallback(async () => {
+    const { data } = await supabase.from('coating_orders')
+      .select('id, order_date, trolley_no, coating_order_items(qty_ordered)').neq('status', 'closed')
+      .order('order_date', { ascending: false }).order('created_at', { ascending: false })
+    setOrders(((data as Array<{ id: string; order_date: string; trolley_no: string; coating_order_items: { qty_ordered: number }[] }>) || [])
+      .map(o => ({ id: o.id, order_date: o.order_date, trolley_no: o.trolley_no, ordered: (o.coating_order_items || []).reduce((s, x) => s + (x.qty_ordered || 0), 0) })))
+  }, [supabase])
+  useEffect(() => { if (tab === 'entry') void loadOrders() }, [tab, loadOrders])
+  const fmtOrderDate = (s: string) => s ? new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'
+
   const loadTrolleys = useCallback(async () => {
     setIsFetching(true)
     const data = await fetchAllRows((from, to) =>
@@ -156,6 +169,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
   }
 
   async function handleSubmit() {
+    if (!orderId) { showToast('Pick the trolley order you are coating for first', 'error'); return }
     if (!lineItems.length) { showToast('Add at least one frame', 'error'); return }
     const invalid = lineItems.map((item, i) => getItemErrors(item, { requireColour: true }).length > 0 ? i : -1).filter(i => i >= 0)
     if (invalid.length) { setInvalidIndices(invalid); showToast('Some frames are missing required fields', 'error'); return }
@@ -163,7 +177,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
     setSubmitting(true)
     try {
       const { data: trolley, error } = await supabase.from('coating_trolleys')
-        .insert({ label: label || null, temp_celsius: temp || null, duration_min: duration || null, notes: notes || null, created_by: userId })
+        .insert({ label: label || null, temp_celsius: temp || null, duration_min: duration || null, notes: notes || null, created_by: userId, coating_order_id: orderId })
         .select().single()
       if (error) throw error
 
@@ -196,8 +210,8 @@ export default function CoatingTab({ userId }: { userId: string }) {
       // NOTE: photo upload stubbed for now (PhotoUploader not yet ported).
       showToast(`Trolley saved ✓ ${createdPieces.length} label(s) ready`)
       setLastLabels(createdPieces.length ? createdPieces : null)
-      setLineItems([]); setLabel(''); setTemp(''); setDuration(''); setNotes('')
-      void loadTrolleys()
+      setLineItems([]); setLabel(''); setTemp(''); setDuration(''); setNotes(''); setOrderId('')
+      void loadTrolleys(); void loadOrders()
     } catch (e) { showToast('Error: ' + (e as Error).message, 'error') }
     setSubmitting(false)
   }
@@ -264,6 +278,15 @@ export default function CoatingTab({ userId }: { userId: string }) {
           </div>
 
           <div>
+            <div style={sectionTitle}>Trolley order <span style={{ color: 'var(--critical)' }}>*</span></div>
+            <select value={orderId} onChange={e => setOrderId(e.target.value)} style={inputField}>
+              <option value="">Select the trolley order you&rsquo;re coating for…</option>
+              {orders.map(o => <option key={o.id} value={o.id}>Trolley {o.trolley_no} · {fmtOrderDate(o.order_date)} · {o.ordered} pcs ordered</option>)}
+            </select>
+            {!orders.length && <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }}>No open coating orders — create one in the Coating Orders tab first.</div>}
+          </div>
+
+          <div>
             <div style={sectionTitle}>Frames in this Trolley</div>
             <LineItemList items={lineItems} onRemove={i => { setLineItems(p => p.filter((_, idx) => idx !== i)); setInvalidIndices([]) }} invalidIndices={invalidIndices} />
           </div>
@@ -313,8 +336,8 @@ export default function CoatingTab({ userId }: { userId: string }) {
             </div>
           )}
 
-          <button onClick={handleSubmit} disabled={submitting || !lineItems.length}
-            style={{ width: '100%', padding: 14, background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 15, borderRadius: 10, border: 'none', cursor: 'pointer', opacity: (submitting || !lineItems.length) ? 0.4 : 1 }}>
+          <button onClick={handleSubmit} disabled={submitting || !lineItems.length || !orderId}
+            style={{ width: '100%', padding: 14, background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 15, borderRadius: 10, border: 'none', cursor: 'pointer', opacity: (submitting || !lineItems.length || !orderId) ? 0.4 : 1 }}>
             {submitting ? 'Saving...' : 'Submit Trolley'}
           </button>
 

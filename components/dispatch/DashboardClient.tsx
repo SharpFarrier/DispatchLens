@@ -195,7 +195,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     document.addEventListener('copy', onCopy)
     return () => document.removeEventListener('copy', onCopy)
   }, [isOwner])
-  const [warehouseTab, setWarehouseTab] = useState<'stock' | 'coating' | 'picking' | 'inventory' | 'barcodes' | 'products' | 'packing'>('stock')
+  const [warehouseTab, setWarehouseTab] = useState<'stock' | 'coating' | 'coating-orders' | 'picking' | 'inventory' | 'barcodes' | 'products' | 'packing'>('stock')
   const pathname = usePathname()
   const stateNavReady = useRef(false)
   // URL -> state: on mount, back/forward, and deep links.
@@ -2598,6 +2598,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'delays', label: 'Delays', section: 'orders', show: effectiveAccess.can_delays },
     { key: 'wh:stock', label: 'Stock', section: 'warehouse', show: effectiveAccess.can_wh_stock },
     { key: 'wh:coating', label: 'Coating', section: 'warehouse', show: effectiveAccess.can_wh_coating },
+    { key: 'wh:coating-orders', label: 'Coating Orders', section: 'warehouse', show: effectiveAccess.can_wh_coating },
     { key: 'wh:picking', label: 'Pack Schedule', section: 'warehouse', show: effectiveAccess.can_wh_picking },
     { key: 'wh:inventory', label: 'Inventory', section: 'warehouse', show: effectiveAccess.can_wh_inventory },
     { key: 'wh:barcodes', label: 'Barcodes', section: 'warehouse', show: effectiveAccess.can_wh_barcodes },
