@@ -3232,7 +3232,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         </div>
       </header>}
 
-      <main style={{ flex: 1, padding: '28px 32px', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
+      <main style={{ flex: 1, padding: isMobile ? '28px 32px calc(150px + env(safe-area-inset-bottom, 0px))' : '28px 32px 104px', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
 
         {/* ════ IMPORT ════ */}
         {tab === 'import' && effectiveAccess.can_import && (

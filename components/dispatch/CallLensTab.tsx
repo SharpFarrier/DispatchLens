@@ -149,7 +149,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [queue, setQueue] = useState<Queue>('predispatch')
   const ACTUAL_REASONS = ['In-transit Damage', 'Manufacturing Defect', 'Delay in Delivery', 'Customer Refused Delivery', 'No Need', 'Not Available', 'Customer not Satisfied with Quality', 'A-Z Claim Received', 'Noise Issue', 'Size Issue', 'Self Ship Return', 'Alignment Issue', 'Other']
   const CANCEL_REASONS = ['Could not contact customer', 'Customer keeping the item', ...ACTUAL_REASONS]
-  const [coordReturns, setCoordReturns] = useState<Record<string, { id: string; state: string; actualReason: string | null }>>({})
+  const [coordReturns, setCoordReturns] = useState<Record<string, { id: string; state: string; actualReason: string | null; note: string | null }>>({})
   const [actualReason, setActualReason] = useState<Record<string, string>>({})
   const [actualNote, setActualNote] = useState<Record<string, string>>({})
   const [cancelFor, setCancelFor] = useState<DBOrder | null>(null)
@@ -159,10 +159,10 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [coordBusy, setCoordBusy] = useState<string | null>(null)
 
   const loadCoord = useCallback(async () => {
-    const { data } = await supabase.from('returns').select('order_id, id, created_at, coord_state, actual_reason').in('coord_state', ['coordinating', 'approved'])
-    const m: Record<string, { id: string; state: string; actualReason: string | null }> = {}; const t: Record<string, string> = {}
-    for (const r of (data || []) as { order_id: string; id: string; created_at: string; coord_state: string; actual_reason: string | null }[]) {
-      if (r.order_id) { m[r.order_id] = { id: r.id, state: r.coord_state, actualReason: r.actual_reason }; t[r.order_id] = r.created_at }
+    const { data } = await supabase.from('returns').select('order_id, id, created_at, coord_state, actual_reason, notes').in('coord_state', ['coordinating', 'approved'])
+    const m: Record<string, { id: string; state: string; actualReason: string | null; note: string | null }> = {}; const t: Record<string, string> = {}
+    for (const r of (data || []) as { order_id: string; id: string; created_at: string; coord_state: string; actual_reason: string | null; notes: string | null }[]) {
+      if (r.order_id) { m[r.order_id] = { id: r.id, state: r.coord_state, actualReason: r.actual_reason, note: r.notes }; t[r.order_id] = r.created_at }
     }
     setCoordReturns(m); setCoordMarkedAt(t)
   }, [supabase])
@@ -554,7 +554,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
       const now = new Date().toISOString()
       await supabase.from('returns').update({ actual_reason: reason, notes: note || null, coord_state: 'approved', updated_at: now }).eq('id', c.id)
       void logOrderEvent(o.order_id, 'note', `Return approved · actual reason: ${reason}${note ? ` (${note})` : ''} · awaiting pickup`, null)
-      setCoordReturns(prev => ({ ...prev, [o.order_id]: { ...c, state: 'approved', actualReason: reason } }))
+      setCoordReturns(prev => ({ ...prev, [o.order_id]: { ...c, state: 'approved', actualReason: reason, note: note || null } }))
       setActualReason(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
       setActualNote(prev => { const n = { ...prev }; delete n[o.order_id]; return n })
     } finally { setCoordBusy(null) }
@@ -897,7 +897,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
                               {o.contact_number && <a href={`tel:${o.contact_number}`} title="Call customer" style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--accent)', textDecoration: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Phone size={12} /> {o.contact_number}</a>}
                               {approved && <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--dispatched)', background: 'var(--dispatched-bg)', borderRadius: 20, padding: '3px 9px' }}>✓ Approved · awaiting pickup</span>}
-                              {approved && c?.actualReason && <span style={{ fontSize: 11, color: 'var(--text2)' }}>Reason: <b>{c.actualReason}</b></span>}
+                              {approved && c?.actualReason && <span style={{ fontSize: 11, color: 'var(--text2)' }}>Reason: <b>{c.actualReason}</b>{c.note ? <> — <span style={{ fontStyle: 'italic' as const }}>{c.note}</span></> : null}</span>}
                             </div>
                             {!approved ? (
                               // STEP A — call, set actual reason, Approve / Cancel
