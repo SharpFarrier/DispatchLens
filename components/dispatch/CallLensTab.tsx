@@ -147,6 +147,8 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
   const [orders, setOrders] = useState<DBOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [queue, setQueue] = useState<Queue>('predispatch')
+  // Return calls: narrow to pending (coordinating) vs approved (awaiting pickup). Flow unchanged.
+  const [rcFilter, setRcFilter] = useState<'all' | 'pending' | 'approved'>('all')
   const ACTUAL_REASONS = ['In-transit Damage', 'Manufacturing Defect', 'Delay in Delivery', 'Customer Refused Delivery', 'No Need', 'Not Available', 'Customer not Satisfied with Quality', 'A-Z Claim Received', 'Noise Issue', 'Size Issue', 'Self Ship Return', 'Alignment Issue', 'Other']
   const CANCEL_REASONS = ['Could not contact customer', 'Customer keeping the item', ...ACTUAL_REASONS]
   const [coordReturns, setCoordReturns] = useState<Record<string, { id: string; state: string; actualReason: string | null; note: string | null }>>({})
@@ -246,7 +248,7 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     void refreshCounts()
   }, [supabase, queue, coordReturns, refreshCounts])
   useEffect(() => { void load() }, [load])
-  useEffect(() => { setSelected(new Set()); setOpenFilter(null); setConfirmingFor(null); setUnlockingFor(null); setReturningFor(null) }, [queue])
+  useEffect(() => { setSelected(new Set()); setOpenFilter(null); setConfirmingFor(null); setUnlockingFor(null); setReturningFor(null); setRcFilter('all') }, [queue])
 
   const notInTransit = useMemo(() => new Set(['delivered', 'rto', 'returned', 'return to origin', 'rto delivered', 'rto initiated', 'cancelled', 'lost']), [])
 
@@ -259,9 +261,13 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
     const inReturnCalls = (o: DBOrder) => !!coordReturns[o.order_id]
     const pred = queue === 'predispatch' ? inPreDispatch : queue === 'callbacks' ? inCallbacks : queue === 'returncalls' ? inReturnCalls : inDelay
     let list = orders.filter(pred)
+    if (queue === 'returncalls' && rcFilter !== 'all') {
+      const want = rcFilter === 'pending' ? 'coordinating' : 'approved'
+      list = list.filter(o => coordReturns[o.order_id]?.state === want)
+    }
     if (hideConfirmed) list = list.filter(o => waStateOf(o.contact_number).state !== 'confirmed')
     return list.map(o => ({ o }))
-  }, [orders, queue, inPreDispatch, inCallbacks, inDelay, coordReturns, hideConfirmed, waByPhone])
+  }, [orders, queue, rcFilter, inPreDispatch, inCallbacks, inDelay, coordReturns, hideConfirmed, waByPhone])
 
 
   // "locked" = an order that's been actioned into a terminal-for-this-queue confirmation state.
@@ -726,6 +732,29 @@ export default function CallLensTab({ currentUserEmail }: { currentUserEmail: st
           <QueueBtn q="returncalls" label="Return calls" n={counts.rc} />
           <button onClick={() => setHideConfirmed(v => !v)} title="Hide orders the customer confirmed on WhatsApp" style={{ marginLeft: 8, padding: '5px 11px', borderRadius: 20, border: `1px solid ${hideConfirmed ? 'var(--accent)' : 'var(--border)'}`, background: hideConfirmed ? 'var(--accent-bg)' : 'var(--surface)', color: hideConfirmed ? 'var(--accent)' : 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><CheckCircle size={12} /> Hide WhatsApp-confirmed</button>
         </div>
+        {queue === 'returncalls' && (() => {
+          const vals = Object.values(coordReturns)
+          const seg: { k: 'all' | 'pending' | 'approved'; label: string; n: number }[] = [
+            { k: 'all', label: 'All', n: vals.length },
+            { k: 'pending', label: 'Pending', n: vals.filter(c => c.state === 'coordinating').length },
+            { k: 'approved', label: 'Approved', n: vals.filter(c => c.state === 'approved').length },
+          ]
+          return (
+            <div style={{ display: 'flex', gap: 3, background: 'var(--bg2)', padding: 3, borderRadius: 7 }}>
+              {seg.map(s => {
+                const on = rcFilter === s.k
+                return (
+                  <button key={s.k} onClick={() => setRcFilter(s.k)} style={{
+                    padding: '5px 11px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                    background: on ? 'var(--surface)' : 'transparent', color: on ? 'var(--text)' : 'var(--text2)',
+                    fontSize: 12, fontWeight: 600, boxShadow: on ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                  }}>{s.label}<span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: on ? 'var(--accent)' : 'var(--text3)' }}>{s.n}</span></button>
+                )
+              })}
+            </div>
+          )
+        })()}
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text3)' }}>{loading ? 'loading…' : `${rows.length} shown`}</span>
         {anyFilter && <button onClick={clearAll} style={{ padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text3)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><X size={12} /> Clear filters</button>}
         <button onClick={() => _xg.handleExport({ rowCount: rows.length, summary: anyFilter ? 'filtered' : undefined, getCsv: exportCsv, filename: `calllens-${queue}-${todayStr()}.csv` })} disabled={loading || !rows.length || _xg.disabled} title={anyFilter ? 'Export the filtered rows' : 'Export all rows shown'} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: rows.length ? 'var(--text2)' : 'var(--text3)', fontSize: 12, fontWeight: 600, cursor: rows.length ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Download size={12} /> {_xg.status === 'none' || _xg.status === 'owner' ? _xg.label + (anyFilter ? ' (filtered)' : '') : _xg.label}</button>
