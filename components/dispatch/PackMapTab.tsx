@@ -120,7 +120,9 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
     if (!data) { showError('NO SUCH FRAME', `${barcode} — not found`); return }
     const f = data as Frame
     if (f.status === 'packed') { showError('ALREADY PACKED', `${barcode} is already packed`); return }
-    if (!['picked', 'coated'].includes(f.status)) { showError('NOT READY', `${barcode} is "${f.status}", not ready to pack`); return }
+    // audit_missing = the physical audit marked it gone, but scanning it here proves it IS present,
+    // so we let it pack (which restores it out of the audit-missing state). coated/picked pack as usual.
+    if (!['picked', 'coated', 'audit_missing'].includes(f.status)) { showError('NOT READY', `${barcode} is "${f.status}", not ready to pack`); return }
     setFrame(f); setResult(null); readyTick()
     focusBox()
   }
@@ -321,8 +323,13 @@ export default function PackMapTab(_props: { userId: string; userEmail?: string 
                     </div>
                     <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
                       {frameIdent.map((t, i) => <span key={i} style={pill}>{t}</span>)}
-                      <span style={pill}>{frame.status}</span>
+                      <span style={pill}>{frame.status === 'audit_missing' ? 'coated' : frame.status}</span>
                     </div>
+                    {frame.status === 'audit_missing' && (
+                      <div style={{ marginTop: 6, fontSize: 11, fontWeight: 600, color: 'var(--amber)', background: 'var(--surface2)', border: '1px solid #e8d9b0', borderRadius: 7, padding: '5px 8px' }}>
+                        Was marked missing in the audit — scanning confirms it&apos;s here. Packing will restore it.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
