@@ -81,3 +81,35 @@ export async function fetchSheetRows(): Promise<SheetRow[]> {
   }
   return out
 }
+
+// --- Dated price columns feature -------------------------------------------
+// All header cells, original case/order, for the column picker in Price Master.
+export async function fetchSheetHeaders(): Promise<string[]> {
+  const res = await fetch(CSV_URL, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`sheet fetch failed: ${res.status}`)
+  const rows = parseCsv(await res.text())
+  return rows.length ? rows[0].map(h => h.trim()).filter(Boolean) : []
+}
+
+// normSku(alias) -> price for an arbitrary price column (by header name), keyed by
+// every sku alias (master/amazon/flipkart/website) exactly like fetchSheetSkus.
+export async function fetchSheetColumnPrices(headerName: string): Promise<Record<string, number>> {
+  const res = await fetch(CSV_URL, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`sheet fetch failed: ${res.status}`)
+  const rows = parseCsv(await res.text())
+  if (rows.length < 2) return {}
+  const header = rows[0].map(h => h.trim().toLowerCase())
+  const pi = header.indexOf(headerName.trim().toLowerCase())
+  if (pi < 0) throw new Error(`column "${headerName}" not found in sheet`)
+  const col = (names: string[]) => { for (let i = 0; i < header.length; i++) if (names.includes(header[i])) return i; return -1 }
+  const mi = col(['master sku']), ai = col(['amazon sku']), fi = col(['flipkart sku']), wi = col(['website sku'])
+  const out: Record<string, number> = {}
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]
+    if (!row.some(c => (c || '').trim())) continue
+    const get = (i: number) => (i >= 0 && i < row.length) ? (row[i] || '').trim() : ''
+    const price = num(get(pi)); if (price == null) continue
+    for (const s of [get(mi), get(ai), get(fi), get(wi)]) { const k = normSku(s); if (k) out[k] = price }
+  }
+  return out
+}
