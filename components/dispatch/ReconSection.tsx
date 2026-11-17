@@ -6,7 +6,7 @@ import { fetchAllRows } from './fetchAll'
 import { Upload, FileText, AlertTriangle, IndianRupee, RefreshCw, Filter, ArrowUp, ArrowDown, ChevronDown, ChevronRight, X, Download, Search, Calendar, ChevronLeft } from 'lucide-react'
 import {
   parseAmazonText, parseFlipkartBuffer, readFileText, readFileBuffer,
-  parseRazorpayText, parseCashfreeText, detectWebsiteAggregator,
+  parseRazorpayText, parseCashfreeText, parseGokwikText, detectWebsiteAggregator,
   type SettlementRow,
 } from '@/lib/settlements'
 import RateCardEditor from './RateCardEditor'
@@ -137,7 +137,8 @@ export default function ReconSection() {
             const agg = detectWebsiteAggregator(txt)
             if (agg === 'razorpay') parsed = parseRazorpayText(txt)
             else if (agg === 'cashfree') parsed = parseCashfreeText(txt)
-            else { flash('warn', `Skipped ${f.name} — couldn't tell if it's a Razorpay or Cashfree export (unrecognized columns)`); continue }
+            else if (agg === 'gokwik') parsed = parseGokwikText(txt)
+            else { flash('warn', `Skipped ${f.name} — couldn't tell if it's a Razorpay, Cashfree or GoKwik export (unrecognized columns)`); continue }
             console.log('[recon] website aggregator detected:', agg)
           }
         } catch (pe) {
@@ -473,6 +474,8 @@ export interface ChargeAgg {
   sale: number; commission: number; closing: number; shipping: number; fba: number
   productTax: number; tcs: number; tds: number; gstOnFees: number; net: number; other: number
   reverseResidual: number; returned: boolean; commissionPct: number | null
+  aggregator: string | null       // Website: which payment gateway (razorpay/cashfree/gokwik)
+  codReceivable: number           // Website: amount still to be collected by the courier (COD / partial-COD)
   detail: { label: string; amount: number }[]
 }
 type SettleLine = { amount: number | null; transaction_type: string | null; amount_description: string | null; raw: Record<string, unknown> | null }
@@ -522,9 +525,9 @@ async function rebuildSettlementCharges(supabase: ReturnType<typeof createClient
   return chargeRows.length
 }
 
-function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
+function aggregateCharges(platform: string, lines: SettleLine[], gwRates: Record<string, number> = {}): ChargeAgg {
   const b = { sale: 0, commission: 0, closing: 0, shipping: 0, fba: 0, productTax: 0, tcs: 0, tds: 0, gstOnFees: 0, net: 0, other: 0 }
-  let reverseResidual = 0, returned = false
+  let reverseResidual = 0, returned = false, codReceivable = 0, aggregator: string | null = null
   const detail: { label: string; amount: number }[] = []
   if (platform === 'Amazon') {
     for (const l of lines) {
@@ -565,8 +568,22 @@ function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
     for (const l of lines) {
       const raw = (l.raw || {}) as Record<string, unknown>
       const num = (v: unknown) => { const n = parseFloat(String(v ?? '')); return isNaN(n) ? 0 : n }
+      const desc = (l.amount_description || '')
+      if (desc) aggregator = aggregator && aggregator !== desc ? 'mixed' : desc
       let gross = 0, fee = 0, gst = 0, net = 0
-      if ((l.amount_description || '') === 'cashfree') {
+      if (desc === 'gokwik') {
+        // GoKwik order report carries NO actual fee — apply the configured all-in % (incl GST)
+        // as the gateway fee. gross = amount received online (full for Paid, the partial token
+        // for Partial Paid); the remainder of a partial order is a COD receivable the courier
+        // collects later (reconciled against the courier remittance file when we have it).
+        gross = num(raw['_online_gross']) || (l.amount || 0)
+        const rate = (gwRates['gokwik'] ?? 0.75) / 100   // all-in, GST-inclusive
+        fee = gross * rate
+        gst = 0            // fee is all-in (GST already inside the %), no separate GST line
+        net = gross - fee
+        codReceivable += num(raw['_cod_receivable'])
+        if (gross === 0 && num(raw['_cod_receivable']) === 0) { detail.push({ label: 'gokwik · cancelled / not settled', amount: 0 }); continue }
+      } else if (desc === 'cashfree') {
         gross = num(raw['_gross']); fee = num(raw['_service_charge']); gst = num(raw['_gst'])
         net = num(raw['_settlement']) || (gross - fee - gst)
       } else {
@@ -575,16 +592,17 @@ function aggregateCharges(platform: string, lines: SettleLine[]): ChargeAgg {
         net = (l.amount || 0) || (gross - fee - gst)
       }
       // A failed/zero line (l.amount === 0) contributed nothing — skip so it doesn't inflate sale.
-      if ((l.amount || 0) === 0 && net === 0) { detail.push({ label: `${l.amount_description || 'gateway'} · not settled`, amount: 0 }); continue }
+      if ((l.amount || 0) === 0 && net === 0 && desc !== 'gokwik') { detail.push({ label: `${desc || 'gateway'} · not settled`, amount: 0 }); continue }
       b.sale += gross
       b.commission += fee
       b.gstOnFees += gst
       b.net += net
-      detail.push({ label: `${l.amount_description || 'gateway'} · settled`, amount: net })
+      const codNote = desc === 'gokwik' && num(raw['_cod_receivable']) > 0 ? ` · +₹${Math.round(num(raw['_cod_receivable']))} COD to collect` : ''
+      detail.push({ label: `${desc || 'gateway'} · online ${Math.round(net)}${codNote}`, amount: net })
     }
   }
   const commissionPct = b.sale ? Math.abs(b.commission) / b.sale * 100 : null
-  return { ...b, reverseResidual, returned, commissionPct, detail }
+  return { ...b, reverseResidual, returned, commissionPct, aggregator, codReceivable, detail }
 }
 
 // Expected settlement from the rate card (B2). All ₹ amounts are positive fees.
@@ -828,11 +846,17 @@ function ChargesView() {
       const p = String(c.platform ?? 'Amazon'), cat = String(c.category ?? '')
       ;(rateCard[p] ??= {})[cat] = { rate_below: Number(c.rate_below) || 0, rate_above: Number(c.rate_above) || 0, threshold: Number(c.threshold) || 0, closing_fee: Number(c.closing_fee) || 0, closing_fee_pct: Number(c.closing_fee_pct) || 0 }
     }
-    const { data: cfgData } = await supabase.from('app_config').select('key, value').in('key', ['recon_tcs_rate', 'recon_tds_rate', 'recon_gst_on_fees_rate', 'recon_accuracy_threshold'])
+    const { data: cfgData } = await supabase.from('app_config').select('key, value').in('key', ['recon_tcs_rate', 'recon_tds_rate', 'recon_gst_on_fees_rate', 'recon_accuracy_threshold', 'recon_gw_razorpay', 'recon_gw_cashfree', 'recon_gw_gokwik'])
     const cfg: Record<string, number> = {}
     for (const r of (cfgData || []) as { key: string; value: unknown }[]) cfg[r.key] = Number(r.value) || 0
     const tcsR = (cfg['recon_tcs_rate'] || 0) / 100, tdsR = (cfg['recon_tds_rate'] || 0) / 100
     const gstR = (cfg['recon_gst_on_fees_rate'] || 18) / 100, accR = (cfg['recon_accuracy_threshold'] || 2) / 100
+    // Website payment-gateway fee %, all-in (GST-inclusive). Defaults match the agreed rates.
+    const gwRates: Record<string, number> = {
+      razorpay: cfg['recon_gw_razorpay'] || 2,
+      cashfree: cfg['recon_gw_cashfree'] || 1.95,
+      gokwik: cfg['recon_gw_gokwik'] || 0.75,
+    }
 
     // Discount events (Phase C): during an event window a SKU may carry a reduced
     // commission rate; the reward is the commission saved vs the normal rate.
@@ -864,6 +888,20 @@ function ChargesView() {
       if (!agg) return null
       if (agg.returned) return null   // refunded/returned order — we don't expect a payout, so no expected net / gap
       if (!(agg.sale > 0)) return null   // no positive sale (reimbursed return / pure adjustment) — no rate-card expectation
+      if (platform === 'Website') {
+        // D2C: the only "charge" is the payment-gateway fee (configurable all-in %). No rate card,
+        // no TCS/TDS/closing. gross = amount received online. For Razorpay/Cashfree the actual fee
+        // comes from the settlement file, so the gap flags a gateway over/undercharge. GoKwik's file
+        // carries no fee — we apply the configured % as the deduction, so actual == expected (gap 0).
+        const gross = agg.sale || 0
+        const rate = gwRates[agg.aggregator || ''] ?? 0      // percent, all-in
+        const expComm = (rate / 100) * gross
+        const expNet = gross - expComm
+        const gap = agg.net - expNet
+        const flagged = Math.abs(gap) > Math.max(1, accR * gross)
+        const reason = flagged ? `gateway fee ${gap > 0 ? 'under' : 'over'}charged ₹${Math.abs(Math.round(gap))}` : null
+        return { toBeChargedPct: rate, expComm, expClosing: 0, closingPctOfSale: 0, expGst: 0, expTcs: 0, expTds: 0, expNet, gap, flagged, reason, reward: null }
+      }
       const card = rateCard[platform]?.[category || 'Uncategorized'] || rateCard[platform]?.['Uncategorized']
       if (!card) return null
       const principal = agg.sale || 0
@@ -911,7 +949,7 @@ function ChargesView() {
       seenOids.add(oid)
       const plat = platformOf(oid); const lines = byOrder[oid]
       const sp = sheetFor(o.barcode_sku || o.sku)
-      const agg = lines ? aggregateCharges(plat, lines) : null
+      const agg = lines ? aggregateCharges(plat, lines, gwRates) : null
       const category = sp?.category ?? null
       const qty = qtyByOid[oid] || 1
       // Dated price history is authoritative — reconcile on the base in effect on the
@@ -964,6 +1002,7 @@ function ChargesView() {
     { key: 'net', label: 'Net', type: 'number', align: 'right', get: r => r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : 0, render: r => { const n = r.agg ? (r.agg.returned ? r.agg.net + r.agg.reverseResidual : r.agg.net) : null; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: (n ?? 0) < 0 ? 'var(--critical)' : 'var(--text)' }}>{r.agg ? money(n) : <span style={{ color: 'var(--critical)', fontWeight: 400 }}>not settled</span>}</span> } },
     { key: 'expNet', label: 'To be received', type: 'number', align: 'right', get: r => r.exp?.expNet ?? 0, render: r => <span style={{ fontFamily: 'var(--font-mono)' }}>{money(r.exp?.expNet)}</span> },
     { key: 'gap', label: 'Gap (actual − expected)', type: 'number', align: 'right', get: r => r.exp?.gap ?? 0, render: r => { if (!r.exp || r.exp.gap == null) return <span style={{ color: 'var(--text3)' }}>—</span>; const f = r.exp.flagged; return <span style={{ fontFamily: 'var(--font-mono)', fontWeight: f ? 700 : 400, color: f ? 'var(--critical)' : 'var(--text3)' }}>{money(r.exp.gap)}{f && r.exp.reason ? <span style={{ display: 'block', fontSize: 10, color: 'var(--critical)' }}>{r.exp.reason}</span> : null}</span> } },
+    { key: 'cod', label: 'COD to collect', type: 'number', align: 'right', get: r => r.agg?.codReceivable ?? 0, render: r => (r.agg?.codReceivable ?? 0) > 0 ? <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }} title="Awaiting courier remittance (partial-COD / COD)">{money(r.agg!.codReceivable)}</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
     { key: 'reward', label: 'Reward received', type: 'number', align: 'right', get: r => r.exp?.reward ?? 0, render: r => r.exp?.reward != null ? <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--green)' }}>{money(r.exp.reward)}</span> : <span style={{ color: 'var(--text3)' }}>—</span> },
   ], [])
 
