@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode, type CSSProperties } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useExportGate } from './exportGate'
 import { fetchAllRows } from './fetchAll'
@@ -683,6 +683,38 @@ function DateRangePicker({ from, to, onApply }: { from: string; to: string; onAp
   )
 }
 
+// ── Per-column (Excel-style) filters for the Charges table ──────────────────
+type NumRange = { min: number | null; max: number | null }
+type ColFilterState = { category?: string[]; tracking_status?: string[]; qty?: NumRange; commissionPct?: NumRange; gap?: NumRange; order_date?: { from: string; to: string } }
+const FILTER_KINDS: Record<string, 'cat' | 'num' | 'date'> = { order_date: 'date', category: 'cat', tracking_status: 'cat', qty: 'num', commissionPct: 'num', gap: 'num' }
+const colNumVal = (r: ChargeRow, k: string): number | null => k === 'qty' ? (r.qty ?? null) : k === 'commissionPct' ? (r.agg?.commissionPct ?? null) : k === 'gap' ? (r.exp?.gap ?? null) : null
+function matchesColFilters(r: ChargeRow, f: ColFilterState): boolean {
+  if (f.category?.length && !f.category.includes(r.category || '—')) return false
+  if (f.tracking_status?.length && !f.tracking_status.includes(r.tracking_status || '—')) return false
+  for (const k of ['qty', 'commissionPct', 'gap'] as const) {
+    const rng = f[k]; if (!rng) continue
+    const v = colNumVal(r, k); if (v == null || isNaN(v)) return false
+    if (rng.min != null && v < rng.min) return false
+    if (rng.max != null && v > rng.max) return false
+  }
+  if (f.order_date) { const v = r.order_date || ''; if (!v) return false; if (f.order_date.from && v < f.order_date.from) return false; if (f.order_date.to && v > f.order_date.to) return false }
+  return true
+}
+const colFilterActive = (f: ColFilterState, key: string): boolean => {
+  const v = (f as Record<string, unknown>)[key]
+  if (!v) return false
+  if (Array.isArray(v)) return v.length > 0
+  const o = v as { min?: number | null; max?: number | null; from?: string; to?: string }
+  if ('min' in o || 'max' in o) return o.min != null || o.max != null
+  if ('from' in o || 'to' in o) return !!(o.from || o.to)
+  return false
+}
+const countBy = (arr: ChargeRow[], f: (r: ChargeRow) => string): [string, number][] => {
+  const m: Record<string, number> = {}
+  for (const r of arr) { const k = f(r); m[k] = (m[k] || 0) + 1 }
+  return Object.entries(m).sort((a, b) => b[1] - a[1])
+}
+
 function ChargesView() {
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
@@ -691,7 +723,7 @@ function ChargesView() {
   const PAGE_SIZE = 100
   const [win, setWin] = useState<'7d' | '30d' | '3mo' | 'all' | 'custom'>('7d')
   const [customFrom, setCustomFrom] = useState(''); const [customTo, setCustomTo] = useState('')
-  const [platformF, setPlatformF] = useState<'all' | 'Amazon' | 'Flipkart'>('all')
+  const [platformF, setPlatformF] = useState<'all' | 'Amazon' | 'Flipkart' | 'Website'>('all')
   const [retF, setRetF] = useState<'all' | 'clean' | 'returned'>('all')
   const [text, setText] = useState('')
   const [pctFilter, setPctFilter] = useState<string[]>([])
@@ -700,6 +732,9 @@ function ChargesView() {
   const [sortKey, setSortKey] = useState('order_date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [colFilters, setColFilters] = useState<ColFilterState>({})
+  const [openFilter, setOpenFilter] = useState<string | null>(null)
+  const [filterAnchor, setFilterAnchor] = useState<{ top: number; left: number; right: number; alignRight: boolean } | null>(null)
 
   useEffect(() => {
     if (!pctOpen) return
@@ -951,11 +986,75 @@ function ChargesView() {
 
   const filtered = useMemo(() => {
     let out = pctFilter.length ? baseFiltered.filter(r => pctFilter.includes(pctBucket(r.agg?.commissionPct))) : baseFiltered
+    if (Object.keys(colFilters).length) out = out.filter(r => matchesColFilters(r, colFilters))
     const col = COLS.find(c => c.key === sortKey)
     const getV = (r: ChargeRow): string | number => sortKey === 'order_date' ? (r.order_date || '') : sortKey === 'order_id' ? r.order_id : col ? col.get(r) : ''
     out = [...out].sort((a, b) => { const va = getV(a), vb = getV(b); const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb)); return sortDir === 'asc' ? cmp : -cmp })
     return out
-  }, [baseFiltered, pctFilter, sortKey, sortDir, COLS])
+  }, [baseFiltered, pctFilter, colFilters, sortKey, sortDir, COLS])
+
+  // ── Per-column filter options, setters, chips + the (fixed-position) popover ──
+  const catOptions = useMemo(() => countBy(baseFiltered, r => r.category || '—'), [baseFiltered])
+  const trackOptions = useMemo(() => countBy(baseFiltered, r => r.tracking_status || '—'), [baseFiltered])
+  useEffect(() => {
+    if (!openFilter) return
+    const h = (e: MouseEvent) => { const t = e.target as HTMLElement; if (!t.closest('.col-filter-pop') && !t.closest('.col-filter-btn')) { setOpenFilter(null); setFilterAnchor(null) } }
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
+  }, [openFilter])
+  const toggleCat = (key: 'category' | 'tracking_status', val: string) => setColFilters(f => { const cur = f[key] || []; const next = cur.includes(val) ? cur.filter(x => x !== val) : [...cur, val]; return { ...f, [key]: next.length ? next : undefined } })
+  const setRange = (key: 'qty' | 'commissionPct' | 'gap', part: 'min' | 'max', v: string) => setColFilters(f => { const cur = f[key] || { min: null, max: null }; const num = v.trim() === '' ? null : parseFloat(v); const next = { ...cur, [part]: (num == null || isNaN(num)) ? null : num }; return { ...f, [key]: (next.min == null && next.max == null) ? undefined : next } })
+  const clearCol = (key: string) => setColFilters(f => { const n = { ...f } as Record<string, unknown>; delete n[key]; return n as ColFilterState })
+  const activeColKeys = Object.keys(colFilters).filter(k => colFilterActive(colFilters, k))
+  const chipLabel = (key: string): string => {
+    const v = (colFilters as Record<string, unknown>)[key]
+    if (key === 'category' || key === 'tracking_status') { const a = v as string[]; const nm = key === 'category' ? 'Category' : 'Tracking'; return `${nm}: ${a.length > 2 ? a.length + ' selected' : a.join(', ')}` }
+    if (key === 'order_date') { const o = v as { from: string; to: string }; return `Order date: ${o.from || '…'} → ${o.to || '…'}` }
+    const o = v as NumRange; const nm = key === 'qty' ? 'Qty' : key === 'commissionPct' ? 'Comm %' : 'Gap'; return `${nm}: ${o.min ?? 'any'}–${o.max ?? 'any'}`
+  }
+  const popStyle = (): CSSProperties => { const a = filterAnchor; if (!a) return { display: 'none' }; return { position: 'fixed', top: a.top + 4, ...(a.alignRight ? { right: a.right } : { left: a.left }), zIndex: 100, background: 'var(--surface)', border: '1px solid var(--border2)', borderRadius: 10, boxShadow: '0 8px 28px rgba(0,0,0,0.16)', fontWeight: 400, textAlign: 'left', color: 'var(--text)' } }
+  const inpS: CSSProperties = { border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 12, fontFamily: 'var(--font-mono)', outline: 'none', width: '100%' }
+  const clearBtn = (key: string) => <button onClick={() => clearCol(key)} style={{ marginTop: 10, width: '100%', padding: 5, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Clear</button>
+  const renderFilterPop = (c: ChgCol, kind: 'cat' | 'num' | 'date') => {
+    if (kind === 'cat') {
+      const key = c.key as 'category' | 'tracking_status'; const opts = key === 'category' ? catOptions : trackOptions; const sel = colFilters[key] || []
+      return (
+        <div className="col-filter-pop" style={{ ...popStyle(), width: 230, overflow: 'hidden' }}>
+          <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>{c.label}</div>
+          <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+            {opts.length === 0 ? <div style={{ padding: 14, fontSize: 12, color: 'var(--text3)', textAlign: 'center' }}>No values</div> : opts.map(([val, n]) => (
+              <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--border)' }}>
+                <input type="checkbox" checked={sel.includes(val)} onChange={() => toggleCat(key, val)} style={{ width: 14, height: 14 }} />
+                <span style={{ flex: 1, color: val === '—' ? 'var(--text3)' : 'var(--text)' }}>{val === '—' ? '— (blank)' : val}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text3)', fontSize: 11 }}>{n}</span>
+              </label>
+            ))}
+          </div>
+          {sel.length > 0 && <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)' }}>{clearBtn(key)}</div>}
+        </div>
+      )
+    }
+    if (kind === 'num') {
+      const key = c.key as 'qty' | 'commissionPct' | 'gap'; const rng = colFilters[key] || { min: null, max: null }
+      return (
+        <div className="col-filter-pop" style={{ ...popStyle(), width: 200, padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{c.label} range</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 10.5, color: 'var(--text2)', fontWeight: 600 }}>Min<input type="number" value={rng.min ?? ''} onChange={e => setRange(key, 'min', e.target.value)} placeholder="any" style={inpS} /></label>
+            <label style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 10.5, color: 'var(--text2)', fontWeight: 600 }}>Max<input type="number" value={rng.max ?? ''} onChange={e => setRange(key, 'max', e.target.value)} placeholder="any" style={inpS} /></label>
+          </div>
+          {(rng.min != null || rng.max != null) && clearBtn(key)}
+        </div>
+      )
+    }
+    const od = colFilters.order_date || { from: '', to: '' }
+    return (
+      <div className="col-filter-pop" style={{ ...popStyle(), padding: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{c.label} range</div>
+        <DateRangePicker from={od.from} to={od.to} onApply={(from, to) => setColFilters(f => ({ ...f, order_date: (from || to) ? { from, to } : undefined }))} />
+        {(od.from || od.to) && clearBtn('order_date')}
+      </div>
+    )
+  }
 
   const _cxg = useExportGate('recon', 'Recon charges export')
   const exportChargesCsv = () => {
@@ -970,7 +1069,7 @@ function ChargesView() {
     return lines.join('\n')
   }
 
-  useEffect(() => { setPage(0) }, [platformF, retF, text, pctFilter])
+  useEffect(() => { setPage(0) }, [platformF, retF, text, pctFilter, colFilters])
   const togglePct = (bk: string) => setPctFilter(prev => prev.includes(bk) ? prev.filter(x => x !== bk) : [...prev, bk])
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageSafe = Math.min(page, pageCount - 1)
@@ -999,6 +1098,7 @@ function ChargesView() {
           {segBtn(platformF === 'all', 'All platforms', () => setPlatformF('all'))}
           {segBtn(platformF === 'Amazon', 'Amazon', () => setPlatformF('Amazon'))}
           {segBtn(platformF === 'Flipkart', 'Flipkart', () => setPlatformF('Flipkart'))}
+          {segBtn(platformF === 'Website', 'Website', () => setPlatformF('Website'))}
         </div>
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
           {segBtn(retF === 'all', 'All', () => setRetF('all'))}
@@ -1048,6 +1148,19 @@ function ChargesView() {
         </button>
       </div>
 
+      {activeColKeys.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const, marginBottom: 12 }}>
+          {activeColKeys.map(k => (
+            <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--accent-bg)', border: '1px solid var(--accent)', color: 'var(--accent)', borderRadius: 20, padding: '3px 10px', fontSize: 11.5, fontWeight: 600 }}>
+              {chipLabel(k)}<span onClick={() => clearCol(k)} style={{ cursor: 'pointer', fontWeight: 700 }}>✕</span>
+            </span>
+          ))}
+          <button onClick={() => setColFilters({})} style={{ fontSize: 11.5, color: 'var(--text3)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Clear all</button>
+        </div>
+      )}
+
+      {openFilter && filterAnchor && (() => { const c = COLS.find(x => x.key === openFilter); const kind = c ? FILTER_KINDS[c.key] : undefined; return c && kind ? renderFilterPop(c, kind) : null })()}
+
       {loading ? (
         <div style={{ ...card, padding: 40, textAlign: 'center' as const, color: 'var(--text3)', fontSize: 13 }}>Loading charges…</div>
       ) : filtered.length === 0 ? (
@@ -1059,9 +1172,14 @@ function ChargesView() {
               <thead>
                 <tr style={{ borderBottom: '2px solid var(--border2)', background: 'var(--bg2)' }}>
                   <th style={{ padding: '8px 10px', textAlign: 'left' as const, fontSize: 11, color: 'var(--text3)', cursor: 'pointer' }} onClick={() => toggleSort('order_id')}>Order {sortKey === 'order_id' ? (sortDir === 'asc' ? '▲' : '▼') : ''}</th>
-                  {COLS.map(c => (
-                    <th key={c.key} onClick={() => toggleSort(c.key)} style={{ padding: '8px 10px', textAlign: (c.align === 'right' ? 'right' : 'left') as 'right' | 'left', fontSize: 11, color: 'var(--text3)', cursor: 'pointer', whiteSpace: 'nowrap' as const }}>{c.label} {sortKey === c.key ? (sortDir === 'asc' ? '▲' : '▼') : ''}</th>
-                  ))}
+                  {COLS.map(c => { const kind = FILTER_KINDS[c.key]; const af = colFilterActive(colFilters, c.key); return (
+                    <th key={c.key} style={{ padding: '8px 10px', textAlign: (c.align === 'right' ? 'right' : 'left') as 'right' | 'left', fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' as const }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexDirection: (c.align === 'right' ? 'row-reverse' : 'row') as 'row' | 'row-reverse' }}>
+                        <span onClick={() => toggleSort(c.key)} style={{ cursor: 'pointer' }}>{c.label} {sortKey === c.key ? (sortDir === 'asc' ? '▲' : '▼') : ''}</span>
+                        {kind && <button className="col-filter-btn" title="Filter" onClick={e => { e.stopPropagation(); const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); setFilterAnchor({ top: rect.bottom, left: rect.left, right: window.innerWidth - rect.right, alignRight: c.align === 'right' }); setOpenFilter(o => o === c.key ? null : c.key) }} style={{ border: 'none', background: af ? 'var(--accent-bg)' : 'transparent', color: af ? 'var(--accent)' : 'var(--text3)', borderRadius: 4, cursor: 'pointer', padding: 2, display: 'inline-flex', lineHeight: 0 }}><Filter size={11} /></button>}
+                      </span>
+                    </th>
+                  ) })}
                 </tr>
               </thead>
               <tbody>
