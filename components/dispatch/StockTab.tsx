@@ -87,6 +87,41 @@ export default function StockTab({ userId }: { userId: string }) {
 
   function showToast(msg: string, type = 'success') { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
+  // Export the stock-inward log to CSV, grouped day-by-day to mirror the Day View
+  // (one row per frame, in the same order shown on screen). Opens in Excel with a BOM.
+  function handleExportDay() {
+    if (!sortedItems.length) { showToast('Nothing to export', 'error'); return }
+    const esc = (v: unknown) => {
+      const s = v == null ? '' : String(v)
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const header = ['Date', 'Supplier', 'Shape', 'Size', 'Mattress', 'Pieces']
+    const lines: string[] = [header.join(',')]
+    dayGroups.forEach(group => {
+      ;(group.items as FlatItem[]).forEach(it => {
+        lines.push([
+          esc(format(new Date(it.created_at), 'dd MMM yy')),
+          esc(it.supplier),
+          esc(it.shape),
+          esc(it.size || ''),
+          esc(it.mattress || ''),
+          esc(it.pieces),
+        ].join(','))
+      })
+    })
+    const csv = '﻿' + lines.join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `stock-inward-${format(new Date(), 'ddMMM-HHmm')}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast(`Exported ${sortedItems.length} row(s)`)
+  }
+
   async function handleSubmit() {
     if (!lineItems.length) { showToast('Add at least one frame', 'error'); return }
     if (!supplier) { showToast('Select a supplier', 'error'); return }
@@ -243,12 +278,18 @@ export default function StockTab({ userId }: { userId: string }) {
                           }}>{vm === 'all' ? 'All Rows' : 'Day View'}</button>
                       ))}
                     </div>
-                    {viewMode === 'day' && (
-                      <button onClick={toggleAllDays}
-                        style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'var(--surface)', color: 'var(--text3)', border: '1px solid var(--border)', cursor: 'pointer' }}>
-                        {allCollapsed() ? 'Expand All' : 'Collapse All'}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={handleExportDay}
+                        style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'var(--surface)', color: 'var(--text2)', border: '1px solid var(--border)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        ⬇ Export
                       </button>
-                    )}
+                      {viewMode === 'day' && (
+                        <button onClick={toggleAllDays}
+                          style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'var(--surface)', color: 'var(--text3)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+                          {allCollapsed() ? 'Expand All' : 'Collapse All'}
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div style={{ background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'auto' }}>
