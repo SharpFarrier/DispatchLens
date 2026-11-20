@@ -179,8 +179,9 @@ function parseCSV(text: string): Record<string, string>[] {
 }
 
 // Detect which aggregator a CSV is, from its header columns.
-export function detectWebsiteAggregator(text: string): 'razorpay' | 'cashfree' | null {
+export function detectWebsiteAggregator(text: string): 'razorpay' | 'cashfree' | 'gokwik' | null {
   const firstLine = (text.split('\n')[0] || '').toLowerCase()
+  if (firstLine.includes('merchant order id') && firstLine.includes('grand total')) return 'gokwik'
   if (firstLine.includes('order_id') && firstLine.includes('notes') && firstLine.includes('captured')) return 'razorpay'
   if (firstLine.includes('cashfree order id') || (firstLine.includes('order id') && firstLine.includes('payment mode'))) return 'cashfree'
   return null
@@ -264,4 +265,44 @@ export function parseCashfreeText(text: string): ParsedFile {
     })
   }
   return { platform: 'website', rows, dedupIds: [...dedupSet] }
+}
+
+// ── GoKwik CSV (Shopify checkout order report) ──
+// Join key = "Merchant Order ID" (the website order-id). This is an ORDER report, not a bank
+// settlement, so there is NO fee column — the gateway fee (configurable %) is applied downstream.
+// Paid        -> full "Grand Total" received online via GoKwik.
+// Partial Paid -> only "Partial Paid Amount" came online; (Grand Total - Partial) is a COD
+//                 receivable collected later by the courier (reconciled against the courier file).
+// dedup by "Payment ID" (KWIK...). Cancelled orders carry 0 (no money kept).
+export function parseGokwikText(text: string): ParsedFile {
+  const raw = parseCSV(text)
+  const rows: SettlementRow[] = []
+  const dedup = new Set<string>()
+  const num = (v: unknown) => { const n = parseFloat(String(v ?? '').replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n }
+  for (const r of raw) {
+    const orderId = (r['Merchant Order ID'] || r['Shopify Order Name'] || '').trim() || null
+    const payId = (r['Payment ID'] || '').trim() || (orderId ? `GK-${orderId}` : '')
+    if (!payId) continue
+    const grand = num(r['Grand Total'])
+    const partial = num(r['Partial Paid Amount'])
+    const status = (r['Payment Status'] || '').trim()
+    const cancelled = (r['Merchant Order Status'] || '').trim().toLowerCase() === 'cancelled'
+    const isPartial = /partial/i.test(status)
+    const onlineGross = cancelled ? 0 : (isPartial ? partial : grand)        // received online via GoKwik
+    const codReceivable = cancelled ? 0 : (isPartial ? Math.max(0, grand - partial) : 0)
+    dedup.add(payId)
+    rows.push({
+      platform: 'website',
+      order_id: orderId,
+      order_item_code: null,
+      sku: null,
+      amount: onlineGross,                 // gross received online; the % gateway fee is applied from config
+      transaction_type: isPartial ? 'partial_cod' : 'advance',
+      amount_description: 'gokwik',
+      dedup_key: payId,
+      settlement_date: (r['Payment At'] || '').trim() || null,
+      raw: { ...r, _grand: grand, _partial: partial, _online_gross: onlineGross, _cod_receivable: codReceivable, _status: status, _cancelled: cancelled, _awb: (r['AWB Number'] || '').trim() },
+    })
+  }
+  return { platform: 'website', rows, dedupIds: [...dedup] }
 }

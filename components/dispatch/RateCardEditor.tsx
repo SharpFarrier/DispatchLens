@@ -21,9 +21,10 @@ function defaultsFor(platform: string): CatRow[] {
   return CATS.map(c => ({ platform, category: c, ...(c === 'Mattress' ? { ...base, rate_below: '9.5', rate_above: '9.5' } : base) }))
 }
 
-const DEFAULT_GLOBALS = { tcs: '0.4237', tds: '0.0849', gst: '18', accuracy: '2' }
+const DEFAULT_GLOBALS = { tcs: '0.4237', tds: '0.0849', gst: '18', accuracy: '2', gwRazorpay: '2', gwCashfree: '1.95', gwGokwik: '0.75' }
 const CONFIG_KEYS = {
   tcs: 'recon_tcs_rate', tds: 'recon_tds_rate', gst: 'recon_gst_on_fees_rate', accuracy: 'recon_accuracy_threshold',
+  gwRazorpay: 'recon_gw_razorpay', gwCashfree: 'recon_gw_cashfree', gwGokwik: 'recon_gw_gokwik',
 } as const
 
 const card = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }
@@ -65,6 +66,8 @@ export default function RateCardEditor() {
         setG(prev => ({
           tcs: byKey[CONFIG_KEYS.tcs] ?? prev.tcs, tds: byKey[CONFIG_KEYS.tds] ?? prev.tds,
           gst: byKey[CONFIG_KEYS.gst] ?? prev.gst, accuracy: byKey[CONFIG_KEYS.accuracy] ?? prev.accuracy,
+          gwRazorpay: byKey[CONFIG_KEYS.gwRazorpay] ?? prev.gwRazorpay, gwCashfree: byKey[CONFIG_KEYS.gwCashfree] ?? prev.gwCashfree,
+          gwGokwik: byKey[CONFIG_KEYS.gwGokwik] ?? prev.gwGokwik,
         }))
       }
     } catch { /* keep defaults */ }
@@ -95,6 +98,8 @@ export default function RateCardEditor() {
       const cfgRows = [
         { key: CONFIG_KEYS.tcs, value: g.tcs }, { key: CONFIG_KEYS.tds, value: g.tds },
         { key: CONFIG_KEYS.gst, value: g.gst }, { key: CONFIG_KEYS.accuracy, value: g.accuracy },
+        { key: CONFIG_KEYS.gwRazorpay, value: g.gwRazorpay }, { key: CONFIG_KEYS.gwCashfree, value: g.gwCashfree },
+        { key: CONFIG_KEYS.gwGokwik, value: g.gwGokwik },
       ].map(r => ({ ...r, updated_at: now, updated_by: 'recon-ratecard' }))
       const { error: cfgErr } = await supabase.from('app_config').upsert(cfgRows, { onConflict: 'key' })
       if (cfgErr) throw cfgErr
@@ -129,6 +134,18 @@ export default function RateCardEditor() {
             {numField('TDS rate (%)', 'on the sale price', g.tds, v => setG(p => ({ ...p, tds: v })))}
             {numField('GST on fees (%)', 'on commission + closing', g.gst, v => setG(p => ({ ...p, gst: v })))}
             {numField('Accuracy tolerance (%)', 'within this = "correct"', g.accuracy, v => setG(p => ({ ...p, accuracy: v })))}
+          </div>
+        </div>
+
+        <div style={{ ...card, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Website payment-gateway fees</div>
+          <p style={{ fontSize: 11, color: 'var(--text3)', margin: '0 0 12px' }}>
+            Flat % the gateway keeps on each D2C order — all-in (GST-inclusive). For Razorpay &amp; Cashfree the actual fee comes from the settlement file and is checked against this; for GoKwik the file has no fee, so this % is applied as the deduction.
+          </p>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' as const }}>
+            {numField('Razorpay (%)', 'all-in incl GST', g.gwRazorpay, v => setG(p => ({ ...p, gwRazorpay: v })))}
+            {numField('Cashfree (%)', 'all-in incl GST', g.gwCashfree, v => setG(p => ({ ...p, gwCashfree: v })))}
+            {numField('GoKwik (%)', 'all-in incl GST', g.gwGokwik, v => setG(p => ({ ...p, gwGokwik: v })))}
           </div>
         </div>
 
