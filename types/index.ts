@@ -142,6 +142,10 @@ export interface DBOrder {
   delivered_at: string | null
   delivery_source?: string | null
   manual_delivered_at?: string | null
+  // ── Private transport (non-courier dispatch) ──
+  dispatch_method?: string | null   // 'courier' (default) | 'private'
+  transporter?: string | null       // private transporter / vehicle name
+  delivered_by?: string | null      // who confirmed a private delivery
   suspected_lost: boolean
   suspected_lost_at: string | null
   lost_at: string | null

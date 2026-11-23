@@ -11,6 +11,7 @@ import MobileShell, { MoreSheet, type TabItem, type SheetGroup } from '@/compone
 import PlanMobileCards from './PlanMobileCards'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import DelaysTab from './DelaysTab'
+import PrivateTab from './PrivateTab'
 import OverviewClient from './OverviewClient'
 import RequestButton from './RequestButton'
 import RequestsTab from './RequestsTab'
@@ -71,7 +72,7 @@ function orderLatestUpdate(o: DBOrder): { label: string; tone: 'success' | 'warn
   return { label: o.plan_decision ? o.plan_decision.replace(/^\w/, (c: string) => c.toUpperCase()) : 'Pending', tone: 'muted', detail: '' }
 }
 
-type Tab = 'overview' | 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users' | 'delays' | 'requests'
+type Tab = 'overview' | 'import' | 'plan' | 'review' | 'picklist' | 'eod' | 'dispatched' | 'allorders' | 'calllens' | 'returns' | 'skumap' | 'handling' | 'warehouse' | 'recon' | 'otdr' | 'reports' | 'users' | 'delays' | 'requests' | 'private'
 
 // ── URL <-> tab sync (Option B: real bookmarkable URLs over the tab-state model) ──
 const SECTION_OF: Record<string, 'orders' | 'warehouse' | 'settings'> = {
@@ -833,6 +834,26 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
   const togglePriority = async (orderId: string, current: boolean) => {
     await supabase.from('dispatch_orders').update({ is_priority: !current }).eq('id', orderId)
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, is_priority: !current } : o))
+  }
+
+  // ── Private transport flag (routes the order to the Private dispatch lane; orthogonal to scheduling) ──
+  const togglePrivate = async (orderId: string, current: boolean) => {
+    const next = current ? 'courier' : 'private'
+    await supabase.from('dispatch_orders').update({ dispatch_method: next, updated_at: new Date().toISOString() }).eq('id', orderId)
+    const o = orders.find(x => x.id === orderId)
+    if (o) logEvent(o.order_id, 'note', next === 'private' ? 'Marked for Private transport' : 'Private transport cleared')
+    setOrders(prev => prev.map(x => x.id === orderId ? { ...x, dispatch_method: next } : x))
+  }
+  const bulkSetPrivate = async (on: boolean) => {
+    if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
+    const next = on ? 'private' : 'courier'
+    await supabase.from('dispatch_orders').update({ dispatch_method: next, updated_at: new Date().toISOString() }).in('id', ids)
+    const idSet = new Set(ids)
+    orders.filter(o => idSet.has(o.id)).forEach(o => logEvent(o.order_id, 'note', on ? 'Marked for Private transport (bulk)' : 'Private transport cleared (bulk)'))
+    setOrders(prev => prev.map(x => idSet.has(x.id) ? { ...x, dispatch_method: next } : x))
+    setSelectedIds(new Set())
+    showToast(`${ids.length} order(s) ${on ? 'marked Private transport' : 'set back to courier'}.`)
   }
 
   // ── EOD: leftover picks (pieces currently in 'picked' status = picked, not dispatched) ──
@@ -2587,6 +2608,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
     { key: 'review', label: 'Review', count: reviewCount, section: 'orders', show: effectiveAccess.can_review },
     { key: 'eod', label: 'EOD', section: 'orders', show: effectiveAccess.can_eod },
     { key: 'dispatched', label: 'Dispatched', count: fullLoaded ? dispatchedOrders.length : (dispatchedCount ?? dispatchedOrders.length), section: 'orders', show: effectiveAccess.can_dispatched },
+    { key: 'private', label: 'Private', section: 'orders', show: effectiveAccess.can_dispatched },
     { key: 'picklist', label: 'Picklist', count: dispatchTodayCount, section: 'orders', show: effectiveAccess.can_picklist },
     { key: 'returns', label: 'Returns', section: 'orders', show: effectiveAccess.can_returns },
     { key: 'allorders', label: 'All Orders', section: 'orders', show: effectiveAccess.can_allorders },
@@ -3538,6 +3560,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                 ]).map(({ d, label, bg }) => (
                   <button key={d} onClick={() => { setBulkDecision(d); setShowBulkConfirm(true) }} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: bg, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{label}</button>
                 ))}
+                <button onClick={() => bulkSetPrivate(true)} title="Route selected orders to Private transport (dispatch in the Private tab)" style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#6b3fa0', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Private transport</button>
                 <button onClick={() => setSelectedIds(new Set())} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, color: 'rgba(255,255,255,0.6)', cursor: 'pointer', padding: '5px 10px', fontSize: 12 }}>Clear</button>
               </div>
             )}
@@ -3972,6 +3995,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
                           onDecision={updateDecision}
                           onSchedule={scheduleOrder}
                           onPriority={togglePriority}
+                          onPrivate={togglePrivate}
                           onCancel={id => setCancelOrderId(id)}
                           onHistory={order => setHistoryOrder(order)}
                           onManualDispatch={order => setManualDispatchOrder(order)}
@@ -5673,6 +5697,9 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
         {tab === 'delays' && effectiveAccess.can_delays && (
           <DelaysTab orders={orders} userEmail={user.email || undefined} onOrderUpdate={(oid, patch) => setOrders(prev => prev.map(o => o.order_id === oid ? { ...o, ...patch } as typeof o : o))} />
         )}
+        {tab === 'private' && effectiveAccess.can_dispatched && (
+          <PrivateTab currentUserEmail={user.email || null} />
+        )}
         {tab === 'reports' && effectiveAccess.can_reports && (
           <ReportsTab userEmail={user.email || ''} isOwner={isOwner} onPendingChange={setPendingReports} />
         )}
@@ -5869,7 +5896,7 @@ export default function DashboardClient({ user, access, initialOrders }: Props) 
 }
 
 // ── Order Row ──
-function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, editingLrId, editingLrValue, onEditLr, onSaveLr, onCancelLr, daysLeftDisplay, liveUrgencyTier, stockCount, neededCount }: {
+function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule, onPriority, onPrivate, onCancel, onHistory, onManualDispatch, onSaveCourier, editingAwbId, editingAwbValue, onEditAwb, onSaveAwb, onCancelAwb, editingLrId, editingLrValue, onEditLr, onSaveLr, onCancelLr, daysLeftDisplay, liveUrgencyTier, stockCount, neededCount }: {
   order: DBOrder; selected: boolean; updating: boolean
   daysLeftDisplay: number | null
   liveUrgencyTier: UrgencyTier | null
@@ -5879,6 +5906,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
   onDecision: (id: string, d: PlanDecision) => void
   onSchedule: (id: string, date: string) => void
   onPriority: (id: string, current: boolean) => void
+  onPrivate: (id: string, current: boolean) => void
   onCancel: (id: string) => void
   onHistory: (order: DBOrder) => void
   onManualDispatch: (order: DBOrder) => void
@@ -5917,6 +5945,7 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
       <td style={{ padding: '8px 12px' }}>
         {order.is_replacement && !order.is_dispatched && <Badge variant="today">Replacement</Badge>}
         {liveUrgencyTier ? <Badge variant={tierVariant(liveUrgencyTier)}>{liveUrgencyTier}</Badge> : <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>}
+        {order.dispatch_method === 'private' && <span title="Private transport" style={{ marginLeft: 4, display: 'inline-flex', alignItems: 'center', fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: '#efe7f6', color: '#6b3fa0' }}>● Private</span>}
       </td>
       <td style={{ padding: '8px 12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 2 }}>
@@ -6104,6 +6133,15 @@ function OrderRow({ order, selected, updating, onSelect, onDecision, onSchedule,
             color: order.plan_decision === 'unfulfillable' ? 'var(--critical)' : 'var(--text3)',
             whiteSpace: 'nowrap' as const,
           }}>Unfulfil.</button>
+          {/* Private transport route (orthogonal to scheduling) */}
+          <button onClick={() => onPrivate(order.id, order.dispatch_method === 'private')} title="Route to Private transport — dispatch it in the Private tab" style={{
+            padding: '4px 8px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
+            fontFamily: 'var(--font-sans)', fontWeight: 600,
+            background: order.dispatch_method === 'private' ? '#efe7f6' : 'var(--surface)',
+            border: `1px solid ${order.dispatch_method === 'private' ? '#d6c3ee' : 'var(--border)'}`,
+            color: order.dispatch_method === 'private' ? '#6b3fa0' : 'var(--text3)',
+            whiteSpace: 'nowrap' as const,
+          }}>Private</button>
         </div>
       </td>
       <td style={{ padding: '8px 12px' }}>
