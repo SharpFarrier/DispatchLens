@@ -4,7 +4,9 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
 import { Spinner, EmptyState } from './warehouse-ui'
 import { beepSuccess, beepError, beepWarn } from './scanFeedback'
-import { Truck, Package, AlertTriangle, CheckCircle, Download, X } from 'lucide-react'
+import { Truck, Package, AlertTriangle, CheckCircle, Download, X, Plus, ClipboardList } from 'lucide-react'
+import { buildSkuLookup, resolveBarcodeSku } from '@/lib/skuResolver'
+import type { SkuMap } from '@/types'
 
 // Private transport dispatch — a self-contained lane for orders that ship by a private
 // vehicle/tempo (no courier, no AWB). The physical box-barcode scan still does the stock
@@ -204,6 +206,101 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
+  // ── add private orders (single + bulk upload) ──
+  const [skuMaps, setSkuMaps] = useState<SkuMap[]>([])
+  useEffect(() => { supabase.from('dispatch_sku_map').select('*').then(({ data }) => setSkuMaps((data as SkuMap[]) || [])) }, [supabase])
+  const skuLookup = useMemo(() => buildSkuLookup(skuMaps), [skuMaps])
+  const masterSet = useMemo(() => { const m = new Map<string, string>(); for (const x of skuMaps) if (x.master_sku) m.set(x.master_sku.trim().toLowerCase(), x.master_sku); return m }, [skuMaps])
+  const resolveSku = useCallback((orderId: string, sku: string): string | null => {
+    const direct = masterSet.get((sku || '').trim().toLowerCase())
+    return direct || resolveBarcodeSku(orderId || 'HT', sku, skuLookup)
+  }, [masterSet, skuLookup])
+
+  const blankForm = { order_id: '', customer_name: '', contact_number: '', city: '', pincode: '', taxable_value: '', sku: '', qty: '1', ship_address: '' }
+  type AddForm = typeof blankForm
+  const [addMode, setAddMode] = useState<'single' | 'bulk'>('single')
+  const [addOpen, setAddOpen] = useState(false)
+  const [form, setForm] = useState<AddForm>({ ...blankForm })
+  const setF = (k: keyof AddForm, v: string) => setForm(p => ({ ...p, [k]: v }))
+  const [bulkText, setBulkText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const formBarcode = useMemo(() => form.sku.trim() ? resolveSku(form.order_id, form.sku) : null, [form.sku, form.order_id, resolveSku])
+
+  const buildRow = (f: AddForm) => {
+    const barcode = resolveSku(f.order_id, f.sku)
+    const val = parseFloat((f.taxable_value || '').replace(/[^0-9.]/g, ''))
+    return {
+      order_id: f.order_id.trim(), customer_name: f.customer_name.trim(), sku: f.sku.trim(),
+      barcode_sku: barcode, sku_mapped: !!barcode, qty: parseInt(f.qty) || 1,
+      contact_number: f.contact_number.trim() || null, city: f.city.trim() || null,
+      pincode: f.pincode.trim() || null, ship_address: f.ship_address.trim() || null,
+      taxable_value: isNaN(val) ? null : val,
+      courier: 'Private', dispatch_method: 'private', tracking_number: null,
+      is_dispatched: false, is_cancelled: false, is_priority: false, is_replacement: false,
+      order_date: new Date().toISOString().slice(0, 10),
+    }
+  }
+
+  const addSingle = async () => {
+    setAddMsg(null)
+    if (!form.order_id.trim() || !form.customer_name.trim() || !form.sku.trim()) { setAddMsg({ ok: false, text: 'Order ID, customer and SKU are required.' }); return }
+    setSaving(true)
+    const { data: dupe } = await supabase.from('dispatch_orders').select('id').eq('order_id', form.order_id.trim()).limit(1)
+    if (dupe && dupe.length) { setSaving(false); setAddMsg({ ok: false, text: `Order ${form.order_id.trim()} already exists in DispatchLens.` }); return }
+    const { error } = await supabase.from('dispatch_orders').insert(buildRow(form))
+    setSaving(false)
+    if (error) { setAddMsg({ ok: false, text: `Couldn't save: ${error.message}` }); return }
+    logEvent(form.order_id.trim(), 'note', 'Private order added (manual)')
+    setAddMsg({ ok: true, text: `Added ${form.order_id.trim()} as Private${formBarcode ? '' : ' — but the SKU isn\'t mapped, map it before dispatch'}.` })
+    setForm({ ...blankForm }); void loadQueue()
+  }
+
+  const bulkRows = useMemo(() => {
+    const lines = bulkText.split('\n').map(l => l.trimEnd()).filter(l => l.trim())
+    if (!lines.length) return [] as { f: AddForm; status: 'ok' | 'unmapped' | 'bad'; barcode: string | null }[]
+    const split = (l: string) => (l.includes('\t') ? l.split('\t') : l.split(',')).map(s => s.trim())
+    let start = 0
+    if (/order\s*id/i.test(lines[0]) && /sku/i.test(lines[0])) start = 1
+    const out: { f: AddForm; status: 'ok' | 'unmapped' | 'bad'; barcode: string | null }[] = []
+    for (let i = start; i < lines.length; i++) {
+      const c = split(lines[i])
+      const f: AddForm = { order_id: c[0] || '', customer_name: c[1] || '', contact_number: c[2] || '', city: c[3] || '', pincode: c[4] || '', sku: c[5] || '', qty: c[6] || '1', taxable_value: c[7] || '', ship_address: '' }
+      const barcode = f.order_id && f.sku ? resolveSku(f.order_id, f.sku) : null
+      const status: 'ok' | 'unmapped' | 'bad' = (!f.order_id || !f.customer_name || !f.sku) ? 'bad' : (barcode ? 'ok' : 'unmapped')
+      out.push({ f, status, barcode })
+    }
+    return out
+  }, [bulkText, resolveSku])
+
+  const addBulk = async () => {
+    setAddMsg(null)
+    const valid = bulkRows.filter(r => r.status !== 'bad')
+    if (!valid.length) { setAddMsg({ ok: false, text: 'Nothing valid to add — each row needs Order ID, Customer and SKU.' }); return }
+    setSaving(true)
+    const ids = valid.map(r => r.f.order_id)
+    const { data: existing } = await supabase.from('dispatch_orders').select('order_id').in('order_id', ids)
+    const existSet = new Set((existing || []).map((e: { order_id: string }) => e.order_id))
+    const toInsert = valid.filter(r => !existSet.has(r.f.order_id))
+    if (!toInsert.length) { setSaving(false); setAddMsg({ ok: false, text: 'All these Order IDs already exist — nothing added.' }); return }
+    const { error } = await supabase.from('dispatch_orders').insert(toInsert.map(r => buildRow(r.f)))
+    setSaving(false)
+    if (error) { setAddMsg({ ok: false, text: `Couldn't save: ${error.message}` }); return }
+    toInsert.forEach(r => logEvent(r.f.order_id, 'note', 'Private order added (bulk)'))
+    const skipped = valid.length - toInsert.length
+    const unmapped = toInsert.filter(r => !r.barcode).length
+    setAddMsg({ ok: true, text: `Added ${toInsert.length} private order(s)${skipped ? `, skipped ${skipped} duplicate(s)` : ''}${unmapped ? `, ${unmapped} with an unmapped SKU` : ''}.` })
+    setBulkText(''); void loadQueue()
+  }
+
+  const addField = (k: keyof AddForm, label: string, opts: { req?: boolean; mono?: boolean; ph?: string; wide?: boolean } = {}) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, gridColumn: opts.wide ? '1 / -1' : undefined }}>
+      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)' }}>{label}{opts.req && <span style={{ color: 'var(--accent)' }}> *</span>}</label>
+      <input value={form[k]} onChange={e => setF(k, e.target.value)} placeholder={opts.ph || ''}
+        style={{ border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px', fontSize: 14, color: 'var(--text)', background: '#fff', outline: 'none', fontFamily: opts.mono ? 'var(--font-mono)' : 'var(--font-sans)', width: '100%', boxSizing: 'border-box' }} />
+    </div>
+  )
+
   const privTag = <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 999, background: '#efe7f6', color: '#6b3fa0' }}>● Private</span>
 
   return (
@@ -211,6 +308,94 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
       <div>
         <h2 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}><Truck size={20} style={{ color: 'var(--accent)' }} /> Private transport</h2>
         <p style={{ fontSize: 13, color: 'var(--text3)', margin: 0 }}>Dispatch orders going by a private vehicle (no courier / no AWB) — the box scan still deducts stock. Dispatched orders wait below for manual delivery confirmation.</p>
+      </div>
+
+      {/* ── ADD PRIVATE ORDERS (single + bulk upload) ── */}
+      <div style={card}>
+        <button onClick={() => { setAddOpen(o => !o); setAddMsg(null) }} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}><Plus size={16} style={{ color: 'var(--accent)' }} /> Add private orders</span>
+          <span style={{ fontSize: 12, color: 'var(--text3)' }}>{addOpen ? 'Hide' : 'Add offline / walk-in orders'}</span>
+        </button>
+
+        {addOpen && (
+          <div style={{ padding: '0 16px 16px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text3)', margin: '0 0 14px' }}>Added here with your own Order IDs, flagged Private automatically, and dropped into Plan for scheduling. The SKU is checked against your barcode map.</p>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+              {([['single', 'Single order', Package], ['bulk', 'Bulk paste', ClipboardList]] as const).map(([k, lbl, Icon]) => (
+                <button key={k} onClick={() => { setAddMode(k); setAddMsg(null) }} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700, padding: '8px 14px', borderRadius: 999, cursor: 'pointer', border: addMode === k ? 'none' : '1px solid var(--border)', background: addMode === k ? 'var(--accent)' : '#fff', color: addMode === k ? '#fff' : 'var(--text2)' }}><Icon size={14} /> {lbl}</button>
+              ))}
+            </div>
+
+            {addMsg && (
+              <div style={{ marginBottom: 14, padding: '10px 13px', borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'flex-start', gap: 8, background: addMsg.ok ? 'var(--dispatched-bg)' : 'var(--critical-bg)', border: `1px solid ${addMsg.ok ? '#bbf7d0' : '#fecaca'}`, color: addMsg.ok ? 'var(--dispatched)' : 'var(--critical)' }}>
+                {addMsg.ok ? <CheckCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} /> : <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />}<span>{addMsg.text}</span>
+              </div>
+            )}
+
+            {addMode === 'single' ? (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 14px' }}>
+                  {addField('order_id', 'Order ID', { req: true, mono: true, ph: 'e.g. HT-OFF-1043' })}
+                  {addField('customer_name', 'Customer name', { req: true, ph: 'Full name' })}
+                  {addField('contact_number', 'Phone', { mono: true })}
+                  {addField('city', 'City')}
+                  {addField('pincode', 'Pincode', { mono: true })}
+                  {addField('taxable_value', 'Order value ₹', { mono: true })}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {addField('sku', 'SKU', { req: true, mono: true, ph: 'Master / platform SKU' })}
+                    {form.sku.trim() ? <span style={{ fontSize: 11.5, color: formBarcode ? 'var(--dispatched)' : 'var(--critical)' }}>{formBarcode ? `✓ maps to box ${formBarcode}` : '✕ SKU not mapped — saves, but map it before dispatch'}</span> : null}
+                  </div>
+                  {addField('qty', 'Qty', { mono: true })}
+                  {addField('ship_address', 'Address', { wide: true })}
+                </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                  <button onClick={() => { setForm({ ...blankForm }); setAddMsg(null) }} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', color: 'var(--text2)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Clear</button>
+                  <button onClick={addSingle} disabled={saving} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>{saving ? 'Adding…' : 'Add private order'}</button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>Paste rows — one order per line, tab or comma separated</label>
+                <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={'Order ID, Customer, Phone, City, Pincode, SKU, Qty, Value\nHT-OFF-1043, Rakesh More, 98XXXXXX21, Dombivli, 421201, ME-BL-BL-RF-2, 1, 12499'}
+                  style={{ width: '100%', minHeight: 120, border: '1px solid var(--border)', borderRadius: 9, padding: '10px 12px', fontSize: 12.5, fontFamily: 'var(--font-mono)', color: 'var(--text)', background: '#fff', outline: 'none', boxSizing: 'border-box', lineHeight: 1.6, whiteSpace: 'pre' }} />
+                <div style={{ fontSize: 11.5, color: 'var(--text3)', marginTop: 6 }}>Columns: Order ID, Customer, Phone, City, Pincode, SKU, Qty, Value. Only Order ID, Customer and SKU are required; a header row is auto-detected.</div>
+
+                {bulkRows.length > 0 && (
+                  <>
+                    <div style={{ overflowX: 'auto', marginTop: 12, border: '1px solid var(--border)', borderRadius: 9 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 620 }}>
+                        <thead style={{ background: 'var(--bg2)' }}><tr>{['Order ID', 'Customer', 'City', 'SKU → box', 'Qty', 'Value', 'Status'].map((h, i) => <th key={i} style={{ padding: '8px 10px', textAlign: 'left', fontSize: 10.5, fontWeight: 800, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.03em', whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
+                        <tbody>
+                          {bulkRows.map((r, i) => (
+                            <tr key={i} style={{ borderTop: '1px solid var(--border)', background: r.status === 'bad' ? '#fdecec' : r.status === 'unmapped' ? '#fff6e8' : 'transparent' }}>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{r.f.order_id || '—'}</td>
+                              <td style={{ padding: '8px 10px' }}>{r.f.customer_name || '—'}</td>
+                              <td style={{ padding: '8px 10px' }}>{r.f.city || '—'}</td>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)' }}>{r.barcode || r.f.sku || '—'}</td>
+                              <td style={{ padding: '8px 10px' }}>{r.f.qty}</td>
+                              <td style={{ padding: '8px 10px' }}>{r.f.taxable_value ? `₹${r.f.taxable_value}` : '—'}</td>
+                              <td style={{ padding: '8px 10px' }}><span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: r.status === 'ok' ? 'var(--dispatched-bg)' : r.status === 'unmapped' ? 'var(--amber-bg, #fff4e0)' : 'var(--critical-bg)', color: r.status === 'ok' ? 'var(--dispatched)' : r.status === 'unmapped' ? '#b26a00' : 'var(--critical)' }}>{r.status === 'ok' ? 'OK' : r.status === 'unmapped' ? 'SKU not mapped' : 'Missing req.'}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10, fontSize: 12.5, color: 'var(--text2)' }}>
+                      <span><b style={{ color: 'var(--text)' }}>{bulkRows.filter(r => r.status === 'ok').length}</b> ready</span>
+                      <span style={{ color: '#b26a00' }}><b>{bulkRows.filter(r => r.status === 'unmapped').length}</b> unmapped SKU</span>
+                      <span style={{ color: 'var(--critical)' }}><b>{bulkRows.filter(r => r.status === 'bad').length}</b> missing required</span>
+                    </div>
+                  </>
+                )}
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                  <button onClick={() => { setBulkText(''); setAddMsg(null) }} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', color: 'var(--text2)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Clear</button>
+                  <button onClick={addBulk} disabled={saving || !bulkRows.some(r => r.status !== 'bad')} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: saving ? 'default' : 'pointer', opacity: bulkRows.some(r => r.status !== 'bad') ? 1 : 0.5 }}>{saving ? 'Adding…' : `Add ${bulkRows.filter(r => r.status !== 'bad').length || ''} private order(s)`}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── DISPATCH SCANNER ── */}
