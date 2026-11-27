@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useCallback, Fragment, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
-import { format } from 'date-fns'
+import { format, parse } from 'date-fns'
 import { Spinner, EmptyState, ColourDot, Th } from './warehouse-ui'
 import { useSort, useDayGroups } from './warehouse-hooks'
 import FramePicker, { type FrameItem } from './FramePicker'
@@ -78,6 +78,55 @@ export default function CoatingTab({ userId }: { userId: string }) {
   }
 
   function showToast(msg: string, type = 'success') { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
+
+  // ── Daily coating headcount (people on the floor → output per person) ──
+  const [headcounts, setHeadcounts] = useState<Record<string, { id: string; count: number }>>({})  // keyed by 'dd MMM yyyy'
+  const loadHeadcounts = useCallback(async () => {
+    const { data } = await supabase.from('coating_headcount').select('id, work_date, headcount')
+    const m: Record<string, { id: string; count: number }> = {}
+    for (const r of (data || []) as { id: string; work_date: string; headcount: number }[]) {
+      m[format(new Date(r.work_date + 'T00:00:00'), 'dd MMM yyyy')] = { id: r.id, count: r.headcount }
+    }
+    setHeadcounts(m)
+  }, [supabase])
+  useEffect(() => { void loadHeadcounts() }, [loadHeadcounts])
+
+  const saveHeadcount = useCallback(async (dateKey: string, count: number) => {
+    const iso = format(parse(dateKey, 'dd MMM yyyy', new Date()), 'yyyy-MM-dd')
+    const { error } = await supabase.from('coating_headcount').upsert(
+      { work_date: iso, headcount: count, created_by: userId, updated_at: new Date().toISOString() }, { onConflict: 'work_date' })
+    if (error) { showToast('Could not save headcount: ' + error.message, 'error'); return }
+    await loadHeadcounts(); showToast('Headcount saved ✓')
+  }, [supabase, userId, loadHeadcounts])
+
+  const todayKey = format(new Date(), 'dd MMM yyyy')
+  const [todayDraft, setTodayDraft] = useState('')
+  useEffect(() => { setTodayDraft(headcounts[todayKey] ? String(headcounts[todayKey].count) : '') }, [headcounts, todayKey])
+
+  const [editHcKey, setEditHcKey] = useState<string | null>(null)
+  const [editHcDraft, setEditHcDraft] = useState('')
+  const renderDayHeadcount = (dateKey: string, total: number): ReactNode => {
+    const hc = headcounts[dateKey]
+    if (editHcKey === dateKey) {
+      return (
+        <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+          <input type="number" value={editHcDraft} autoFocus onChange={e => setEditHcDraft(e.target.value)}
+            style={{ width: 52, textAlign: 'center', border: '1px solid var(--accent)', borderRadius: 6, padding: '3px 5px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+          <button onClick={() => { const n = parseInt(editHcDraft); if (!isNaN(n) && n >= 0) void saveHeadcount(dateKey, n); setEditHcKey(null) }}
+            style={{ border: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 700, padding: '3px 8px', cursor: 'pointer' }}>✓</button>
+          <button onClick={() => setEditHcKey(null)} style={{ border: '1px solid var(--border)', background: '#fff', color: 'var(--text3)', borderRadius: 6, fontSize: 12, padding: '3px 7px', cursor: 'pointer' }}>✕</button>
+        </span>
+      )
+    }
+    const per = hc && hc.count > 0 ? (total / hc.count).toFixed(1) : null
+    return (
+      <span onClick={e => { e.stopPropagation(); setEditHcKey(dateKey); setEditHcDraft(hc ? String(hc.count) : '') }}
+        title="Set / edit people in coating this day"
+        style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: hc ? 'var(--text2)' : 'var(--text3)', whiteSpace: 'nowrap' }}>
+        {hc ? <>👥 {hc.count} · <b style={{ color: 'var(--accent)' }}>{per}</b>/person</> : <>👥 set</>}
+      </span>
+    )
+  }
 
   // Scan a mis-coated piece to flag it as error (only while still 'coated').
   const [errScan, setErrScan] = useState('')
@@ -277,6 +326,16 @@ export default function CoatingTab({ userId }: { userId: string }) {
             {format(new Date(), 'EEE, dd MMM yyyy • hh:mm:ss aa')}
           </div>
 
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>👥 People in coating today</span>
+            <input type="number" min={0} value={todayDraft} onChange={e => setTodayDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { const n = parseInt(todayDraft); if (!isNaN(n) && n >= 0) void saveHeadcount(todayKey, n) } }}
+              placeholder="0" style={{ width: 70, textAlign: 'center', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 15, fontFamily: 'var(--font-mono)', outline: 'none' }} />
+            <button onClick={() => { const n = parseInt(todayDraft); if (!isNaN(n) && n >= 0) void saveHeadcount(todayKey, n) }}
+              style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save</button>
+            {headcounts[todayKey] && <span style={{ fontSize: 12, color: 'var(--text3)' }}>saved · {headcounts[todayKey].count} today</span>}
+          </div>
+
           <div>
             <div style={sectionTitle}>Trolley order <span style={{ color: 'var(--critical)' }}>*</span></div>
             <select value={orderId} onChange={e => setOrderId(e.target.value)} style={inputField}>
@@ -363,7 +422,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
         <LogTable isFetching={isFetching} hasData={!!sorted.length} viewMode={viewMode} setViewMode={setViewMode}
           allCollapsed={allCollapsed()} toggleAllDays={toggleAllDays} tableHead={tableHead}
           sorted={sorted} dayGroups={dayGroups} collapsedDays={collapsedDays} toggleDay={toggleDay}
-          renderRow={renderRow} totalPcs={totalPcs} colCount={COL_COUNT} emptyIcon="🎨" emptyMsg="No coating entries yet" groupByTrolley onExport={handleExportDay} />
+          renderRow={renderRow} totalPcs={totalPcs} colCount={COL_COUNT} emptyIcon="🎨" emptyMsg="No coating entries yet" groupByTrolley onExport={handleExportDay} dayExtra={renderDayHeadcount} />
       )}
     </div>
   )
@@ -372,7 +431,7 @@ export default function CoatingTab({ userId }: { userId: string }) {
 // Shared log-table renderer (also used by Picks)
 export function LogTable<T extends { id?: string; pieces: number; created_at: string }>({
   isFetching, hasData, viewMode, setViewMode, allCollapsed, toggleAllDays, tableHead,
-  sorted, dayGroups, collapsedDays, toggleDay, renderRow, totalPcs, colCount, emptyIcon, emptyMsg, groupByTrolley, onExport,
+  sorted, dayGroups, collapsedDays, toggleDay, renderRow, totalPcs, colCount, emptyIcon, emptyMsg, groupByTrolley, onExport, dayExtra,
 }: {
   isFetching: boolean; hasData: boolean; viewMode: 'all' | 'day'; setViewMode: (v: 'all' | 'day') => void
   allCollapsed: boolean; toggleAllDays: () => void; tableHead: ReactNode
@@ -380,6 +439,7 @@ export function LogTable<T extends { id?: string; pieces: number; created_at: st
   collapsedDays: Record<string, boolean>; toggleDay: (k: string) => void
   renderRow: (item: T, i: number) => ReactNode; totalPcs: number; colCount: number
   emptyIcon: string; emptyMsg: string; groupByTrolley?: boolean; onExport?: () => void
+  dayExtra?: (dateKey: string, total: number) => ReactNode
 }) {
   if (isFetching && !hasData) return <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><Spinner size="lg" /></div>
   if (!hasData) return <EmptyState icon={emptyIcon} message={emptyMsg} />
@@ -429,7 +489,7 @@ export function LogTable<T extends { id?: string; pieces: number; created_at: st
             <>
               <tbody>
                 {dayGroups.map(group => (
-                  <DayRows key={group.dateKey} group={group} collapsed={!!collapsedDays[group.dateKey]} onToggle={() => toggleDay(group.dateKey)} renderRow={renderRow} colCount={colCount} groupByTrolley={groupByTrolley} />
+                  <DayRows key={group.dateKey} group={group} collapsed={!!collapsedDays[group.dateKey]} onToggle={() => toggleDay(group.dateKey)} renderRow={renderRow} colCount={colCount} groupByTrolley={groupByTrolley} dayExtra={dayExtra} />
                 ))}
               </tbody>
               <tfoot style={{ background: 'var(--bg2)', borderTop: '2px solid var(--border)' }}>
@@ -446,9 +506,10 @@ export function LogTable<T extends { id?: string; pieces: number; created_at: st
   )
 }
 
-function DayRows<T extends { trolley_id?: string; trolley_label?: string | null; pieces?: number }>({ group, collapsed, onToggle, renderRow, colCount, groupByTrolley }: {
+function DayRows<T extends { trolley_id?: string; trolley_label?: string | null; pieces?: number }>({ group, collapsed, onToggle, renderRow, colCount, groupByTrolley, dayExtra }: {
   group: { dateKey: string; items: T[]; total: number }; collapsed: boolean; onToggle: () => void
   renderRow: (item: T, i: number) => ReactNode; colCount: number; groupByTrolley?: boolean
+  dayExtra?: (dateKey: string, total: number) => ReactNode
 }) {
   // Segregate the day's items by trolley, preserving order of first appearance.
   const trolleyGroups = (() => {
@@ -474,7 +535,10 @@ function DayRows<T extends { trolley_id?: string; trolley_label?: string | null;
               <span style={{ fontWeight: 700, color: 'var(--text2)', fontSize: 12 }}>{group.dateKey}</span>
               <span style={{ fontSize: 12, color: 'var(--text3)' }}>{group.items.length} rows{trolleyGroups ? ` · ${trolleyGroups.length} ${trolleyGroups.length === 1 ? 'trolley' : 'trolleys'}` : ''}</span>
             </div>
-            <span style={{ fontWeight: 800, color: 'var(--accent)', fontSize: 14 }}>{group.total} pcs</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {dayExtra && dayExtra(group.dateKey, group.total)}
+              <span style={{ fontWeight: 800, color: 'var(--accent)', fontSize: 14 }}>{group.total} pcs</span>
+            </div>
           </div>
         </td>
       </tr>
