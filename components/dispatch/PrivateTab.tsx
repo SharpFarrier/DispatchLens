@@ -249,12 +249,23 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
       order_id: f.order_id.trim(), customer_name: f.customer_name.trim(), sku: f.sku.trim(),
       barcode_sku: barcode, sku_mapped: !!barcode, qty: parseInt(f.qty) || 1,
       contact_number: f.contact_number.trim() || null, city: f.city.trim() || null,
-      pincode: f.pincode.trim() || null, ship_address: f.ship_address.trim() || null,
+      pincode: f.pincode.trim(), ship_address: f.ship_address.trim() || null,
       taxable_value: isNaN(val) ? null : val,
       courier: 'Private', dispatch_method: 'private', tracking_number: null,
       is_dispatched: false, is_cancelled: false, is_priority: false, is_replacement: false,
       order_date: new Date().toISOString().slice(0, 10),
     }
+  }
+
+  // Every order row must belong to an import batch (dispatch_sessions) — same as the courier importer.
+  const makeSession = async (count: number): Promise<string | null> => {
+    const { data: { user } } = await supabase.auth.getUser()
+    const label = `Private ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+    const { data, error } = await supabase.from('dispatch_sessions')
+      .insert({ created_by: user?.id ?? null, session_date: new Date().toISOString().split('T')[0], label, total_orders: count })
+      .select('id').single()
+    if (error || !data) { setAddMsg({ ok: false, text: `Couldn't save: ${error?.message || 'could not create the import batch'}` }); return null }
+    return (data as { id: string }).id
   }
 
   const addSingle = async () => {
@@ -265,7 +276,10 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
     if (dupe && dupe.length) { setSaving(false); setAddMsg({ ok: false, text: `Order ${form.order_id.trim()} already exists in DispatchLens.` }); return }
     // one row per SKU under the same order ID; the order value sits on the first line only
     const extras = extraLines.filter(l => l.sku.trim()).map(l => buildRow({ ...form, sku: l.sku, qty: l.qty || '1', taxable_value: '' }))
-    const allRows = [buildRow(form), ...extras]
+    const baseRows = [buildRow(form), ...extras]
+    const sessionId = await makeSession(baseRows.length)
+    if (!sessionId) { setSaving(false); return }
+    const allRows = baseRows.map(r => ({ ...r, session_id: sessionId }))
     const { error } = await supabase.from('dispatch_orders').insert(allRows)
     setSaving(false)
     if (error) { setAddMsg({ ok: false, text: `Couldn't save: ${error.message}` }); return }
@@ -302,7 +316,9 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
     const existSet = new Set((existing || []).map((e: { order_id: string }) => e.order_id))
     const toInsert = valid.filter(r => !existSet.has(r.f.order_id))
     if (!toInsert.length) { setSaving(false); setAddMsg({ ok: false, text: 'All these Order IDs already exist — nothing added.' }); return }
-    const { error } = await supabase.from('dispatch_orders').insert(toInsert.map(r => buildRow(r.f)))
+    const sessionId = await makeSession(toInsert.length)
+    if (!sessionId) { setSaving(false); return }
+    const { error } = await supabase.from('dispatch_orders').insert(toInsert.map(r => ({ ...buildRow(r.f), session_id: sessionId })))
     setSaving(false)
     if (error) { setAddMsg({ ok: false, text: `Couldn't save: ${error.message}` }); return }
     toInsert.forEach(r => logEvent(r.f.order_id, 'note', 'Private order added (bulk)'))
