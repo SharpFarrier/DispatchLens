@@ -60,6 +60,7 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
   // ── dispatch scanner state ──
   const [orderInput, setOrderInput] = useState('')
   const [order, setOrder] = useState<Row | null>(null)
+  const [pendingRows, setPendingRows] = useState<Row[]>([])   // every un-dispatched line (SKU) of the scanned order
   const [stage, setStage] = useState<'scan' | 'confirm' | 'box'>('scan')
   const [transporter, setTransporter] = useState('')
   const [lr, setLr] = useState('')
@@ -70,7 +71,7 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
   const [success, setSuccess] = useState<{ sku: string; remaining: number } | null>(null)
 
   const resetScan = () => {
-    setOrderInput(''); setOrder(null); setStage('scan'); setTransporter(''); setLr('')
+    setOrderInput(''); setOrder(null); setPendingRows([]); setStage('scan'); setTransporter(''); setLr('')
     setBoxInput(''); setErr(null); setForceId(null)
   }
 
@@ -82,18 +83,21 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
     const rows = (data || []) as Row[]
     setBusy(false)
     if (!rows.length) { beepError(); setErr(`No order found for ID ${oid}.`); return }
-    if (rows.some(o => o.is_dispatched && !o.is_cancelled)) { beepError(); setErr(`${oid} is already dispatched — not dispatching again.`); return }
+    const pending = rows.filter(x => !x.is_cancelled && !x.is_dispatched)
+    if (!pending.length && rows.some(o => o.is_dispatched && !o.is_cancelled)) { beepError(); setErr(`${oid} is already dispatched — not dispatching again.`); return }
     if (rows.length && rows.every(o => o.is_cancelled)) { beepError(); setErr(`${oid} is cancelled — un-cancel it in Plan first if this is wrong.`); return }
     const held = rows.find(o => isHeld(o))
     if (held) { beepError(); setErr(`${oid} is On Hold — release it in the Plan tab before dispatching.`); return }
-    const o = rows.find(x => !x.is_cancelled && !x.is_dispatched)
+    const o = pending[0]
     if (!o) { beepError(); setErr(`No pending order to dispatch for ${oid}.`); return }
-    if ((o.tracking_number || '').trim()) {
+    const tracked = pending.find(x => (x.tracking_number || '').trim())
+    if (tracked) {
       beepWarn()
-      setErr(`${oid} has a tracking ID (${o.tracking_number}) — dispatch it from the courier scanner, not the private lane.`)
+      setErr(`${oid} has a tracking ID (${tracked.tracking_number}) — dispatch it from the courier scanner, not the private lane.`)
       return
     }
     beepSuccess()
+    setPendingRows(pending)
     setOrder(o); setTransporter(o.transporter || ''); setLr(o.lr_number || ''); setStage('confirm')
   }
 
@@ -102,6 +106,7 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
     if (!barcode || !order) return
     setErr(null); setBusy(true)
     let deductedSku: string | null = null
+    let target: Row = order
 
     if (!force) {
       const { data: unit } = await supabase.from('packed_units').select('id, sku, status').eq('barcode', barcode).maybeSingle()
@@ -116,11 +121,14 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
         setErr(`${barcode} is "${u.status}", not in stock. Force-dispatch it anyway, or rescan.`)
         return
       }
-      if (order.barcode_sku && u.sku && u.sku !== order.barcode_sku) {
+      const lines = pendingRows.length ? pendingRows : [order]
+      const match = lines.find(r => r.barcode_sku && u.sku && r.barcode_sku === u.sku) || lines.find(r => !r.barcode_sku)
+      if (!match) {
         setBusy(false); beepError()
-        setErr(`WRONG ITEM — expected ${order.barcode_sku}, scanned ${u.sku}. Not dispatched.`)
+        setErr(`WRONG ITEM — expected ${lines.map(r => r.barcode_sku).filter(Boolean).join(' or ')}, scanned ${u.sku}. Not dispatched.`)
         return
       }
+      target = match
       await supabase.from('packed_units').update({ status: 'dispatched', dispatched_at: new Date().toISOString() }).eq('id', u.id).in('status', ['stocked', 'picked'])
       deductedSku = u.sku
     }
@@ -130,7 +138,7 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
       is_dispatched: true, dispatched_at: now, scan_verified: true, scan_verified_at: now,
       scanned_barcode: barcode, dispatch_method: 'private',
       transporter: transporter.trim() || null, lr_number: lr.trim() || null, updated_at: now,
-    }).eq('id', order.id).eq('is_dispatched', false).select(SELECT)
+    }).eq('id', target.id).eq('is_dispatched', false).select(SELECT)
     setBusy(false)
 
     if (error || !updated || !updated.length) {
@@ -140,11 +148,17 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
       const { count } = await supabase.from('packed_units').select('id', { count: 'exact', head: true }).eq('sku', deductedSku).eq('status', 'stocked')
       setSuccess({ sku: deductedSku, remaining: count ?? 0 })
     } else {
-      setSuccess({ sku: order.barcode_sku || order.sku || '—', remaining: -1 })
+      setSuccess({ sku: target.barcode_sku || target.sku || '—', remaining: -1 })
     }
     beepSuccess()
     logEvent(order.order_id, 'dispatched', `Private dispatch · box ${barcode}${force ? ' (FORCE — not in stock)' : ''}${transporter.trim() ? ` · ${transporter.trim()}` : ''}`)
-    resetScan()
+    const left = pendingRows.filter(r => r.id !== target.id)
+    if (left.length) {
+      // more SKUs on this order — stay on it and wait for the next box
+      setPendingRows(left); setOrder(left[0]); setBoxInput(''); setForceId(null); setStage('box')
+    } else {
+      resetScan()
+    }
     void loadQueue()
   }
 
@@ -222,6 +236,7 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
   const [addOpen, setAddOpen] = useState(false)
   const [form, setForm] = useState<AddForm>({ ...blankForm })
   const setF = (k: keyof AddForm, v: string) => setForm(p => ({ ...p, [k]: v }))
+  const [extraLines, setExtraLines] = useState<{ sku: string; qty: string }[]>([])   // further SKUs on the same order
   const [bulkText, setBulkText] = useState('')
   const [saving, setSaving] = useState(false)
   const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -248,12 +263,16 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
     setSaving(true)
     const { data: dupe } = await supabase.from('dispatch_orders').select('id').eq('order_id', form.order_id.trim()).limit(1)
     if (dupe && dupe.length) { setSaving(false); setAddMsg({ ok: false, text: `Order ${form.order_id.trim()} already exists in DispatchLens.` }); return }
-    const { error } = await supabase.from('dispatch_orders').insert(buildRow(form))
+    // one row per SKU under the same order ID; the order value sits on the first line only
+    const extras = extraLines.filter(l => l.sku.trim()).map(l => buildRow({ ...form, sku: l.sku, qty: l.qty || '1', taxable_value: '' }))
+    const allRows = [buildRow(form), ...extras]
+    const { error } = await supabase.from('dispatch_orders').insert(allRows)
     setSaving(false)
     if (error) { setAddMsg({ ok: false, text: `Couldn't save: ${error.message}` }); return }
-    logEvent(form.order_id.trim(), 'note', 'Private order added (manual)')
-    setAddMsg({ ok: true, text: `Added ${form.order_id.trim()} as Private${formBarcode ? '' : ' — but the SKU isn\'t mapped, map it before dispatch'}.` })
-    setForm({ ...blankForm }); void loadQueue()
+    logEvent(form.order_id.trim(), 'note', `Private order added (manual) · ${allRows.length} SKU line(s)`)
+    const unmappedN = allRows.filter(r => !r.barcode_sku).length
+    setAddMsg({ ok: true, text: `Added ${form.order_id.trim()} as Private with ${allRows.length} SKU line(s)${unmappedN ? ` — ${unmappedN} SKU not mapped, map before dispatch` : ''}.` })
+    setForm({ ...blankForm }); setExtraLines([]); void loadQueue()
   }
 
   const bulkRows = useMemo(() => {
@@ -348,8 +367,23 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
                   {addField('qty', 'Qty', { mono: true })}
                   {addField('ship_address', 'Address', { wide: true })}
                 </div>
+                {extraLines.map((l, i) => {
+                  const bc = l.sku.trim() ? resolveSku(form.order_id, l.sku) : null
+                  const inp = { border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px', fontSize: 14, color: 'var(--text)', background: '#fff', outline: 'none', fontFamily: 'var(--font-mono)', boxSizing: 'border-box' as const }
+                  return (
+                    <div key={i} style={{ marginTop: 10 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <input value={l.sku} placeholder={`SKU ${i + 2}`} onChange={e => setExtraLines(p => p.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))} style={{ ...inp, flex: 1 }} />
+                        <input value={l.qty} placeholder="Qty" onChange={e => setExtraLines(p => p.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} style={{ ...inp, width: 70, textAlign: 'center' }} />
+                        <button onClick={() => setExtraLines(p => p.filter((_, j) => j !== i))} title="Remove this SKU" style={{ border: '1px solid var(--border)', background: '#fff', color: 'var(--text3)', borderRadius: 9, padding: '8px 10px', cursor: 'pointer', display: 'flex' }}><X size={14} /></button>
+                      </div>
+                      {l.sku.trim() ? <span style={{ fontSize: 11.5, color: bc ? 'var(--dispatched)' : 'var(--critical)' }}>{bc ? `✓ maps to box ${bc}` : '✕ SKU not mapped — saves, but map it before dispatch'}</span> : null}
+                    </div>
+                  )
+                })}
+                <button onClick={() => setExtraLines(p => [...p, { sku: '', qty: '1' }])} style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px dashed var(--border)', background: '#fff', color: 'var(--text2)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}><Plus size={14} /> Add another SKU to this order</button>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button onClick={() => { setForm({ ...blankForm }); setAddMsg(null) }} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', color: 'var(--text2)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Clear</button>
+                  <button onClick={() => { setForm({ ...blankForm }); setExtraLines([]); setAddMsg(null) }} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', color: 'var(--text2)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Clear</button>
                   <button onClick={addSingle} disabled={saving} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>{saving ? 'Adding…' : 'Add private order'}</button>
                 </div>
               </div>
@@ -443,8 +477,18 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>{order.order_id}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: order.barcode_sku ? 'var(--accent)' : 'var(--critical)' }}>{order.barcode_sku ? `${order.barcode_sku}-N` : 'NOT MAPPED'}</span>
+                {pendingRows.length <= 1 && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: order.barcode_sku ? 'var(--accent)' : 'var(--critical)' }}>{order.barcode_sku ? `${order.barcode_sku}-N` : 'NOT MAPPED'}</span>}
               </div>
+              {pendingRows.length > 1 && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', marginBottom: 4 }}>{pendingRows.length} ITEMS LEFT TO SCAN</div>
+                  {pendingRows.map(r => (
+                    <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 700, color: r.barcode_sku ? 'var(--accent)' : 'var(--critical)', padding: '2px 0' }}>
+                      <span>{r.barcode_sku ? `${r.barcode_sku}-N` : `${r.sku} · NOT MAPPED`}</span><span style={{ color: 'var(--text3)', fontWeight: 400 }}>qty {r.qty}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={{ marginTop: 12, padding: '11px 13px', background: 'var(--today-bg)', border: '1px solid #fed7aa', borderRadius: 10, fontSize: 12.5, color: '#7a4a00' }}>
