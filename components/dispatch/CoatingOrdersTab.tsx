@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import DrumDatePicker from './DrumDatePicker'
 import FramePicker, { type FrameItem } from './FramePicker'
 import LineItemList, { getItemErrors } from './LineItemList'
-import { ClipboardList, Check, X } from 'lucide-react'
+import { ClipboardList, Check, X, Users } from 'lucide-react'
 
 // Coating Orders — a trolley is ordered (date + trolley no + what to coat), then the
 // Coating tab generates barcodes against it. Balance = ordered − coated per line,
@@ -40,6 +40,31 @@ export default function CoatingOrdersTab({ userId }: { userId: string }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
   const flash = (msg: string, type: 'success' | 'error' = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3500) }
+
+  // ── People working in coating (per day, by role) ──
+  const ROLES = [['coaters', 'Coater'], ['helpers', 'Helper'], ['chemical_applicators', 'Chemical Applicator']] as const
+  type RoleKey = typeof ROLES[number][0]
+  const [hcDate, setHcDate] = useState(istToday())
+  const [hc, setHc] = useState<Record<RoleKey, number>>({ coaters: 0, helpers: 0, chemical_applicators: 0 })
+  const [hcSaved, setHcSaved] = useState<{ total: number; split: boolean } | null>(null)   // what is stored for hcDate
+  const [hcSaving, setHcSaving] = useState(false)
+  const hcTotal = hc.coaters + hc.helpers + hc.chemical_applicators
+  const loadHc = useCallback(async (d: string) => {
+    const { data } = await supabase.from('coating_headcount').select('headcount, coaters, helpers, chemical_applicators').eq('work_date', d).maybeSingle()
+    const r = data as { headcount: number; coaters: number | null; helpers: number | null; chemical_applicators: number | null } | null
+    const next = { coaters: r?.coaters || 0, helpers: r?.helpers || 0, chemical_applicators: r?.chemical_applicators || 0 }
+    setHc(next)
+    setHcSaved(r && typeof r.headcount === 'number' ? { total: r.headcount, split: next.coaters + next.helpers + next.chemical_applicators > 0 } : null)
+  }, [supabase])
+  useEffect(() => { void loadHc(hcDate) }, [hcDate, loadHc])
+  const saveHc = async () => {
+    setHcSaving(true)
+    const { error } = await supabase.from('coating_headcount').upsert(
+      { work_date: hcDate, headcount: hcTotal, ...hc, created_by: userId, updated_at: new Date().toISOString() }, { onConflict: 'work_date' })
+    setHcSaving(false)
+    if (error) { flash('Could not save: ' + error.message, 'error'); return }
+    flash(`People saved · ${hcTotal} working`); void loadHc(hcDate)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -133,6 +158,35 @@ export default function CoatingOrdersTab({ userId }: { userId: string }) {
       <div>
         <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>Coating Orders</h2>
         <p style={{ fontSize: 12, color: 'var(--text3)', margin: '4px 0 0' }}>Order trolleys to be coated, then generate barcodes against them on the Coating tab. Balance = ordered − coated per line (matched by shape · size · mattress · colour).</p>
+      </div>
+
+      {/* People working */}
+      <div style={{ ...card }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}><Users size={15} /> People working in coating</div>
+        <div style={{ padding: 16, display: 'flex', gap: 16, flexWrap: 'wrap' as const, alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}><span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>Date</span><DrumDatePicker value={hcDate} onChange={setHcDate} placeholder="Date" /></div>
+          {ROLES.map(([k, label]) => (
+            <div key={k} style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>{label}</span>
+              <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', height: 38, background: 'var(--surface)' }}>
+                <button onClick={() => setHc(p => ({ ...p, [k]: Math.max(0, p[k] - 1) }))} aria-label={`Fewer ${label}`} style={{ width: 34, height: '100%', border: 'none', background: 'var(--bg2)', fontSize: 16, fontWeight: 700, color: 'var(--text2)', cursor: 'pointer' }}>−</button>
+                <input value={hc[k]} inputMode="numeric" onChange={e => { const n = parseInt(e.target.value.replace(/\D/g, '')); setHc(p => ({ ...p, [k]: isNaN(n) ? 0 : n })) }}
+                  style={{ width: 44, textAlign: 'center' as const, border: 'none', outline: 'none', fontSize: 15, fontWeight: 700, fontFamily: 'var(--font-mono)', background: 'transparent', color: 'var(--text)' }} />
+                <button onClick={() => setHc(p => ({ ...p, [k]: p[k] + 1 }))} aria-label={`More ${label}`} style={{ width: 34, height: '100%', border: 'none', background: 'var(--bg2)', fontSize: 16, fontWeight: 700, color: 'var(--text2)', cursor: 'pointer' }}>+</button>
+              </div>
+            </div>
+          ))}
+          <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>Total</span>
+            <div style={{ height: 38, display: 'flex', alignItems: 'center', fontSize: 18, fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--accent)', minWidth: 30 }}>{hcTotal}</div>
+          </div>
+          <button onClick={saveHc} disabled={hcSaving} style={{ height: 38, padding: '0 18px', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 14, borderRadius: 10, border: 'none', cursor: 'pointer', opacity: hcSaving ? 0.5 : 1 }}>{hcSaving ? 'Saving…' : 'Save'}</button>
+        </div>
+        <div style={{ padding: '0 16px 14px', fontSize: 12, color: 'var(--text3)' }}>
+          {hcSaved == null ? 'Nothing saved for this date yet.'
+            : hcSaved.split ? `Saved for this date: ${hcSaved.total} people.`
+            : `Saved earlier for this date: ${hcSaved.total} people with no role split. Enter the split and save to replace it.`}
+        </div>
       </div>
 
       {/* New order */}

@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useCallback, Fragment, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fetchAllRows } from './fetchAll'
-import { format, parse } from 'date-fns'
+import { format } from 'date-fns'
 import { Spinner, EmptyState, ColourDot, Th } from './warehouse-ui'
 import { useSort, useDayGroups } from './warehouse-hooks'
 import FramePicker, { type FrameItem } from './FramePicker'
@@ -79,51 +79,25 @@ export default function CoatingTab({ userId }: { userId: string }) {
 
   function showToast(msg: string, type = 'success') { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
 
-  // ── Daily coating headcount (people on the floor → output per person) ──
-  const [headcounts, setHeadcounts] = useState<Record<string, { id: string; count: number }>>({})  // keyed by 'dd MMM yyyy'
-  const loadHeadcounts = useCallback(async () => {
-    const { data } = await supabase.from('coating_headcount').select('id, work_date, headcount')
-    const m: Record<string, { id: string; count: number }> = {}
-    for (const r of (data || []) as { id: string; work_date: string; headcount: number }[]) {
-      m[format(new Date(r.work_date + 'T00:00:00'), 'dd MMM yyyy')] = { id: r.id, count: r.headcount }
-    }
-    setHeadcounts(m)
+  // ── Daily coating headcount — entered on the Coating Orders tab; shown read-only here per day ──
+  const [headcounts, setHeadcounts] = useState<Record<string, { total: number; coaters: number; helpers: number; chem: number }>>({})  // keyed by 'dd MMM yyyy'
+  useEffect(() => {
+    supabase.from('coating_headcount').select('work_date, headcount, coaters, helpers, chemical_applicators').then(({ data }) => {
+      const m: Record<string, { total: number; coaters: number; helpers: number; chem: number }> = {}
+      for (const r of (data || []) as { work_date: string; headcount: number; coaters: number | null; helpers: number | null; chemical_applicators: number | null }[]) {
+        m[format(new Date(r.work_date + 'T00:00:00'), 'dd MMM yyyy')] = { total: r.headcount, coaters: r.coaters || 0, helpers: r.helpers || 0, chem: r.chemical_applicators || 0 }
+      }
+      setHeadcounts(m)
+    })
   }, [supabase])
-  useEffect(() => { void loadHeadcounts() }, [loadHeadcounts])
-
-  const saveHeadcount = useCallback(async (dateKey: string, count: number) => {
-    const iso = format(parse(dateKey, 'dd MMM yyyy', new Date()), 'yyyy-MM-dd')
-    const { error } = await supabase.from('coating_headcount').upsert(
-      { work_date: iso, headcount: count, created_by: userId, updated_at: new Date().toISOString() }, { onConflict: 'work_date' })
-    if (error) { showToast('Could not save headcount: ' + error.message, 'error'); return }
-    await loadHeadcounts(); showToast('Headcount saved ✓')
-  }, [supabase, userId, loadHeadcounts])
-
-  const todayKey = format(new Date(), 'dd MMM yyyy')
-  const [todayDraft, setTodayDraft] = useState('')
-  useEffect(() => { setTodayDraft(headcounts[todayKey] ? String(headcounts[todayKey].count) : '') }, [headcounts, todayKey])
-
-  const [editHcKey, setEditHcKey] = useState<string | null>(null)
-  const [editHcDraft, setEditHcDraft] = useState('')
   const renderDayHeadcount = (dateKey: string, total: number): ReactNode => {
     const hc = headcounts[dateKey]
-    if (editHcKey === dateKey) {
-      return (
-        <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
-          <input type="number" value={editHcDraft} autoFocus onChange={e => setEditHcDraft(e.target.value)}
-            style={{ width: 52, textAlign: 'center', border: '1px solid var(--accent)', borderRadius: 6, padding: '3px 5px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
-          <button onClick={() => { const n = parseInt(editHcDraft); if (!isNaN(n) && n >= 0) void saveHeadcount(dateKey, n); setEditHcKey(null) }}
-            style={{ border: 'none', background: 'var(--accent)', color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 700, padding: '3px 8px', cursor: 'pointer' }}>✓</button>
-          <button onClick={() => setEditHcKey(null)} style={{ border: '1px solid var(--border)', background: '#fff', color: 'var(--text3)', borderRadius: 6, fontSize: 12, padding: '3px 7px', cursor: 'pointer' }}>✕</button>
-        </span>
-      )
-    }
-    const per = hc && hc.count > 0 ? (total / hc.count).toFixed(1) : null
+    if (!hc || hc.total <= 0) return null
+    const split = hc.coaters + hc.helpers + hc.chem > 0
     return (
-      <span onClick={e => { e.stopPropagation(); setEditHcKey(dateKey); setEditHcDraft(hc ? String(hc.count) : '') }}
-        title="Set / edit people in coating this day"
-        style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: hc ? 'var(--text2)' : 'var(--text3)', whiteSpace: 'nowrap' }}>
-        {hc ? <>👥 {hc.count} · <b style={{ color: 'var(--accent)' }}>{per}</b>/person</> : <>👥 set</>}
+      <span title={split ? `${hc.coaters} coater · ${hc.helpers} helper · ${hc.chem} chemical applicator` : 'People in coating this day'}
+        style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+        👥 {hc.total}{split ? <span style={{ color: 'var(--text3)', fontWeight: 400 }}> ({hc.coaters}C · {hc.helpers}H · {hc.chem}CA)</span> : null} · <b style={{ color: 'var(--accent)' }}>{(total / hc.total).toFixed(1)}</b>/person
       </span>
     )
   }
@@ -324,16 +298,6 @@ export default function CoatingTab({ userId }: { userId: string }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div style={{ background: 'var(--accent)', color: '#fff', borderRadius: 10, padding: '12px 16px', fontSize: 13, fontWeight: 700 }}>
             {format(new Date(), 'EEE, dd MMM yyyy • hh:mm:ss aa')}
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>👥 People in coating today</span>
-            <input type="number" min={0} value={todayDraft} onChange={e => setTodayDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { const n = parseInt(todayDraft); if (!isNaN(n) && n >= 0) void saveHeadcount(todayKey, n) } }}
-              placeholder="0" style={{ width: 70, textAlign: 'center', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 15, fontFamily: 'var(--font-mono)', outline: 'none' }} />
-            <button onClick={() => { const n = parseInt(todayDraft); if (!isNaN(n) && n >= 0) void saveHeadcount(todayKey, n) }}
-              style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Save</button>
-            {headcounts[todayKey] && <span style={{ fontSize: 12, color: 'var(--text3)' }}>saved · {headcounts[todayKey].count} today</span>}
           </div>
 
           <div>
