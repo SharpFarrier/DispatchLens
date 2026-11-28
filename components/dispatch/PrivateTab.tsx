@@ -230,31 +230,40 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
     return direct || resolveBarcodeSku(orderId || 'HT', sku, skuLookup)
   }, [masterSet, skuLookup])
 
-  const blankForm = { order_id: '', customer_name: '', contact_number: '', city: '', pincode: '', taxable_value: '', sku: '', qty: '1', ship_address: '' }
+  const blankForm = { order_id: '', customer_name: '', contact_number: '', city: '', pincode: '', ship_address: '' }
   type AddForm = typeof blankForm
+  type Item = { sku: string; qty: number; price: string }     // price = selling price per unit
+  const blankItem = (): Item => ({ sku: '', qty: 1, price: '' })
   const [addMode, setAddMode] = useState<'single' | 'bulk'>('single')
   const [addOpen, setAddOpen] = useState(false)
   const [form, setForm] = useState<AddForm>({ ...blankForm })
   const setF = (k: keyof AddForm, v: string) => setForm(p => ({ ...p, [k]: v }))
-  const [extraLines, setExtraLines] = useState<{ sku: string; qty: string }[]>([])   // further SKUs on the same order
+  const [items, setItems] = useState<Item[]>([blankItem()])
+  const setItem = (i: number, patch: Partial<Item>) => setItems(p => p.map((x, j) => j === i ? { ...x, ...patch } : x))
   const [bulkText, setBulkText] = useState('')
   const [saving, setSaving] = useState(false)
   const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const formBarcode = useMemo(() => form.sku.trim() ? resolveSku(form.order_id, form.sku) : null, [form.sku, form.order_id, resolveSku])
+  const num = (v: string) => { const n = parseFloat((v || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? null : n }
+  const itemUnits = items.reduce((a, l) => a + l.qty, 0)
+  const itemTotal = items.reduce((a, l) => a + (num(l.price) || 0) * l.qty, 0)
+  const itemsUnmapped = items.filter(l => l.sku.trim() && !resolveSku(form.order_id, l.sku)).length
+  const itemsNoPrice = items.filter(l => num(l.price) == null).length
 
-  const buildRow = (f: AddForm) => {
-    const barcode = resolveSku(f.order_id, f.sku)
-    const val = parseFloat((f.taxable_value || '').replace(/[^0-9.]/g, ''))
-    return {
-      order_id: f.order_id.trim(), customer_name: f.customer_name.trim(), sku: f.sku.trim(),
-      barcode_sku: barcode, sku_mapped: !!barcode, qty: parseInt(f.qty) || 1,
+  // One row per UNIT (qty 2 → two rows of qty 1): each row is one box to scan at dispatch,
+  // and each carries its own selling price for reconciliation.
+  const buildUnitRows = (f: AddForm, it: { sku: string; qty: number; price: number | null }) => {
+    const barcode = resolveSku(f.order_id, it.sku)
+    const row = {
+      order_id: f.order_id.trim(), customer_name: f.customer_name.trim(), sku: it.sku.trim(),
+      barcode_sku: barcode, sku_mapped: !!barcode, qty: 1,
       contact_number: f.contact_number.trim() || null, city: f.city.trim() || null,
       pincode: f.pincode.trim(), ship_address: f.ship_address.trim() || null,
-      taxable_value: isNaN(val) ? null : val,
+      unit_price: it.price, taxable_value: it.price,
       courier: 'Private', dispatch_method: 'private', tracking_number: null,
       is_dispatched: false, is_cancelled: false, is_priority: false, is_replacement: false,
       order_date: new Date().toISOString().slice(0, 10),
     }
+    return Array.from({ length: Math.max(1, it.qty) }, () => ({ ...row }))
   }
 
   // Every order row must belong to an import batch (dispatch_sessions) — same as the courier importer.
@@ -270,61 +279,64 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
 
   const addSingle = async () => {
     setAddMsg(null)
-    if (!form.order_id.trim() || !form.customer_name.trim() || !form.sku.trim()) { setAddMsg({ ok: false, text: 'Order ID, customer and SKU are required.' }); return }
+    const oid = form.order_id.trim()
+    const missing = [!oid && 'Order ID', !form.customer_name.trim() && 'Name', !form.contact_number.trim() && 'Phone', !form.ship_address.trim() && 'Address'].filter(Boolean)
+    if (missing.length) { setAddMsg({ ok: false, text: `Required: ${missing.join(', ')}.` }); return }
+    if (items.some(l => !l.sku.trim())) { setAddMsg({ ok: false, text: 'Every item needs a SKU (remove empty rows).' }); return }
+    if (itemsNoPrice) { setAddMsg({ ok: false, text: 'Every item needs a selling price.' }); return }
     setSaving(true)
-    const { data: dupe } = await supabase.from('dispatch_orders').select('id').eq('order_id', form.order_id.trim()).limit(1)
-    if (dupe && dupe.length) { setSaving(false); setAddMsg({ ok: false, text: `Order ${form.order_id.trim()} already exists in DispatchLens.` }); return }
-    // one row per SKU under the same order ID; the order value sits on the first line only
-    const extras = extraLines.filter(l => l.sku.trim()).map(l => buildRow({ ...form, sku: l.sku, qty: l.qty || '1', taxable_value: '' }))
-    const baseRows = [buildRow(form), ...extras]
+    const { data: dupe } = await supabase.from('dispatch_orders').select('id').eq('order_id', oid).limit(1)
+    if (dupe && dupe.length) { setSaving(false); setAddMsg({ ok: false, text: `Order ${oid} already exists in DispatchLens.` }); return }
+    const baseRows = items.flatMap(l => buildUnitRows(form, { sku: l.sku, qty: l.qty, price: num(l.price) }))
     const sessionId = await makeSession(baseRows.length)
     if (!sessionId) { setSaving(false); return }
-    const allRows = baseRows.map(r => ({ ...r, session_id: sessionId }))
-    const { error } = await supabase.from('dispatch_orders').insert(allRows)
+    const { error } = await supabase.from('dispatch_orders').insert(baseRows.map(r => ({ ...r, session_id: sessionId })))
     setSaving(false)
     if (error) { setAddMsg({ ok: false, text: `Couldn't save: ${error.message}` }); return }
-    logEvent(form.order_id.trim(), 'note', `Private order added (manual) · ${allRows.length} SKU line(s)`)
-    const unmappedN = allRows.filter(r => !r.barcode_sku).length
-    setAddMsg({ ok: true, text: `Added ${form.order_id.trim()} as Private with ${allRows.length} SKU line(s)${unmappedN ? ` — ${unmappedN} SKU not mapped, map before dispatch` : ''}.` })
-    setForm({ ...blankForm }); setExtraLines([]); void loadQueue()
+    logEvent(oid, 'note', `Private order added (manual) · ${items.length} SKU(s), ${baseRows.length} box(es) · ₹${itemTotal}`)
+    setAddMsg({ ok: true, text: `Added ${oid} as Private — ${items.length} SKU(s), ${baseRows.length} box(es) to scan${itemsUnmapped ? ` · ${itemsUnmapped} SKU not mapped, map before dispatch` : ''}.` })
+    setForm({ ...blankForm }); setItems([blankItem()]); void loadQueue()
   }
 
+  type BulkRow = { f: AddForm; sku: string; qty: number; price: number | null; status: 'ok' | 'unmapped' | 'bad'; barcode: string | null }
   const bulkRows = useMemo(() => {
     const lines = bulkText.split('\n').map(l => l.trimEnd()).filter(l => l.trim())
-    if (!lines.length) return [] as { f: AddForm; status: 'ok' | 'unmapped' | 'bad'; barcode: string | null }[]
+    if (!lines.length) return [] as BulkRow[]
     const split = (l: string) => (l.includes('\t') ? l.split('\t') : l.split(',')).map(s => s.trim())
     let start = 0
     if (/order\s*id/i.test(lines[0]) && /sku/i.test(lines[0])) start = 1
-    const out: { f: AddForm; status: 'ok' | 'unmapped' | 'bad'; barcode: string | null }[] = []
+    const out: BulkRow[] = []
     for (let i = start; i < lines.length; i++) {
       const c = split(lines[i])
-      const f: AddForm = { order_id: c[0] || '', customer_name: c[1] || '', contact_number: c[2] || '', city: c[3] || '', pincode: c[4] || '', sku: c[5] || '', qty: c[6] || '1', taxable_value: c[7] || '', ship_address: '' }
-      const barcode = f.order_id && f.sku ? resolveSku(f.order_id, f.sku) : null
-      const status: 'ok' | 'unmapped' | 'bad' = (!f.order_id || !f.customer_name || !f.sku) ? 'bad' : (barcode ? 'ok' : 'unmapped')
-      out.push({ f, status, barcode })
+      const f: AddForm = { order_id: c[0] || '', customer_name: c[1] || '', contact_number: c[2] || '', city: c[3] || '', pincode: c[4] || '', ship_address: c.slice(8).join(', ') }
+      const sku = c[5] || '', qty = Math.max(1, parseInt(c[6] || '1') || 1), price = num(c[7] || '')
+      const barcode = f.order_id && sku ? resolveSku(f.order_id, sku) : null
+      const bad = !f.order_id || !f.customer_name || !f.contact_number || !sku || price == null || !f.ship_address
+      out.push({ f, sku, qty, price, status: bad ? 'bad' : (barcode ? 'ok' : 'unmapped'), barcode })
     }
     return out
-  }, [bulkText, resolveSku])
+  }, [bulkText, resolveSku])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const addBulk = async () => {
     setAddMsg(null)
     const valid = bulkRows.filter(r => r.status !== 'bad')
-    if (!valid.length) { setAddMsg({ ok: false, text: 'Nothing valid to add — each row needs Order ID, Customer and SKU.' }); return }
+    if (!valid.length) { setAddMsg({ ok: false, text: 'Nothing valid to add — each row needs Order ID, Customer, Phone, SKU, Price and Address.' }); return }
     setSaving(true)
     const ids = valid.map(r => r.f.order_id)
     const { data: existing } = await supabase.from('dispatch_orders').select('order_id').in('order_id', ids)
     const existSet = new Set((existing || []).map((e: { order_id: string }) => e.order_id))
     const toInsert = valid.filter(r => !existSet.has(r.f.order_id))
     if (!toInsert.length) { setSaving(false); setAddMsg({ ok: false, text: 'All these Order IDs already exist — nothing added.' }); return }
-    const sessionId = await makeSession(toInsert.length)
+    const unitRows = toInsert.flatMap(r => buildUnitRows(r.f, { sku: r.sku, qty: r.qty, price: r.price }))
+    const sessionId = await makeSession(unitRows.length)
     if (!sessionId) { setSaving(false); return }
-    const { error } = await supabase.from('dispatch_orders').insert(toInsert.map(r => ({ ...buildRow(r.f), session_id: sessionId })))
+    const { error } = await supabase.from('dispatch_orders').insert(unitRows.map(r => ({ ...r, session_id: sessionId })))
     setSaving(false)
     if (error) { setAddMsg({ ok: false, text: `Couldn't save: ${error.message}` }); return }
-    toInsert.forEach(r => logEvent(r.f.order_id, 'note', 'Private order added (bulk)'))
+    Array.from(new Set(toInsert.map(r => r.f.order_id))).forEach(oid => logEvent(oid, 'note', 'Private order added (bulk)'))
     const skipped = valid.length - toInsert.length
     const unmapped = toInsert.filter(r => !r.barcode).length
-    setAddMsg({ ok: true, text: `Added ${toInsert.length} private order(s)${skipped ? `, skipped ${skipped} duplicate(s)` : ''}${unmapped ? `, ${unmapped} with an unmapped SKU` : ''}.` })
+    setAddMsg({ ok: true, text: `Added ${toInsert.length} line(s), ${unitRows.length} box(es)${skipped ? `, skipped ${skipped} already in the system` : ''}${unmapped ? `, ${unmapped} with an unmapped SKU` : ''}.` })
     setBulkText(''); void loadQueue()
   }
 
@@ -335,6 +347,11 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
         style={{ border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px', fontSize: 14, color: 'var(--text)', background: '#fff', outline: 'none', fontFamily: opts.mono ? 'var(--font-mono)' : 'var(--font-sans)', width: '100%', boxSizing: 'border-box' }} />
     </div>
   )
+
+  const secStyle = { padding: '14px 16px' }
+  const secHead = { fontSize: 11, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase' as const, color: 'var(--text3)', marginBottom: 10 }
+  const itemInp = { border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px', fontSize: 14, color: 'var(--text)', background: '#fff', outline: 'none', fontFamily: 'var(--font-mono)', boxSizing: 'border-box' as const }
+  const stepBtn = { width: 32, height: '100%', border: 'none', background: 'var(--bg2)', fontSize: 16, fontWeight: 700, color: 'var(--text2)', cursor: 'pointer' }
 
   const privTag = <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 999, background: '#efe7f6', color: '#6b3fa0' }}>● Private</span>
 
@@ -368,62 +385,85 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
             )}
 
             {addMode === 'single' ? (
-              <div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 14px' }}>
-                  {addField('order_id', 'Order ID', { req: true, mono: true, ph: 'e.g. HT-OFF-1043' })}
-                  {addField('customer_name', 'Customer name', { req: true, ph: 'Full name' })}
-                  {addField('contact_number', 'Phone', { mono: true })}
-                  {addField('city', 'City')}
-                  {addField('pincode', 'Pincode', { mono: true })}
-                  {addField('taxable_value', 'Order value ₹', { mono: true })}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {addField('sku', 'SKU', { req: true, mono: true, ph: 'Master / platform SKU' })}
-                    {form.sku.trim() ? <span style={{ fontSize: 11.5, color: formBarcode ? 'var(--dispatched)' : 'var(--critical)' }}>{formBarcode ? `✓ maps to box ${formBarcode}` : '✕ SKU not mapped — saves, but map it before dispatch'}</span> : null}
-                  </div>
-                  {addField('qty', 'Qty', { mono: true })}
-                  {addField('ship_address', 'Address', { wide: true })}
-                </div>
-                {extraLines.map((l, i) => {
-                  const bc = l.sku.trim() ? resolveSku(form.order_id, l.sku) : null
-                  const inp = { border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px', fontSize: 14, color: 'var(--text)', background: '#fff', outline: 'none', fontFamily: 'var(--font-mono)', boxSizing: 'border-box' as const }
-                  return (
-                    <div key={i} style={{ marginTop: 10 }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <input value={l.sku} placeholder={`SKU ${i + 2}`} onChange={e => setExtraLines(p => p.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))} style={{ ...inp, flex: 1 }} />
-                        <input value={l.qty} placeholder="Qty" onChange={e => setExtraLines(p => p.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} style={{ ...inp, width: 70, textAlign: 'center' }} />
-                        <button onClick={() => setExtraLines(p => p.filter((_, j) => j !== i))} title="Remove this SKU" style={{ border: '1px solid var(--border)', background: '#fff', color: 'var(--text3)', borderRadius: 9, padding: '8px 10px', cursor: 'pointer', display: 'flex' }}><X size={14} /></button>
-                      </div>
-                      {l.sku.trim() ? <span style={{ fontSize: 11.5, color: bc ? 'var(--dispatched)' : 'var(--critical)' }}>{bc ? `✓ maps to box ${bc}` : '✕ SKU not mapped — saves, but map it before dispatch'}</span> : null}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={secStyle}>
+                  <div style={secHead}>Order</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px 14px' }}>
+                    {addField('order_id', 'Order ID', { req: true, mono: true, ph: 'e.g. HT-OFF-1043' })}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)' }}>Order total ₹ <span style={{ color: 'var(--text3)', fontWeight: 400 }}>adds up from the items</span></label>
+                      <div style={{ border: '1px solid var(--border)', borderRadius: 9, padding: '9px 11px', fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', background: 'var(--bg2)' }}>{itemTotal.toLocaleString('en-IN')}</div>
                     </div>
-                  )
-                })}
-                <button onClick={() => setExtraLines(p => [...p, { sku: '', qty: '1' }])} style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px dashed var(--border)', background: '#fff', color: 'var(--text2)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}><Plus size={14} /> Add another SKU to this order</button>
-                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                  <button onClick={() => { setForm({ ...blankForm }); setExtraLines([]); setAddMsg(null) }} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', color: 'var(--text2)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Clear</button>
-                  <button onClick={addSingle} disabled={saving} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>{saving ? 'Adding…' : 'Add private order'}</button>
+                  </div>
+                </div>
+                <div style={{ ...secStyle, borderTop: '1px solid var(--border)' }}>
+                  <div style={secHead}>Customer</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px 14px' }}>
+                    {addField('customer_name', 'Name', { req: true, ph: 'Full name' })}
+                    {addField('contact_number', 'Phone', { req: true, mono: true })}
+                    {addField('city', 'City')}
+                    {addField('pincode', 'Pincode', { mono: true })}
+                    {addField('ship_address', 'Address', { req: true, wide: true })}
+                  </div>
+                </div>
+                <div style={{ ...secStyle, borderTop: '1px solid var(--border)' }}>
+                  <div style={{ ...secHead, display: 'flex', justifyContent: 'space-between' }}><span>Items <span style={{ color: 'var(--accent)' }}>*</span></span><span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 600 }}>{items.length} SKU{items.length > 1 ? 's' : ''}</span></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {items.map((l, i) => {
+                      const bc = l.sku.trim() ? resolveSku(form.order_id, l.sku) : null
+                      const noPrice = num(l.price) == null
+                      return (
+                        <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', border: '1px solid var(--border)', borderRadius: 10, padding: 8 }}>
+                          <span style={{ width: 18, textAlign: 'center', fontSize: 12, fontWeight: 800, color: 'var(--text3)' }}>{i + 1}</span>
+                          <input value={l.sku} placeholder="SKU" onChange={e => setItem(i, { sku: e.target.value })} style={{ ...itemInp, flex: '2 1 150px', minWidth: 0 }} />
+                          <span title={bc || ''} style={{ flex: '1 1 130px', minWidth: 0, fontSize: 11.5, fontWeight: 700, padding: '5px 9px', borderRadius: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: bc ? 'var(--font-mono)' : 'var(--font-sans)', background: !l.sku.trim() ? 'transparent' : bc ? 'var(--dispatched-bg)' : 'var(--critical-bg)', color: !l.sku.trim() ? 'var(--text3)' : bc ? 'var(--dispatched)' : 'var(--critical)' }}>{!l.sku.trim() ? 'box barcode' : bc ? `✓ ${bc}` : '✕ not mapped'}</span>
+                          <input value={l.price} placeholder="Price ₹" inputMode="decimal" onChange={e => setItem(i, { price: e.target.value })} style={{ ...itemInp, flex: '0 1 120px', minWidth: 90, textAlign: 'right', borderColor: noPrice && l.sku.trim() ? 'var(--critical)' : 'var(--border)' }} />
+                          <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: 9, overflow: 'hidden', height: 38, flexShrink: 0 }}>
+                            <button onClick={() => setItem(i, { qty: Math.max(1, l.qty - 1) })} style={stepBtn}>−</button>
+                            <span style={{ width: 34, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{l.qty}</span>
+                            <button onClick={() => setItem(i, { qty: l.qty + 1 })} style={stepBtn}>+</button>
+                          </div>
+                          {items.length > 1 && <button onClick={() => setItems(p => p.filter((_, j) => j !== i))} title="Remove this SKU" style={{ border: '1px solid var(--border)', background: '#fff', color: 'var(--text3)', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><X size={14} /></button>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <button onClick={() => setItems(p => [...p, blankItem()])} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px dashed var(--border)', background: '#fff', color: 'var(--text2)', borderRadius: 9, padding: '8px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}><Plus size={14} /> Add SKU</button>
+                  <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 8 }}>Price is the selling price per unit. Type a platform SKU or the master SKU; a red chip means it isn&apos;t mapped to a box barcode yet.</div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '14px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg2)' }}>
+                  <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                    <b style={{ color: 'var(--text)' }}>{items.length}</b> SKU{items.length > 1 ? 's' : ''} · <b style={{ color: 'var(--text)' }}>{itemUnits}</b> box{itemUnits > 1 ? 'es' : ''} to scan at dispatch
+                    {itemsUnmapped ? <span style={{ color: 'var(--critical)' }}> · <b>{itemsUnmapped}</b> not mapped</span> : null}
+                    {itemsNoPrice ? <span style={{ color: 'var(--critical)' }}> · <b>{itemsNoPrice}</b> missing price</span> : null}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={() => { setForm({ ...blankForm }); setItems([blankItem()]); setAddMsg(null) }} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', color: 'var(--text2)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Clear</button>
+                    <button onClick={addSingle} disabled={saving} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>{saving ? 'Adding…' : 'Add private order'}</button>
+                  </div>
                 </div>
               </div>
             ) : (
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--text2)', marginBottom: 6 }}>Paste rows — one order per line, tab or comma separated</label>
-                <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={'Order ID, Customer, Phone, City, Pincode, SKU, Qty, Value\nHT-OFF-1043, Rakesh More, 98XXXXXX21, Dombivli, 421201, ME-BL-BL-RF-2, 1, 12499'}
+                <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={'Order ID, Customer, Phone, City, Pincode, SKU, Qty, Price, Address\nHT-OFF-1043, Rakesh More, 98XXXXXX21, Dombivli, 421201, ME-BL-BL-RF-2, 1, 12499, 12 Shanti Nagar near station'}
                   style={{ width: '100%', minHeight: 120, border: '1px solid var(--border)', borderRadius: 9, padding: '10px 12px', fontSize: 12.5, fontFamily: 'var(--font-mono)', color: 'var(--text)', background: '#fff', outline: 'none', boxSizing: 'border-box', lineHeight: 1.6, whiteSpace: 'pre' }} />
-                <div style={{ fontSize: 11.5, color: 'var(--text3)', marginTop: 6 }}>Columns: Order ID, Customer, Phone, City, Pincode, SKU, Qty, Value. Only Order ID, Customer and SKU are required; a header row is auto-detected.</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text3)', marginTop: 6 }}>Columns: Order ID, Customer, Phone, City, Pincode, SKU, Qty, Price (per unit), Address. City and Pincode are optional, the rest are required. Repeat the Order ID on a new line for each extra SKU. A header row is auto-detected.</div>
 
                 {bulkRows.length > 0 && (
                   <>
                     <div style={{ overflowX: 'auto', marginTop: 12, border: '1px solid var(--border)', borderRadius: 9 }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 620 }}>
-                        <thead style={{ background: 'var(--bg2)' }}><tr>{['Order ID', 'Customer', 'City', 'SKU → box', 'Qty', 'Value', 'Status'].map((h, i) => <th key={i} style={{ padding: '8px 10px', textAlign: 'left', fontSize: 10.5, fontWeight: 800, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.03em', whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
+                        <thead style={{ background: 'var(--bg2)' }}><tr>{['Order ID', 'Customer', 'City', 'SKU → box', 'Qty', 'Price', 'Status'].map((h, i) => <th key={i} style={{ padding: '8px 10px', textAlign: 'left', fontSize: 10.5, fontWeight: 800, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.03em', whiteSpace: 'nowrap' }}>{h}</th>)}</tr></thead>
                         <tbody>
                           {bulkRows.map((r, i) => (
                             <tr key={i} style={{ borderTop: '1px solid var(--border)', background: r.status === 'bad' ? '#fdecec' : r.status === 'unmapped' ? '#fff6e8' : 'transparent' }}>
                               <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>{r.f.order_id || '—'}</td>
                               <td style={{ padding: '8px 10px' }}>{r.f.customer_name || '—'}</td>
                               <td style={{ padding: '8px 10px' }}>{r.f.city || '—'}</td>
-                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)' }}>{r.barcode || r.f.sku || '—'}</td>
-                              <td style={{ padding: '8px 10px' }}>{r.f.qty}</td>
-                              <td style={{ padding: '8px 10px' }}>{r.f.taxable_value ? `₹${r.f.taxable_value}` : '—'}</td>
+                              <td style={{ padding: '8px 10px', fontFamily: 'var(--font-mono)' }}>{r.barcode || r.sku || '—'}</td>
+                              <td style={{ padding: '8px 10px' }}>{r.qty}</td>
+                              <td style={{ padding: '8px 10px' }}>{r.price != null ? `₹${r.price}` : '—'}</td>
                               <td style={{ padding: '8px 10px' }}><span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: r.status === 'ok' ? 'var(--dispatched-bg)' : r.status === 'unmapped' ? 'var(--amber-bg, #fff4e0)' : 'var(--critical-bg)', color: r.status === 'ok' ? 'var(--dispatched)' : r.status === 'unmapped' ? '#b26a00' : 'var(--critical)' }}>{r.status === 'ok' ? 'OK' : r.status === 'unmapped' ? 'SKU not mapped' : 'Missing req.'}</span></td>
                             </tr>
                           ))}
@@ -440,7 +480,7 @@ export default function PrivateTab({ currentUserEmail }: { currentUserEmail: str
 
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
                   <button onClick={() => { setBulkText(''); setAddMsg(null) }} style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', color: 'var(--text2)', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Clear</button>
-                  <button onClick={addBulk} disabled={saving || !bulkRows.some(r => r.status !== 'bad')} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: saving ? 'default' : 'pointer', opacity: bulkRows.some(r => r.status !== 'bad') ? 1 : 0.5 }}>{saving ? 'Adding…' : `Add ${bulkRows.filter(r => r.status !== 'bad').length || ''} private order(s)`}</button>
+                  <button onClick={addBulk} disabled={saving || !bulkRows.some(r => r.status !== 'bad')} style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 800, fontSize: 14, cursor: saving ? 'default' : 'pointer', opacity: bulkRows.some(r => r.status !== 'bad') ? 1 : 0.5 }}>{saving ? 'Adding…' : `Add ${bulkRows.filter(r => r.status !== 'bad').length || ''} line(s)`}</button>
                 </div>
               </div>
             )}
